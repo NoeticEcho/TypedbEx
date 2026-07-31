@@ -68,7 +68,14 @@ defmodule TypeDB.Config do
 
   # Credentials must not reach logs, crash reports or LiveDashboard through an
   # incidental inspect of the config or the connection's state.
-  @derive {Inspect, except: [:password, :static_token]}
+  #
+  # `:http_opts` is redacted wholesale rather than by key name: it is opaque
+  # adapter data whose shape this driver does not own, and it is exactly where
+  # `TypeDB.HTTP.Finch`'s own documentation tells users to put TLS material — a
+  # mutual-TLS deployment puts the client private key and its passphrase there.
+  # `:http_adapter` stays visible, and anyone who genuinely wants the options can
+  # ask for them deliberately with `TypeDB.Connection.config/1`.
+  @derive {Inspect, except: [:password, :static_token, :http_opts]}
   defstruct [
     :base_url,
     :username,
@@ -96,11 +103,17 @@ defmodule TypeDB.Config do
   """
   @spec new(keyword()) :: {:ok, t()} | {:error, TypeDB.Error.t()}
   def new(opts) when is_list(opts) do
-    with {:ok, base_url} <- parse_url(Keyword.get(opts, :url, @default_url)),
+    with :ok <- reject_unknown(opts),
+         {:ok, base_url} <- parse_url(Keyword.get(opts, :url, @default_url)),
          {:ok, name} <- parse_name(Keyword.get(opts, :name, TypeDB)),
          {:ok, {username, password, token}} <- parse_credentials(opts),
          {:ok, {adapter, adapter_opts}} <- parse_http(Keyword.get(opts, :http, {TypeDB.HTTP.Finch, []})),
-         {:ok, backoff} <- parse_backoff(Keyword.get(opts, :retry_backoff, {:exponential, 100})) do
+         {:ok, backoff} <- parse_backoff(Keyword.get(opts, :retry_backoff, {:exponential, 100})),
+         {:ok, timeout} <- parse_timeout(opts, :timeout, @default_timeout),
+         {:ok, connect_timeout} <- parse_timeout(opts, :connect_timeout, @default_connect_timeout),
+         {:ok, max_retries} <- parse_count(opts, :max_retries, 1),
+         {:ok, max_auth_renewals} <- parse_count(opts, :max_auth_renewals, 2),
+         {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit) do
       {:ok,
        %__MODULE__{
          base_url: base_url,
@@ -108,16 +121,87 @@ defmodule TypeDB.Config do
          password: password,
          static_token: token,
          name: name,
-         timeout: Keyword.get(opts, :timeout, @default_timeout),
-         connect_timeout: Keyword.get(opts, :connect_timeout, @default_connect_timeout),
+         timeout: timeout,
+         connect_timeout: connect_timeout,
          http_adapter: adapter,
          http_opts: adapter_opts,
-         max_retries: Keyword.get(opts, :max_retries, 1),
-         max_auth_renewals: Keyword.get(opts, :max_auth_renewals, 2),
-         answer_count_limit: Keyword.get(opts, :answer_count_limit),
+         max_retries: max_retries,
+         max_auth_renewals: max_auth_renewals,
+         answer_count_limit: answer_count_limit,
          retry_backoff: backoff
        }}
     end
+  end
+
+  @known_opts [
+    :url,
+    :username,
+    :password,
+    :token,
+    :name,
+    :timeout,
+    :connect_timeout,
+    :http,
+    :max_retries,
+    :max_auth_renewals,
+    :answer_count_limit,
+    :retry_backoff
+  ]
+
+  @doc """
+  The option keys `new/1` accepts. Anything else is rejected.
+  """
+  @spec known_options() :: [atom()]
+  def known_options, do: @known_opts
+
+  # A misspelled option used to be accepted in silence and the default applied,
+  # so `timout: 5_000` produced a connection that looked configured and was not.
+  # This function exists to reject bad configuration, and a key it has never
+  # heard of is bad configuration.
+  defp reject_unknown(opts) do
+    case Keyword.keys(opts) -- @known_opts do
+      [] ->
+        :ok
+
+      unknown ->
+        {:error,
+         config_error(
+           "unknown option#{if length(unknown) > 1, do: "s"} " <>
+             "#{Enum.map_join(unknown, ", ", &inspect/1)}. " <>
+             "Accepted: #{Enum.map_join(@known_opts, ", ", &inspect/1)}."
+         )}
+    end
+  end
+
+  # The numeric options went through a bare `Keyword.get/3`, so a string from
+  # `System.get_env/1` — the usual way these arrive — booted a green application
+  # that then failed every single request, deep inside the HTTP adapter, with a
+  # message naming Finch and `:prim_inet` rather than the typo.
+  defp parse_timeout(opts, key, default) do
+    case Keyword.get(opts, key, default) do
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      :infinity -> {:ok, :infinity}
+      other -> {:error, numeric_error(key, other, "a positive integer in milliseconds, or :infinity")}
+    end
+  end
+
+  defp parse_count(opts, key, default) do
+    case Keyword.get(opts, key, default) do
+      value when is_integer(value) and value >= 0 -> {:ok, value}
+      other -> {:error, numeric_error(key, other, "a non-negative integer")}
+    end
+  end
+
+  defp parse_limit(opts, key) do
+    case Keyword.get(opts, key) do
+      nil -> {:ok, nil}
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      other -> {:error, numeric_error(key, other, "a positive integer, or unset")}
+    end
+  end
+
+  defp numeric_error(key, value, expected) do
+    config_error("invalid #{inspect(key)} #{inspect(value)}, expected #{expected}")
   end
 
   @doc """

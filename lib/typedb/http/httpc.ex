@@ -46,6 +46,11 @@ defmodule TypeDB.HTTP.Httpc do
   @default_max_keep_alive_length 100
   @default_keep_alive_timeout :timer.minutes(2)
 
+  # `:ssl_opts` is where a mutual-TLS deployment's client key and its passphrase
+  # end up, and this struct lives in the connection's state and in its ETS table,
+  # so it renders in every crash report. Redacting it also keeps the OS trust
+  # store's several hundred kilobytes of `:cacerts` out of those reports.
+  @derive {Inspect, except: [:ssl_opts]}
   defstruct [:profile, :ssl_opts]
 
   @type t :: %__MODULE__{profile: atom(), ssl_opts: keyword()}

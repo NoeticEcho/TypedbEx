@@ -229,7 +229,14 @@ defmodule TypeDB.Connection do
 
     with {:ok, http_state} <- init_adapter(config) do
       table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
-      :ets.insert(table, [{@config_key, config}, {@adapter_key, http_state}])
+
+      # `:protected` means every process in the VM can read this table — which is
+      # the point, since it is what lets requests run in the caller's process
+      # rather than through the connection. So the copy published here carries no
+      # credentials: nothing outside this process ever needed them, and
+      # `:ets.lookup(:my_conn, :config)` should not be a way to read a password.
+      # `state.config` below keeps the full struct for sign-in.
+      :ets.insert(table, [{@config_key, redact(config)}, {@adapter_key, http_state}])
 
       state = %{
         config: config,
@@ -242,6 +249,8 @@ defmodule TypeDB.Connection do
       {:ok, cache_static_token(state)}
     end
   end
+
+  defp redact(%Config{} = config), do: %{config | password: nil, static_token: nil}
 
   # The process the transport cannot work without, if it has one. Adapters that
   # hold no process of their own answer nil.

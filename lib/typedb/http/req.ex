@@ -29,6 +29,9 @@ defmodule TypeDB.HTTP.Req do
 
   @compile {:no_warn_undefined, Req}
 
+  # The `%Req.Request{}` carries `:connect_options`, which is where TLS material
+  # goes, and this struct renders in the connection's crash reports.
+  @derive {Inspect, except: [:req]}
   defstruct [:req]
 
   @type t :: %__MODULE__{req: term()}

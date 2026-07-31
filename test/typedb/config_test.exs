@@ -100,6 +100,94 @@ defmodule TypeDB.ConfigTest do
     end
   end
 
+  describe "new/1 numeric options" do
+    # These went through a bare Keyword.get/3, so `timeout: System.get_env(...)`
+    # produced a connection that booted green and then failed every request from
+    # inside the HTTP adapter, blaming Finch for a typo in the caller's config.
+    for {key, bad, hint} <- [
+          {:timeout, "5000", "positive integer"},
+          {:timeout, 0, "positive integer"},
+          {:timeout, -1, "positive integer"},
+          {:connect_timeout, "1000", "positive integer"},
+          {:max_retries, -1, "non-negative"},
+          {:max_retries, 1.5, "non-negative"},
+          {:max_auth_renewals, "2", "non-negative"},
+          {:answer_count_limit, 0, "positive integer"},
+          {:answer_count_limit, "100", "positive integer"}
+        ] do
+      test "rejects #{key}: #{inspect(bad)}" do
+        assert {:error, %Error{kind: :config, message: message}} =
+                 Config.new([{unquote(key), unquote(bad)}, {:token, "t"}])
+
+        assert message =~ inspect(unquote(key))
+        assert message =~ unquote(hint)
+      end
+    end
+
+    test "accepts the documented values" do
+      assert {:ok, config} =
+               Config.new(
+                 token: "t",
+                 timeout: 1,
+                 connect_timeout: :infinity,
+                 max_retries: 0,
+                 max_auth_renewals: 0,
+                 answer_count_limit: 1
+               )
+
+      assert config.timeout == 1
+      assert config.connect_timeout == :infinity
+      assert config.max_retries == 0
+      assert config.max_auth_renewals == 0
+      assert config.answer_count_limit == 1
+    end
+
+    test "answer_count_limit is optional" do
+      assert {:ok, %{answer_count_limit: nil}} = Config.new(token: "t")
+    end
+  end
+
+  describe "new/1 unknown options" do
+    test "a misspelled option is rejected rather than silently defaulted" do
+      assert {:error, %Error{kind: :config, message: message}} =
+               Config.new(token: "t", timout: 5_000)
+
+      assert message =~ ":timout"
+      assert message =~ ":timeout", "the message should list the accepted keys"
+    end
+
+    test "several unknown options are all named" do
+      assert {:error, %Error{message: message}} = Config.new(token: "t", foo: 1, bar: 2)
+      assert message =~ ":foo"
+      assert message =~ ":bar"
+    end
+
+    test "every option known_options/0 advertises is actually accepted" do
+      # known_options/0 is the list new/1 rejects against and the list the error
+      # message shows the user, so an entry that new/1 would refuse would be a
+      # lie in both places. Building a config out of the whole list proves it.
+      opts =
+        for key <- Config.known_options() do
+          case key do
+            :url -> {:url, "http://localhost:8000"}
+            :username -> {:username, "admin"}
+            :password -> {:password, "password"}
+            :token -> {:token, nil}
+            :name -> {:name, :some_conn}
+            :timeout -> {:timeout, 1_000}
+            :connect_timeout -> {:connect_timeout, 1_000}
+            :http -> {:http, {TypeDB.HTTP.Httpc, []}}
+            :max_retries -> {:max_retries, 1}
+            :max_auth_renewals -> {:max_auth_renewals, 1}
+            :answer_count_limit -> {:answer_count_limit, 10}
+            :retry_backoff -> {:retry_backoff, {:exponential, 10}}
+          end
+        end
+
+      assert {:ok, _} = Config.new(opts)
+    end
+  end
+
   describe "new/1 misc options" do
     test "rejects a non-atom name" do
       assert {:error, %Error{kind: :config, message: message}} =

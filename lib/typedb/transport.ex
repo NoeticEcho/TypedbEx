@@ -231,14 +231,32 @@ defmodule TypeDB.Transport do
     kind = if message =~ "unable to provide a connection", do: :timeout, else: :transport
 
     Error.new(kind, "HTTP adapter #{inspect(adapter)} on #{where} #{verb}: #{message}",
-      reason: {exception, stacktrace}
+      reason: {exception, redact(stacktrace, adapter)}
     )
   end
 
   defp adapter_fault(adapter, where, verb, reason, stacktrace) do
     Error.new(:transport, "HTTP adapter #{inspect(adapter)} on #{where} #{verb}: #{inspect(reason)}",
-      reason: {reason, stacktrace}
+      reason: {reason, redact(stacktrace, adapter)}
     )
+  end
+
+  # On a `function_clause` or `badarg` the BEAM puts the failing frame's
+  # *arguments* into the stacktrace, and argument 5 of `c:TypeDB.HTTP.request/6`
+  # is the encoded request body — which for `POST /v1/signin` is the password,
+  # and for `TypeDB.User.create/3` is the user's new one. That term would then
+  # travel in `%TypeDB.Error{reason: ...}` into logs and into telemetry metadata.
+  #
+  # Only the adapter's own frames are stripped, and only down to an arity, so
+  # every other frame keeps the detail that makes a stacktrace worth having.
+  defp redact(stacktrace, adapter) do
+    Enum.map(stacktrace, fn
+      {^adapter, function, args, location} when is_list(args) ->
+        {adapter, function, length(args), location}
+
+      frame ->
+        frame
+    end)
   end
 
   defp headers(%Request{token: token, opts: opts}) do
