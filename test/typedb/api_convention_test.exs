@@ -83,6 +83,19 @@ defmodule TypeDB.APIConventionTest do
       {TypeDB, :delete_database!, 2, TypeDB.Database, :delete!}
     ]
 
+    # Same hazard as the block above, and it bit here: `function_exported?/3`
+    # answers false for a module the test VM has not loaded yet, so this passed
+    # or failed on the seed. CI caught it on two of the four Elixir/OTP entries
+    # once the adapter loop stopped being limited to the newest one.
+    setup do
+      for {module, _, _, target_module, _} <- @delegates do
+        Code.ensure_loaded!(module)
+        Code.ensure_loaded!(target_module)
+      end
+
+      :ok
+    end
+
     test "each one's return type matches the function it delegates to" do
       mismatched =
         for {module, name, arity, target_module, target_name} <- @delegates,
