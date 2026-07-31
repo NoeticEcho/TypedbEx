@@ -2,6 +2,17 @@ defmodule TypeDB.Options do
   @moduledoc """
   Transaction and query options, and their translation to the HTTP wire format.
 
+  You do not normally call anything here. Pass these as ordinary keyword options
+  to `TypeDB.query/4`, `TypeDB.Transaction.open/4` or
+  `TypeDB.Transaction.query/3`, mixed in with everything else:
+
+      TypeDB.query(conn, "social", query, transaction_type: :read, answer_count_limit: 100)
+
+  `TypeDB.Options.Query` and `TypeDB.Options.Transaction` are the canonical list
+  of which key belongs to which set — the driver splits your keyword list by
+  exactly that. `query_payload/2` and `transaction_payload/2` accept either form
+  and are here for tooling that builds requests itself.
+
   ## Transaction options
 
     * `:transaction_timeout_millis` — how long the server keeps an idle
