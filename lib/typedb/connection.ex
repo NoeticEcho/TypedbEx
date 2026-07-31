@@ -384,7 +384,17 @@ defmodule TypeDB.Connection do
     http_opts = [timeout: config.timeout, connect_timeout: config.connect_timeout]
     url = Config.url(config, "/signin")
 
-    case config.http_adapter.request(http_state, :post, url, headers, body, http_opts) do
+    # Through `Transport.contain/3` for the same reason every other adapter call
+    # is: an adapter may raise. Here it matters more than anywhere else — this
+    # code runs *inside* the connection process, so an uncontained fault takes
+    # the connection down and every caller sees "connection is not running"
+    # instead of what actually happened.
+    result =
+      Transport.contain(config.http_adapter, "POST #{url}", fn ->
+        config.http_adapter.request(http_state, :post, url, headers, body, http_opts)
+      end)
+
+    case result do
       {:ok, %{status: status, body: response_body}} when status in 200..299 -> decode_token(response_body)
       {:ok, response} -> {:error, Transport.error_from(response)}
       {:error, error} -> {:error, error}

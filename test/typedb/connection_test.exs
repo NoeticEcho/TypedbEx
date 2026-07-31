@@ -503,6 +503,47 @@ defmodule TypeDB.ConnectionTest do
       end
     end
 
+    # Sign-in runs inside the connection process, so an uncontained adapter fault
+    # here takes the connection down with it — and every caller then sees
+    # "connection is not running" instead of what actually went wrong.
+    defmodule FaultyAtSignInAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(_name, opts), do: {:ok, opts[:fault]}
+
+      def request(:raise, _m, _u, _h, _b, _o), do: raise("adapter blew up")
+      def request(:throw, _m, _u, _h, _b, _o), do: throw(:nope)
+      def request(:exit, _m, _u, _h, _b, _o), do: exit(:boom)
+      def request(:garbage, _m, _u, _h, _b, _o), do: :not_a_response
+    end
+
+    for fault <- [:raise, :throw, :exit, :garbage] do
+      test "an adapter that #{fault}s during sign-in does not take the connection with it" do
+        name = :"signin_fault_#{System.unique_integer([:positive])}"
+
+        {:ok, pid} =
+          TypeDB.start_link(
+            name: name,
+            url: "http://127.0.0.1:1",
+            username: "admin",
+            password: "password",
+            http: {FaultyAtSignInAdapter, [fault: unquote(fault)]}
+          )
+
+        assert {:error, %Error{kind: :transport, message: message}} = TypeDB.Database.list(name)
+        assert message =~ "/v1/signin"
+
+        assert Process.alive?(pid),
+               "the connection died with its adapter, so every later caller sees 'not running'"
+
+        # And it is still usable: the failure was reported, not fatal.
+        assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(name)
+
+        TypeDB.stop(pid)
+      end
+    end
+
     @tag stub_opts: [databases: ["social"], token_uses: 1]
     test "a rejected token is renewed and the request retried", %{conn: conn, stub: stub} do
       assert {:ok, _} = TypeDB.Database.list(conn)

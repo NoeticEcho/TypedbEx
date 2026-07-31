@@ -165,13 +165,38 @@ defmodule TypeDB.Transport do
   defp outcome({:ok, %{status: status}}), do: %{status: status}
   defp outcome({:error, %Error{} = error}), do: %{error: error}
 
-  # An adapter is a plug-in point: `TypeDB.HTTP` is public and anyone may
-  # implement it, and even the shipped ones raise — Finch raises rather than
-  # returns when its pool is exhausted. Everything an adapter can do is contained
-  # here so that callers only ever see the `{:ok, _} | {:error, %TypeDB.Error{}}`
-  # contract the rest of the driver documents.
-  defp do_adapter_request(%Request{} = request) do
-    case call_adapter(request) do
+  defp do_adapter_request(%Request{config: config} = request) do
+    http_opts = [
+      # `timeout: nil` reaches here whenever a caller forwards an absent option.
+      timeout: request.opts[:timeout] || config.timeout,
+      connect_timeout: config.connect_timeout
+    ]
+
+    contain(config.http_adapter, "#{request.method} #{request.url}", fn ->
+      config.http_adapter.request(
+        Connection.adapter_state(request.conn),
+        request.method,
+        request.url,
+        headers(request),
+        request.body,
+        http_opts
+      )
+    end)
+  end
+
+  @doc """
+  Invokes an HTTP adapter, containing everything it can do wrong.
+
+  An adapter is a plug-in point: `TypeDB.HTTP` is public and anyone may
+  implement it, and even the shipped ones raise — Finch raises rather than
+  returns when its pool is exhausted. Every call into an adapter goes through
+  here, so that a raise, a throw, an exit or a nonsense return value all become
+  the `{:ok, response} | {:error, %TypeDB.Error{}}` the rest of the driver
+  documents. `where` names the call for the error message.
+  """
+  @spec contain(module(), String.t(), (-> term())) :: {:ok, TypeDB.HTTP.response()} | {:error, Error.t()}
+  def contain(adapter, where, fun) when is_function(fun, 0) do
+    case fun.() do
       {:ok, %{status: status, headers: headers, body: body}} = ok
       when is_integer(status) and is_list(headers) and is_binary(body) ->
         ok
@@ -183,55 +208,36 @@ defmodule TypeDB.Transport do
         {:error,
          Error.new(
            :transport,
-           "HTTP adapter #{inspect(request.config.http_adapter)} returned #{inspect(other)}, " <>
+           "HTTP adapter #{inspect(adapter)} on #{where} returned #{inspect(other)}, " <>
              "which is not a TypeDB.HTTP response",
            reason: other
          )}
     end
   rescue
     exception ->
-      {:error, adapter_fault(request, "raised", exception, __STACKTRACE__)}
+      {:error, adapter_fault(adapter, where, "raised", exception, __STACKTRACE__)}
   catch
     :exit, reason ->
-      {:error, adapter_fault(request, "exited", reason, __STACKTRACE__)}
+      {:error, adapter_fault(adapter, where, "exited", reason, __STACKTRACE__)}
 
     :throw, value ->
-      {:error, adapter_fault(request, "threw", value, __STACKTRACE__)}
+      {:error, adapter_fault(adapter, where, "threw", value, __STACKTRACE__)}
   end
 
   # Finch signals pool exhaustion by raising, and a checkout that never completes
   # is a timeout in every sense the caller cares about.
-  defp adapter_fault(request, verb, %{__exception__: true} = exception, stacktrace) do
+  defp adapter_fault(adapter, where, verb, %{__exception__: true} = exception, stacktrace) do
     message = Exception.message(exception)
     kind = if message =~ "unable to provide a connection", do: :timeout, else: :transport
 
-    Error.new(kind, "#{adapter_prefix(request)} #{verb}: #{message}", reason: {exception, stacktrace})
-  end
-
-  defp adapter_fault(request, verb, reason, stacktrace) do
-    Error.new(:transport, "#{adapter_prefix(request)} #{verb}: #{inspect(reason)}",
-      reason: {reason, stacktrace}
+    Error.new(kind, "HTTP adapter #{inspect(adapter)} on #{where} #{verb}: #{message}",
+      reason: {exception, stacktrace}
     )
   end
 
-  defp adapter_prefix(%Request{config: config, method: method, url: url}) do
-    "HTTP adapter #{inspect(config.http_adapter)} on #{method} #{url}"
-  end
-
-  defp call_adapter(%Request{config: config} = request) do
-    http_opts = [
-      # `timeout: nil` reaches here whenever a caller forwards an absent option.
-      timeout: request.opts[:timeout] || config.timeout,
-      connect_timeout: config.connect_timeout
-    ]
-
-    config.http_adapter.request(
-      Connection.adapter_state(request.conn),
-      request.method,
-      request.url,
-      headers(request),
-      request.body,
-      http_opts
+  defp adapter_fault(adapter, where, verb, reason, stacktrace) do
+    Error.new(:transport, "HTTP adapter #{inspect(adapter)} on #{where} #{verb}: #{inspect(reason)}",
+      reason: {reason, stacktrace}
     )
   end
 

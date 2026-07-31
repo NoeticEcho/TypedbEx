@@ -210,6 +210,21 @@ not restarted.
 - `Duration.to_iso8601` — reject or normalise negative components.
 - Delete the tracked `typeql-check.FAILED`.
 
+### Step 15 — Contain adapter faults during sign-in too (C3, found during execution)
+**Added after the plan was approved**, because step 6 exposed it: step 3 contained adapter faults
+inside `TypeDB.Transport`, but `TypeDB.Connection.do_sign_in/1` calls the adapter directly and was
+therefore never covered. Reproduced: a raising adapter kills the connection process, and the caller
+gets `%TypeDB.Error{kind: :config, message: "... is not running"}` — which names neither the adapter
+nor the fault.
+
+**Change:** the containment from step 3 becomes `TypeDB.Transport.contain/3` and `do_sign_in/1` goes
+through it.
+
+**Files:** `lib/typedb/transport.ex`, `lib/typedb/connection.ex`, `test/typedb/connection_test.exs`
+
+**Verify:** four adapters — raising, throwing, exiting, and returning garbage — each asserted to
+leave the connection alive and usable, with the fault named in the error. Plus the gate.
+
 ---
 
 ## Sequencing notes
