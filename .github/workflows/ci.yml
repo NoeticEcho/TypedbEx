@@ -82,12 +82,9 @@ jobs:
         ports:
           - 8000:8000
           - 1729:1729
-        options: >-
-          --health-cmd "curl -fsS http://localhost:8000/health || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 30
-          --health-start-period 15s
+        # No --health-cmd on purpose: a service health check runs *inside* the
+        # container and would depend on what the TypeDB image happens to ship.
+        # The "Wait for TypeDB" step below probes from the runner instead.
 
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +144,8 @@ jobs:
             "https://repo.typedb.com/public/public-release/raw/names/${name}/versions/${TYPEQL_CHECK_VERSION}/${name}-${TYPEQL_CHECK_VERSION}.tar.gz"
           tar xzf typeql-check.tar.gz
           sudo install -m755 "${name}-${TYPEQL_CHECK_VERSION}/typeql-check" /usr/local/bin/typeql-check
-          typeql-check "match $p isa person;"
+          # Single-quoted: the shell must not expand the TypeQL variable $p.
+          typeql-check 'match $p isa person;'
 
       - run: mix deps.get
 

@@ -18,13 +18,11 @@ services:
       - "1729:1729"
     volumes:
       - typedb-data:/var/lib/typedb/data
-    healthcheck:
-      # /health is unauthenticated and returns 204 once the server is serving.
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-      start_period: 15s
+    # No healthcheck: it would run inside the container and depend on what the
+    # TypeDB image ships. Probe from outside instead — /health is unauthenticated
+    # and answers 204 once the server is serving:
+    #
+    #   until curl -fsS http://localhost:8000/health; do sleep 2; done
 
 volumes:
   typedb-data:
