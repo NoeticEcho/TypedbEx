@@ -234,6 +234,94 @@ defmodule TypeDB.HTTPTest do
     end
   end
 
+  describe "adapter faults are contained" do
+    # TypeDB.HTTP is public, so anyone may implement it — and even the shipped
+    # Finch adapter raises rather than returns when its pool is exhausted. None of
+    # that may escape the {:ok, _} | {:error, %TypeDB.Error{}} contract.
+    defmodule Raising do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+      def request(_s, _m, _u, _h, _b, _o), do: raise("adapter blew up")
+    end
+
+    defmodule PoolExhausted do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+
+      def request(_s, _m, _u, _h, _b, _o) do
+        raise "Finch was unable to provide a connection within the timeout"
+      end
+    end
+
+    defmodule Throwing do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+      def request(_s, _m, _u, _h, _b, _o), do: throw(:nope)
+    end
+
+    defmodule Exiting do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+      def request(_s, _m, _u, _h, _b, _o), do: exit(:boom)
+    end
+
+    defmodule Garbage do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+      def request(_s, _m, _u, _h, _b, _o), do: :not_a_response
+    end
+
+    defmodule MalformedResponse do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+      def init(_name, _opts), do: {:ok, :state}
+      def request(_s, _m, _u, _h, _b, _o), do: {:ok, %{status: "200", headers: [], body: nil}}
+    end
+
+    for {adapter, kind, label} <- [
+          {Raising, :transport, "raises"},
+          {PoolExhausted, :timeout, "raises because its pool is exhausted"},
+          {Throwing, :transport, "throws"},
+          {Exiting, :transport, "exits"},
+          {Garbage, :transport, "returns something that is not a response"},
+          {MalformedResponse, :transport, "returns a response with the wrong field types"}
+        ] do
+      test "an adapter that #{label} yields a TypeDB.Error, not a crash" do
+        name = :"fault_#{System.unique_integer([:positive])}"
+
+        {:ok, pid} =
+          TypeDB.start_link(
+            name: name,
+            url: "http://127.0.0.1:1",
+            token: "t",
+            max_retries: 0,
+            http: {unquote(adapter), []}
+          )
+
+        assert {:error, %TypeDB.Error{kind: unquote(kind)}} = TypeDB.Database.list(name)
+
+        TypeDB.stop(pid)
+      end
+    end
+
+    test "the original fault is kept in :reason for debugging" do
+      name = :"fault_reason_#{System.unique_integer([:positive])}"
+      {:ok, pid} = TypeDB.start_link(name: name, url: "http://127.0.0.1:1", token: "t", http: {Raising, []})
+
+      assert {:error, %TypeDB.Error{reason: {%RuntimeError{message: "adapter blew up"}, stacktrace}}} =
+               TypeDB.Database.list(name)
+
+      assert is_list(stacktrace)
+
+      TypeDB.stop(pid)
+    end
+  end
+
   defp echo_stub do
     TypeDB.Stub.start_link(
       handler: fn method, path, headers, body ->
