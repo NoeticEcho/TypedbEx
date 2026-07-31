@@ -1,0 +1,22 @@
+# Example schema used by this driver's integration tests and README.
+# Validate it with: mix typedb.check
+
+define
+
+  attribute name, value string;
+  attribute age, value integer;
+  attribute since, value datetime;
+
+  entity person,
+    owns name,
+    owns age,
+    plays employment:employee;
+
+  entity company,
+    owns name,
+    plays employment:employer;
+
+  relation employment,
+    relates employee,
+    relates employer,
+    owns since;

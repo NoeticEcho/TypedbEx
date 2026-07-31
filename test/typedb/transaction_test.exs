@@ -1,0 +1,168 @@
+defmodule TypeDB.TransactionTest do
+  use TypeDB.Case, async: true
+
+  @moduletag stub_opts: [databases: ["social"]]
+
+  describe "open/4" do
+    test "opens a transaction and returns a handle", %{conn: conn, stub: stub} do
+      assert {:ok, %Transaction{id: id, database: "social", type: :write}} =
+               Transaction.open(conn, "social", :write)
+
+      assert is_binary(id)
+
+      assert [request] = requests(stub, "/transactions/open")
+      payload = JSON.decode!(request.body)
+      assert payload["databaseName"] == "social"
+      assert payload["transactionType"] == "write"
+      refute Map.has_key?(payload, "transactionOptions")
+    end
+
+    test "forwards transaction options", %{conn: conn, stub: stub} do
+      assert {:ok, _tx} = Transaction.open(conn, "social", :schema, schema_lock_acquire_timeout_millis: 5_000)
+
+      payload = stub |> requests("/transactions/open") |> hd() |> Map.fetch!(:body) |> JSON.decode!()
+      assert payload["transactionOptions"] == %{"schemaLockAcquireTimeoutMillis" => 5_000}
+    end
+
+    test "reports an unknown database", %{conn: conn} do
+      assert {:error, %Error{status: 404, code: "TSV2"}} = Transaction.open(conn, "nope", :read)
+    end
+
+    test "rejects an unknown transaction type", %{conn: conn} do
+      # Computed so the compile-time type checker does not flag the bad call.
+      type = String.to_atom("sideways")
+      assert_raise FunctionClauseError, fn -> Transaction.open(conn, "social", type) end
+    end
+  end
+
+  describe "query/3" do
+    setup %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      {:ok, tx: tx}
+    end
+
+    test "runs against the transaction endpoint", %{tx: tx, stub: stub} do
+      assert {:ok, %Answer.ConceptRows{}} = Transaction.query(tx, "insert $p isa person;")
+
+      assert [request] = requests(stub, "/query")
+      assert request.path == "/v1/transactions/#{tx.id}/query"
+    end
+
+    test "forwards query options", %{tx: tx, stub: stub} do
+      assert {:ok, _} = Transaction.query(tx, "match $p isa person;", answer_count_limit: 3)
+
+      payload = stub |> requests("/query") |> hd() |> Map.fetch!(:body) |> JSON.decode!()
+      assert payload["queryOptions"] == %{"answerCountLimit" => 3}
+    end
+
+    test "forwards given_rows", %{tx: tx, stub: stub} do
+      rows = [%{"name" => "Alice"}, %{"name" => "Bob"}]
+      assert {:ok, _} = Transaction.query(tx, "insert $p isa person, has name $name;", given_rows: rows)
+
+      payload = stub |> requests("/query") |> hd() |> Map.fetch!(:body) |> JSON.decode!()
+      assert payload["givenRows"] == [%{"name" => "Alice"}, %{"name" => "Bob"}]
+    end
+
+    test "query!/3 raises", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :read)
+      :ok = Transaction.close(tx)
+
+      assert_raise Error, fn -> Transaction.query!(tx, "match $p isa person;") end
+    end
+  end
+
+  describe "lifecycle" do
+    test "commit finishes the transaction", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.commit(tx)
+      assert {:error, %Error{code: "TSV11"}} = Transaction.query(tx, "match $p isa person;")
+    end
+
+    test "commit on a read transaction is rejected by the server", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :read)
+      assert {:error, %Error{status: 400, code: "TSV3"}} = Transaction.commit(tx)
+    end
+
+    test "commit! raises on failure", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :read)
+      assert_raise Error, ~r/TSV3/, fn -> Transaction.commit!(tx) end
+    end
+
+    test "rollback leaves the transaction usable", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.rollback(tx)
+      assert {:ok, _} = Transaction.query(tx, "insert $p isa person;")
+      assert :ok = Transaction.commit(tx)
+    end
+
+    test "close is idempotent", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :read)
+      assert :ok = Transaction.close(tx)
+      assert :ok = Transaction.close(tx)
+    end
+
+    test "analyze returns the pipeline structure", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :read)
+      assert {:ok, %{"query" => %{"stages" => []}}} = Transaction.analyze(tx, "match $p isa person;")
+    end
+  end
+
+  describe "TypeDB.transaction/5" do
+    test "commits when the block succeeds", %{conn: conn, stub: stub} do
+      assert :ok =
+               TypeDB.transaction(conn, "social", :write, fn tx ->
+                 {:ok, _} = Transaction.query(tx, "insert $p isa person;")
+                 :ok
+               end)
+
+      assert length(requests(stub, "/commit")) == 1
+      assert requests(stub, "/rollback") == []
+    end
+
+    test "returns the block's value", %{conn: conn} do
+      assert 42 = TypeDB.transaction(conn, "social", :write, fn _tx -> 42 end)
+    end
+
+    test "rolls back and propagates when the block returns an error", %{conn: conn, stub: stub} do
+      assert {:error, :nope} = TypeDB.transaction(conn, "social", :write, fn _tx -> {:error, :nope} end)
+
+      assert length(requests(stub, "/rollback")) == 1
+      assert requests(stub, "/commit") == []
+    end
+
+    test "rolls back and re-raises when the block raises", %{conn: conn, stub: stub} do
+      assert_raise RuntimeError, "boom", fn ->
+        TypeDB.transaction(conn, "social", :write, fn _tx -> raise "boom" end)
+      end
+
+      assert length(requests(stub, "/rollback")) == 1
+      assert requests(stub, "/commit") == []
+    end
+
+    test "rolls back and re-throws when the block throws", %{conn: conn, stub: stub} do
+      assert catch_throw(TypeDB.transaction(conn, "social", :write, fn _tx -> throw(:bail) end)) == :bail
+      assert length(requests(stub, "/rollback")) == 1
+    end
+
+    test "closes rather than commits a read transaction", %{conn: conn, stub: stub} do
+      assert {:ok, _} =
+               TypeDB.transaction(conn, "social", :read, fn tx ->
+                 Transaction.query(tx, "match $p isa person;")
+               end)
+
+      assert requests(stub, "/commit") == []
+      assert length(requests(stub, "/close")) == 1
+    end
+
+    test "returns an error when the transaction cannot be opened", %{conn: conn} do
+      assert {:error, %Error{code: "TSV2"}} =
+               TypeDB.transaction(conn, "nope", :write, fn _tx -> :never_runs end)
+    end
+
+    @tag stub_opts: [databases: ["social"], fail_commit: true]
+    test "a failed commit wins over the block's return value", %{conn: conn} do
+      assert {:error, %Error{code: "TSV6"}} =
+               TypeDB.transaction(conn, "social", :write, fn _tx -> :all_good end)
+    end
+  end
+end

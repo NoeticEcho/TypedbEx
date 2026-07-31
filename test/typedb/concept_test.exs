@@ -1,0 +1,239 @@
+defmodule TypeDB.ConceptTest do
+  use ExUnit.Case, async: true
+
+  alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration, Error}
+
+  doctest TypeDB.Concept
+
+  describe "decode/1 instances" do
+    test "entity with a type" do
+      assert %Concept.Entity{iid: "0x1e00", type: %Concept.EntityType{label: "person"}} =
+               Concept.decode(%{
+                 "kind" => "entity",
+                 "iid" => "0x1e00",
+                 "type" => %{"kind" => "entityType", "label" => "person"}
+               })
+    end
+
+    test "entity without a type" do
+      assert %Concept.Entity{iid: "0x1e00", type: nil} =
+               Concept.decode(%{"kind" => "entity", "iid" => "0x1e00"})
+    end
+
+    test "entity with an explicitly null type" do
+      assert %Concept.Entity{type: nil} =
+               Concept.decode(%{"kind" => "entity", "iid" => "0x1e00", "type" => nil})
+    end
+
+    test "relation" do
+      assert %Concept.Relation{iid: "0x1f00", type: %Concept.RelationType{label: "employment"}} =
+               Concept.decode(%{
+                 "kind" => "relation",
+                 "iid" => "0x1f00",
+                 "type" => %{"kind" => "relationType", "label" => "employment"}
+               })
+    end
+
+    test "attribute" do
+      assert %Concept.Attribute{
+               iid: "0x2000",
+               value: "Alice",
+               value_type: "string",
+               type: %Concept.AttributeType{label: "name", value_type: "string"}
+             } =
+               Concept.decode(%{
+                 "kind" => "attribute",
+                 "iid" => "0x2000",
+                 "value" => "Alice",
+                 "valueType" => "string",
+                 "type" => %{"kind" => "attributeType", "label" => "name", "valueType" => "string"}
+               })
+    end
+
+    test "value" do
+      assert %Concept.Value{value: 42, value_type: "integer"} =
+               Concept.decode(%{"kind" => "value", "value" => 42, "valueType" => "integer"})
+    end
+  end
+
+  describe "decode/1 types" do
+    test "entity type" do
+      assert %Concept.EntityType{label: "person"} =
+               Concept.decode(%{"kind" => "entityType", "label" => "person"})
+    end
+
+    test "relation type" do
+      assert %Concept.RelationType{label: "employment"} =
+               Concept.decode(%{"kind" => "relationType", "label" => "employment"})
+    end
+
+    test "role type keeps its scoped label" do
+      assert %Concept.RoleType{label: "employment:employee"} =
+               Concept.decode(%{"kind" => "roleType", "label" => "employment:employee"})
+    end
+
+    test "abstract attribute type has no value type" do
+      assert %Concept.AttributeType{label: "identifier", value_type: nil} =
+               Concept.decode(%{"kind" => "attributeType", "label" => "identifier"})
+    end
+  end
+
+  describe "decode/1 edge cases" do
+    test "nil stays nil" do
+      assert Concept.decode(nil) == nil
+    end
+
+    test "lists decode element-wise" do
+      assert [%Concept.Value{value: 1}, %Concept.Value{value: 2}] =
+               Concept.decode([
+                 %{"kind" => "value", "value" => 1, "valueType" => "integer"},
+                 %{"kind" => "value", "value" => 2, "valueType" => "integer"}
+               ])
+    end
+
+    test "an unknown kind raises a decode error" do
+      assert_raise Error, ~r/unrecognised TypeDB concept/, fn -> Concept.decode(%{"kind" => "quark"}) end
+    end
+
+    test "a missing required field raises a decode error" do
+      assert_raise Error, ~r/missing the "iid" field/, fn -> Concept.decode(%{"kind" => "entity"}) end
+    end
+  end
+
+  describe "accessors" do
+    test "iid/1" do
+      assert Concept.iid(%Concept.Entity{iid: "0x1"}) == "0x1"
+      assert Concept.iid(%Concept.Value{value: 1, value_type: "integer"}) == nil
+      assert Concept.iid(%Concept.EntityType{label: "person"}) == nil
+    end
+
+    test "label/1 on types" do
+      assert Concept.label(%Concept.EntityType{label: "person"}) == "person"
+      assert Concept.label(%Concept.RoleType{label: "employment:employee"}) == "employment:employee"
+    end
+
+    test "label/1 on instances reads through to the type" do
+      entity = %Concept.Entity{iid: "0x1", type: %Concept.EntityType{label: "person"}}
+      assert Concept.label(entity) == "person"
+      assert Concept.label(%Concept.Entity{iid: "0x1"}) == nil
+    end
+
+    test "value/1" do
+      assert Concept.value(%Concept.Attribute{iid: "0x1", value: "Alice", value_type: "string"}) == "Alice"
+      assert Concept.value(%Concept.Value{value: 1, value_type: "integer"}) == 1
+      assert Concept.value(%Concept.EntityType{label: "person"}) == nil
+    end
+  end
+
+  describe "typed_value/1" do
+    test "primitives pass through" do
+      assert cast(true, "boolean") == true
+      assert cast(7, "integer") == 7
+      assert cast(1.5, "double") == 1.5
+      assert cast("hi", "string") == "hi"
+    end
+
+    test "an integer arriving for a double becomes a float" do
+      assert cast(7, "double") === 7.0
+    end
+
+    test "date" do
+      assert cast("2024-03-01", "date") == ~D[2024-03-01]
+    end
+
+    test "datetime" do
+      assert cast("2024-03-01T10:30:00.000000000", "datetime") == ~N[2024-03-01 10:30:00.000000]
+    end
+
+    test "datetime-tz with an IANA zone" do
+      assert %DateTimeTZ{time_zone: "Europe/London", naive: ~N[2024-03-01 10:30:00.000000]} =
+               cast("2024-03-01T10:30:00.000000000 Europe/London", "datetime-tz")
+    end
+
+    test "datetime-tz with a fixed offset" do
+      assert %DateTimeTZ{utc_offset: 3600, time_zone: nil} =
+               cast("2024-03-01T10:30:00.000000000+01:00", "datetime-tz")
+    end
+
+    test "duration" do
+      assert %Duration{months: 14, days: 3} = cast("P1Y2M3DT4H", "duration")
+    end
+
+    test "an unparseable temporal value is returned unchanged" do
+      assert cast("not-a-date", "date") == "not-a-date"
+      assert cast("not-a-duration", "duration") == "not-a-duration"
+      assert cast("nonsense", "datetime-tz") == "nonsense"
+    end
+
+    test "an unknown value type is returned unchanged" do
+      assert cast(%{"a" => 1}, "struct-of-some-kind") == %{"a" => 1}
+    end
+
+    test "typed_value/1 on non-value concepts is nil" do
+      assert Concept.typed_value(%Concept.EntityType{label: "person"}) == nil
+    end
+  end
+
+  describe "TypeDB.ConceptRow" do
+    setup do
+      row =
+        ConceptRow.decode(%{
+          "data" => %{
+            "p" => %{"kind" => "entity", "iid" => "0x1"},
+            "name" => %{"kind" => "attribute", "iid" => "0x2", "value" => "Alice", "valueType" => "string"},
+            "age" => %{"kind" => "attribute", "iid" => "0x3", "value" => 30, "valueType" => "integer"},
+            "missing" => nil
+          },
+          "involvedBlocks" => [0, 1]
+        })
+
+      {:ok, row: row}
+    end
+
+    test "implements Access", %{row: row} do
+      assert %Concept.Entity{iid: "0x1"} = row["p"]
+      assert row["nope"] == nil
+      assert get_in(row, ["name"]).value == "Alice"
+    end
+
+    test "fetch/2 distinguishes unbound from absent", %{row: row} do
+      assert ConceptRow.fetch(row, "missing") == {:ok, nil}
+      assert ConceptRow.fetch(row, "nope") == :error
+    end
+
+    test "get/3 applies the default to both", %{row: row} do
+      assert ConceptRow.get(row, "missing", :fallback) == :fallback
+      assert ConceptRow.get(row, "nope", :fallback) == :fallback
+    end
+
+    test "variables/1", %{row: row} do
+      assert Enum.sort(ConceptRow.variables(row)) == ["age", "missing", "name", "p"]
+    end
+
+    test "value/2 and typed_value/2", %{row: row} do
+      assert ConceptRow.value(row, "name") == "Alice"
+      assert ConceptRow.value(row, "missing") == nil
+      assert ConceptRow.typed_value(row, "age") == 30
+    end
+
+    test "to_map/1 unwraps values and keeps non-values", %{row: row} do
+      map = ConceptRow.to_map(row)
+      assert map["name"] == "Alice"
+      assert map["age"] == 30
+      assert map["missing"] == nil
+      assert %Concept.Entity{} = map["p"]
+    end
+
+    test "carries involved_blocks", %{row: row} do
+      assert row.involved_blocks == [0, 1]
+    end
+
+    test "a malformed row raises a decode error" do
+      assert_raise Error, ~r/unrecognised TypeDB concept row/, fn -> ConceptRow.decode(%{"nope" => 1}) end
+    end
+  end
+
+  defp cast(value, value_type) do
+    Concept.typed_value(%Concept.Value{value: value, value_type: value_type})
+  end
+end

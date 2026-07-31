@@ -1,0 +1,30 @@
+# TypeDB for local development and the integration test suite.
+#
+#   docker compose up -d
+#   TYPEDB_INTEGRATION_URL=http://localhost:8000 mix test --include integration
+#
+# Port 8000 is the HTTP API this driver speaks; 1729 is gRPC, exposed only so
+# that TypeDB Console and Studio can attach to the same server.
+#
+# The default credentials are TypeDB's out-of-the-box admin/password. They are
+# fine for a throwaway local server and must not be used anywhere else.
+
+services:
+  typedb:
+    image: typedb/typedb:3.12.1
+    container_name: typedb
+    ports:
+      - "8000:8000"
+      - "1729:1729"
+    volumes:
+      - typedb-data:/var/lib/typedb/data
+    healthcheck:
+      # /health is unauthenticated and returns 204 once the server is serving.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+volumes:
+  typedb-data:

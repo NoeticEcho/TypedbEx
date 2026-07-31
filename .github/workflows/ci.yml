@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  MIX_ENV: test
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: "1.20"
+            otp: "29"
+            lint: true
+          - elixir: "1.19"
+            otp: "28"
+          - elixir: "1.18"
+            otp: "27"
+          # Oldest supported combination.
+          - elixir: "1.18"
+            otp: "25"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.exs') }}
+          restore-keys: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      - run: mix deps.get
+
+      - name: Check formatting
+        if: matrix.lint
+        run: mix format --check-formatted
+
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
+
+      - run: mix test
+
+  integration:
+    name: Integration (TypeDB ${{ matrix.typedb }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        typedb: ["3.12.1"]
+
+    services:
+      typedb:
+        image: typedb/typedb:${{ matrix.typedb }}
+        ports:
+          - 8000:8000
+          - 1729:1729
+        options: >-
+          --health-cmd "curl -fsS http://localhost:8000/health || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 30
+          --health-start-period 15s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "TypeDB did not become healthy in time" >&2
+          exit 1
+
+      - name: Run integration tests
+        env:
+          TYPEDB_INTEGRATION_URL: http://localhost:8000
+          TYPEDB_INTEGRATION_USERNAME: admin
+          TYPEDB_INTEGRATION_PASSWORD: password
+        run: mix test --include integration
+
+  typeql:
+    name: TypeQL syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - name: Install typeql-check
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common apt-transport-https gpg curl
+          curl -fsSL https://repo.typedb.com/public/public-release/gpg.key \
+            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/typedb.gpg
+          echo "deb https://repo.typedb.com/public/public-release/deb/ubuntu trusty main" \
+            | sudo tee /etc/apt/sources.list.d/typedb.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y typeql-check
+
+      - run: mix deps.get
+
+      - run: mix typedb.check
