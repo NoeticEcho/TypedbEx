@@ -1,0 +1,44 @@
+name: Release
+
+# Publishes to hex.pm when a version tag is pushed. Requires a HEX_API_KEY
+# secret: generate one with `mix hex.user key generate` on the maintainer
+# account and store it in the repository's Actions secrets.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: hex
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Verify the tag matches the version in mix.exs
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])')"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $tag does not match mix.exs version $version" >&2
+            exit 1
+          fi
+
+      - run: mix test
+        env:
+          MIX_ENV: test
+
+      - name: Publish to hex.pm
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes

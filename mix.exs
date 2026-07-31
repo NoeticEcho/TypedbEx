@@ -61,7 +61,7 @@ defmodule TypeDB.MixProject do
       name: "typedb",
       licenses: ["Apache-2.0"],
       maintainers: ["NoeticEcho"],
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md",
@@ -76,13 +76,15 @@ defmodule TypeDB.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
       groups_for_modules: [
         Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
         Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Querying: [
           TypeDB.Transaction,
           TypeDB.Options,
+          TypeDB.Options.Query,
+          TypeDB.Options.Transaction,
           TypeDB.Given,
           TypeDB.Answer,
           TypeDB.Answer.Ok,
@@ -103,7 +105,14 @@ defmodule TypeDB.MixProject do
           TypeDB.Duration,
           TypeDB.DateTimeTZ
         ],
-        Extending: [TypeDB.HTTP, TypeDB.HTTP.Httpc, TypeDB.HTTP.Req, TypeDB.JSON],
+        Extending: [
+          TypeDB.HTTP,
+          TypeDB.HTTP.Httpc,
+          TypeDB.HTTP.Req,
+          TypeDB.JSON,
+          TypeDB.JSON.Native,
+          TypeDB.JSON.Jason
+        ],
         Errors: [TypeDB.Error]
       ]
     ]
