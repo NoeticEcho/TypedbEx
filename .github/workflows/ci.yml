@@ -118,16 +118,18 @@ jobs:
           elixir-version: "1.20"
           otp-version: "29"
 
+      # Pinned tarball rather than the apt repository: the pool serves one URL
+      # per version across architectures, so apt can pick the wrong build.
       - name: Install typeql-check
+        env:
+          TYPEQL_CHECK_VERSION: "3.12.0"
         run: |
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common apt-transport-https gpg curl
-          curl -fsSL https://repo.typedb.com/public/public-release/gpg.key \
-            | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/typedb.gpg
-          echo "deb https://repo.typedb.com/public/public-release/deb/ubuntu trusty main" \
-            | sudo tee /etc/apt/sources.list.d/typedb.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y typeql-check
+          name="typeql-check-linux-x86_64"
+          curl -fsSL -o typeql-check.tar.gz \
+            "https://repo.typedb.com/public/public-release/raw/names/${name}/versions/${TYPEQL_CHECK_VERSION}/${name}-${TYPEQL_CHECK_VERSION}.tar.gz"
+          tar xzf typeql-check.tar.gz
+          sudo install -m755 "${name}-${TYPEQL_CHECK_VERSION}/typeql-check" /usr/local/bin/typeql-check
+          typeql-check "match $p isa person;"
 
       - run: mix deps.get
 

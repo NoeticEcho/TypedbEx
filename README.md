@@ -331,6 +331,11 @@ server that speaks the TypeDB API — so transport, encoding and error mapping a
 exercised without a database. The integration suite runs the same paths against a
 real TypeDB server.
 
+A third, opt-in suite checks the TLS posture — untrusted certificate rejected,
+pinned CA accepted, hostname mismatch refused — against a TypeDB server started
+with `--server.encryption.enabled`. `TypeDB.TLSIntegrationTest` documents how to
+mint the certificates and start that server.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

@@ -40,4 +40,10 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   or to a codec you configure.
 - `mix typedb.check` — validates `.tql` files with TypeDB's `typeql-check` CLI.
 
+### Verified against
+
+- TypeDB 3.12.1 (HTTP API v1) on Elixir 1.20.2 / OTP 29, including an opt-in
+  suite that checks the TLS defaults against a server started with
+  `--server.encryption.enabled`.
+
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/v0.1.0

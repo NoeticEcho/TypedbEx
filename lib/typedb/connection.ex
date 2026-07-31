@@ -74,8 +74,11 @@ defmodule TypeDB.Connection do
 
   @doc """
   Stops a connection.
+
+  Accepts the registered name or the pid — unlike every other function here,
+  which needs the name because it reads the connection's ETS table.
   """
-  @spec stop(t(), term(), timeout()) :: :ok
+  @spec stop(t() | pid(), term(), timeout()) :: :ok
   def stop(conn, reason \\ :normal, timeout \\ :infinity), do: GenServer.stop(conn, reason, timeout)
 
   @doc """

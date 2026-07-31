@@ -138,9 +138,9 @@ defmodule TypeDB.Stub do
             error -> {500, [], "stub handler crashed: " <> Exception.message(error)}
           end
 
-        :gen_tcp.send(socket, encode_response(status, response_headers, response_body))
+        _ = :gen_tcp.send(socket, encode_response(status, response_headers, response_body))
         # Reset to header mode and keep the connection alive for the next request.
-        :inet.setopts(socket, packet: :http_bin)
+        _ = :inet.setopts(socket, packet: :http_bin)
         serve(server, socket, handler)
 
       {:error, _reason} ->
@@ -187,7 +187,7 @@ defmodule TypeDB.Stub do
         {:ok, ""}
 
       {length, _} ->
-        :inet.setopts(socket, packet: :raw)
+        _ = :inet.setopts(socket, packet: :raw)
         :gen_tcp.recv(socket, length, 30_000)
 
       :error ->

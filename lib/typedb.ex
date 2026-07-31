@@ -85,9 +85,9 @@ defmodule TypeDB do
   defdelegate child_spec(opts), to: Connection
 
   @doc """
-  Stops a connection.
+  Stops a connection, by registered name or pid.
   """
-  @spec stop(conn(), term(), timeout()) :: :ok
+  @spec stop(conn() | pid(), term(), timeout()) :: :ok
   defdelegate stop(conn, reason \\ :normal, timeout \\ :infinity), to: Connection
 
   # ----------------------------------------------------------------------------
