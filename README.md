@@ -6,11 +6,12 @@
 
 An Elixir driver for [TypeDB](https://typedb.com) 3.x, built on the TypeDB HTTP API.
 
-- **No runtime dependencies.** JSON comes from Elixir's built-in `JSON`; HTTP from OTP's `:httpc`. Swap either out if you'd rather use `Req` or `Jason`.
+- **Fast under load.** Finch-backed by default: ~1900 req/s at 200-way concurrency where OTP's `:httpc` manages 77. A swappable transport keeps `:httpc` available for dependency-free deployments.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
-- **Tokens handled for you.** Sign-in is lazy, renewal on expiry is transparent, and the request that hit the expired token is retried. Concurrent renewals collapse into a single sign-in — verified with 200-way bursts against a server whose tokens expire mid-flight.
+- **Tokens handled for you.** The driver reads the token's own lifetime and renews it *before* it expires, so ordinary traffic never spends a round trip on a `401` — with reactive renewal still there as the safety net. Verified with 200-way bursts against a server issuing one-second tokens.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
 - **Errors you can branch on.** Every failure is a `TypeDB.Error` carrying TypeDB's stable error code.
+- **Observable.** `:telemetry` spans for every request and sign-in, ready for `telemetry_metrics`.
 
 Verified against **TypeDB 3.12.1** on **Elixir 1.20 / OTP 29**.
 
@@ -22,8 +23,11 @@ def deps do
 end
 ```
 
-Requires Elixir 1.18+ and OTP 25+. JSON is handled by Elixir's built-in `JSON`
-module; to route it through a different codec, configure one:
+Requires Elixir 1.18+ and OTP 25+.
+
+The only dependency is [Finch](https://hex.pm/packages/finch), which backs the
+default transport. JSON is handled by Elixir's built-in `JSON` module; to route
+it through a different codec, configure one:
 
 ```elixir
 config :typedb, :json_codec, TypeDB.JSON.Jason
@@ -209,10 +213,29 @@ TypeDB.query(conn, "social", "match $p isa person;",
 )
 ```
 
-`answer_count_limit` matters: the HTTP API materialises the whole answer set
-before responding, so an unbounded `match` against a large database will try to
-build all of it. Exceeding the limit sets a warning on the answer rather than
-failing — check it with `TypeDB.Answer.warning/1`.
+`answer_count_limit` matters. The HTTP API is not streaming and TypeDB applies no
+cap of its own, so an unbounded `match` against a large database really does
+materialise the whole match set on the server and ship it. Exceeding the limit
+sets a warning on the answer rather than failing — check it with
+`TypeDB.Answer.warning/1`.
+
+Set it once per connection to guard every query that does not override it:
+
+```elixir
+{TypeDB, url: "...", username: "...", password: "...", answer_count_limit: 10_000}
+```
+
+## Telemetry
+
+Every request and sign-in is a `:telemetry` span:
+
+```elixir
+:telemetry.attach("typedb", [:typedb, :request, :stop], fn _event, %{duration: d}, meta, _ ->
+  Logger.info("typedb #{meta.method} #{meta.path} -> #{meta[:status]} in #{d}")
+end, nil)
+```
+
+See `TypeDB.Telemetry` for the full event list and metadata.
 
 ## Administration
 
@@ -261,34 +284,55 @@ on that, not on messages.
 | `:name` | `TypeDB` | registered name; start several connections under different names |
 | `:timeout` | `60_000` | per-request receive timeout, ms |
 | `:connect_timeout` | `10_000` | TCP/TLS connect timeout, ms |
-| `:http` | `{TypeDB.HTTP.Httpc, []}` | adapter and its options |
+| `:http` | `{TypeDB.HTTP.Finch, []}` | adapter and its options |
 | `:max_retries` | `1` | transport-failure retries for idempotent requests |
 | `:max_auth_renewals` | `2` | token renewals a single request may make after a `401` |
+| `:answer_count_limit` | — | default cap on answers per query; see below |
 | `:retry_backoff` | `{:exponential, 100}` | or a `(attempt -> ms)` function |
 
 ### TLS
 
-Certificate verification is on by default and cannot be switched off by accident:
-`verify_peer`, the OS trust store, hostname checking, TLS 1.2/1.3. To pin a
-private CA:
+Certificate verification is on by default under every adapter — peer
+verification, the OS trust store and hostname checking — and turning it off takes
+an explicit option. To pin a private CA:
 
 ```elixir
-{TypeDB,
- url: "https://typedb.internal:8000",
- username: "admin",
- password: password,
- http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/private-ca.pem"}}
+# Finch (default)
+http: {TypeDB.HTTP.Finch, conn_opts: [transport_opts: [cacertfile: "/etc/ssl/private-ca.pem"]]}
+
+# httpc
+http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/private-ca.pem"}
 ```
 
-### Using Req instead of :httpc
+### Choosing a transport
+
+The default is `TypeDB.HTTP.Finch`, which starts a Finch pool per connection:
 
 ```elixir
-# mix.exs
-{:req, "~> 0.5"}
-
-# supervision tree
-{TypeDB, url: "...", username: "...", password: "...", http: {TypeDB.HTTP.Req, finch: MyApp.Finch}}
+{TypeDB, url: "...", username: "...", password: "...",
+ http: {TypeDB.HTTP.Finch, size: 100, count: 2}}
 ```
+
+Two alternatives ship with the driver:
+
+```elixir
+# Reuse a Finch your app already runs through Req. Needs {:req, "~> 0.5"}.
+http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
+
+# No dependencies at all — see the table below for what that costs.
+http: {TypeDB.HTTP.Httpc, max_sessions: 100}
+```
+
+Measured against a local TypeDB 3.12.1, 400 requests per run:
+
+| Concurrency | `:httpc` | Finch |
+| --- | --- | --- |
+| 16 | 344 req/s, p50 45ms | 1729 req/s, p50 8ms |
+| 64 | 247 req/s, p50 263ms | 1773 req/s, p50 23ms |
+| 200 | 77 req/s, p50 2477ms | 1981 req/s, p50 19ms |
+
+`:httpc` throughput *falls* as concurrency rises. Pick it deliberately, not by
+default.
 
 Any module implementing the `TypeDB.HTTP` behaviour works.
 

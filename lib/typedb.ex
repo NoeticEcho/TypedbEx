@@ -145,7 +145,7 @@ defmodule TypeDB do
         "transactionType" => Atom.to_string(transaction_type)
       }
       |> put_unless_nil("commit", Keyword.get(opts, :commit))
-      |> put_unless_nil("queryOptions", Options.query_payload(opts))
+      |> put_unless_nil("queryOptions", Options.query_payload(opts, query_defaults(conn)))
       |> put_unless_nil("transactionOptions", Options.transaction_payload(opts))
       |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
@@ -281,4 +281,13 @@ defmodule TypeDB do
 
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
+
+  @doc false
+  @spec query_defaults(conn()) :: keyword()
+  def query_defaults(conn) do
+    case Connection.config(conn).answer_count_limit do
+      nil -> []
+      limit -> [answer_count_limit: limit]
+    end
+  end
 end

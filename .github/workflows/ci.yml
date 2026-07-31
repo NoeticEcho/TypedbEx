@@ -56,7 +56,16 @@ jobs:
       - name: Compile without warnings
         run: mix compile --warnings-as-errors
 
-      - run: mix test
+      - name: Test (default transport)
+        run: mix test
+
+      - name: Test every HTTP adapter
+        if: matrix.lint
+        run: |
+          for adapter in finch req httpc; do
+            echo "--- $adapter ---"
+            TYPEDB_TEST_ADAPTER=$adapter mix test
+          done
 
   integration:
     name: Integration (TypeDB ${{ matrix.typedb }})
@@ -105,6 +114,15 @@ jobs:
           TYPEDB_INTEGRATION_USERNAME: admin
           TYPEDB_INTEGRATION_PASSWORD: password
         run: mix test --include integration
+
+      - name: Run integration tests through every adapter
+        env:
+          TYPEDB_INTEGRATION_URL: http://localhost:8000
+        run: |
+          for adapter in finch req httpc; do
+            echo "--- $adapter ---"
+            TYPEDB_TEST_ADAPTER=$adapter mix test --include integration
+          done
 
   typeql:
     name: TypeQL syntax

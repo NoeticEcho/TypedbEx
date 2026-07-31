@@ -43,7 +43,11 @@ defmodule TypeDB.JSON do
 
   @doc "Forgets the memoised codec. Intended for tests."
   @spec reset() :: :ok
-  def reset, do: :persistent_term.erase(@persistent_key) && :ok
+  def reset do
+    # erase/1 answers false when the key was never set, which is not a failure.
+    _ = :persistent_term.erase(@persistent_key)
+    :ok
+  end
 
   @doc "Encodes `term` to JSON iodata."
   @spec encode_to_iodata!(term()) :: iodata()

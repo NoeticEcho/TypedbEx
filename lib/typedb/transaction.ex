@@ -147,7 +147,7 @@ defmodule TypeDB.Transaction do
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     body =
       %{"query" => query}
-      |> put_unless_nil("queryOptions", Options.query_payload(opts))
+      |> put_unless_nil("queryOptions", Options.query_payload(opts, TypeDB.query_defaults(tx.conn)))
       |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-

@@ -8,7 +8,7 @@ defmodule TypeDB.HTTP.Httpc do
 
   ## Options
 
-    * `:profile` — profile name. Defaults to a name derived from the connection.
+    * `:profile` — profile name. Defaults to one derived from the connection name.
     * `:max_sessions` — max simultaneous sockets per host. Defaults to `50`.
     * `:max_keep_alive_length` — max requests queued per keep-alive socket.
       Defaults to `100`.
@@ -46,9 +46,8 @@ defmodule TypeDB.HTTP.Httpc do
   @type t :: %__MODULE__{profile: atom(), ssl_opts: keyword()}
 
   @impl true
-  def init(opts) do
-    profile =
-      Keyword.get_lazy(opts, :profile, fn -> :"typedb_httpc_#{System.unique_integer([:positive])}" end)
+  def init(name, opts) do
+    profile = Keyword.get(opts, :profile) || :"#{name}.HTTP"
 
     with :ok <- start_profile(profile),
          :ok <- set_profile_options(profile, opts) do
@@ -72,8 +71,9 @@ defmodule TypeDB.HTTP.Httpc do
     ]
 
     request = build_request(method, url, headers, body)
+    client_opts = [body_format: :binary, full_result: true]
 
-    case :httpc.request(method, request, http_opts, [body_format: :binary, full_result: true], state.profile) do
+    case :httpc.request(method, request, http_opts, client_opts, state.profile) do
       {:ok, {{_version, status, _reason}, resp_headers, resp_body}} ->
         {:ok,
          %{
@@ -86,8 +86,8 @@ defmodule TypeDB.HTTP.Httpc do
         {:error, TypeDB.Error.new(:timeout, "request to #{url} timed out", reason: :timeout)}
 
       {:error, {:failed_connect, _} = reason} ->
-        {:error,
-         TypeDB.Error.new(:transport, "could not connect to #{url}: #{format_reason(reason)}", reason: reason)}
+        message = "could not connect to #{url}: #{format_reason(reason)}"
+        {:error, TypeDB.Error.new(:transport, message, reason: reason)}
 
       {:error, reason} ->
         {:error,

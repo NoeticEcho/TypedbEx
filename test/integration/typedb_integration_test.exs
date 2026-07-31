@@ -39,10 +39,18 @@ defmodule TypeDB.IntegrationTest do
         url: url,
         username: username,
         password: password,
-        timeout: 60_000
+        timeout: 60_000,
+        http: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: TypeDB.stop(pid) end)
+    on_exit(fn ->
+      # Linked to the setup_all process, so it may already be shutting down.
+      try do
+        TypeDB.stop(pid)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
 
     {:ok, conn: name}
   end
@@ -574,7 +582,13 @@ defmodule TypeDB.IntegrationTest do
       name = :"typedb_integration_bad_#{System.unique_integer([:positive])}"
 
       {:ok, pid} =
-        TypeDB.start_link(name: name, url: config.base_url, username: "admin", password: "definitely-wrong")
+        TypeDB.start_link(
+          name: name,
+          url: config.base_url,
+          username: "admin",
+          password: "definitely-wrong",
+          http: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}
+        )
 
       assert {:error, %Error{kind: :unauthenticated}} = Database.list(name)
 

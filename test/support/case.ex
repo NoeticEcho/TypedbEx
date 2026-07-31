@@ -23,6 +23,26 @@ defmodule TypeDB.Case do
     end
   end
 
+  @doc """
+  The HTTP adapter the suite runs against.
+
+  Defaults to the driver's own default; set `TYPEDB_TEST_ADAPTER` to `finch`,
+  `req` or `httpc` to run the whole suite through a specific one. CI runs all
+  three, because an adapter that is never exercised end to end is an adapter
+  that is quietly broken.
+  """
+  @spec adapter() :: {module(), keyword()} | nil
+  def adapter do
+    case System.get_env("TYPEDB_TEST_ADAPTER") do
+      "finch" -> {TypeDB.HTTP.Finch, []}
+      "req" -> {TypeDB.HTTP.Req, []}
+      "httpc" -> {TypeDB.HTTP.Httpc, []}
+      nil -> nil
+      "" -> nil
+      other -> raise ArgumentError, "unknown TYPEDB_TEST_ADAPTER #{inspect(other)}"
+    end
+  end
+
   setup context do
     stub_opts = Map.get(context, :stub_opts, [])
     conn_opts = Map.get(context, :conn_opts, [])
@@ -40,6 +60,7 @@ defmodule TypeDB.Case do
         timeout: 5_000,
         connect_timeout: 2_000
       ]
+      |> then(fn opts -> if adapter = adapter(), do: Keyword.put(opts, :http, adapter), else: opts end)
       |> Keyword.merge(conn_opts)
 
     {:ok, conn_pid} = start_connection(opts)

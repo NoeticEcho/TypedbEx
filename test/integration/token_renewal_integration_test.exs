@@ -45,7 +45,8 @@ defmodule TypeDB.TokenRenewalIntegrationTest do
             name: name,
             url: url,
             username: System.get_env("TYPEDB_SHORT_TOKEN_USERNAME", "admin"),
-            password: System.get_env("TYPEDB_SHORT_TOKEN_PASSWORD", "password")
+            password: System.get_env("TYPEDB_SHORT_TOKEN_PASSWORD", "password"),
+            http: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}
           )
 
         on_exit(fn ->

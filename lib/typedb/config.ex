@@ -19,13 +19,19 @@ defmodule TypeDB.Config do
     * `:timeout` — per-request receive timeout in ms. Defaults to `60_000`.
     * `:connect_timeout` — TCP/TLS connect timeout in ms. Defaults to `10_000`.
     * `:http` — `{adapter_module, adapter_opts}`. Defaults to
-      `{TypeDB.HTTP.Httpc, []}`.
+      `{TypeDB.HTTP.Finch, []}`. See `TypeDB.HTTP` for the alternatives and why
+      this is the default.
     * `:max_retries` — how many times to retry *idempotent* requests after a
       transport failure. Defaults to `1`.
     * `:max_auth_renewals` — how many times a single request will renew its
       token and retry after a `401`. Defaults to `2`; more than one matters only
       when a burst of requests is wide enough for the freshly minted token to
       expire before every one of them has used it.
+    * `:answer_count_limit` — a default cap on answers per query, applied unless
+      the query passes its own. Unset by default. The HTTP API is not streaming
+      and TypeDB does not cap results itself, so an unbounded `match` really does
+      materialise the whole match set on the server and ship it; setting this
+      once per connection is the cheap guard against that.
     * `:retry_backoff` — either `{:exponential, base_ms}` or a
       `(attempt -> ms)` function. Defaults to `{:exponential, 100}`.
 
@@ -56,6 +62,7 @@ defmodule TypeDB.Config do
           http_opts: keyword(),
           max_retries: non_neg_integer(),
           max_auth_renewals: non_neg_integer(),
+          answer_count_limit: pos_integer() | nil,
           retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer())
         }
 
@@ -74,6 +81,7 @@ defmodule TypeDB.Config do
     :http_opts,
     :max_retries,
     :max_auth_renewals,
+    :answer_count_limit,
     :retry_backoff
   ]
 
@@ -91,7 +99,7 @@ defmodule TypeDB.Config do
     with {:ok, base_url} <- parse_url(Keyword.get(opts, :url, @default_url)),
          {:ok, name} <- parse_name(Keyword.get(opts, :name, TypeDB)),
          {:ok, {username, password, token}} <- parse_credentials(opts),
-         {:ok, {adapter, adapter_opts}} <- parse_http(Keyword.get(opts, :http, {TypeDB.HTTP.Httpc, []})),
+         {:ok, {adapter, adapter_opts}} <- parse_http(Keyword.get(opts, :http, {TypeDB.HTTP.Finch, []})),
          {:ok, backoff} <- parse_backoff(Keyword.get(opts, :retry_backoff, {:exponential, 100})) do
       {:ok,
        %__MODULE__{
@@ -106,6 +114,7 @@ defmodule TypeDB.Config do
          http_opts: adapter_opts,
          max_retries: Keyword.get(opts, :max_retries, 1),
          max_auth_renewals: Keyword.get(opts, :max_auth_renewals, 2),
+         answer_count_limit: Keyword.get(opts, :answer_count_limit),
          retry_backoff: backoff
        }}
     end

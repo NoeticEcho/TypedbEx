@@ -3,9 +3,10 @@ defmodule TypeDB.Connection do
   A supervised connection to a TypeDB server.
 
   A connection process owns exactly two things: the configuration and the current
-  authentication token. It does **not** proxy requests — HTTP calls run in the
-  caller's process, reading configuration from a `:read_concurrency` ETS table
-  owned by this process. A slow query therefore never blocks anything else.
+  access token. It does **not** proxy requests — HTTP calls run in the caller's
+  process (see `TypeDB.Transport`), reading configuration from a
+  `:read_concurrency` ETS table owned by this process. A slow query therefore
+  never blocks anything else.
 
   The process is consulted only when the token has to be minted or renewed, and
   it collapses concurrent renewals into a single sign-in.
@@ -30,16 +31,19 @@ defmodule TypeDB.Connection do
 
   ## Token lifecycle
 
-  TypeDB issues expiring bearer tokens. This driver acquires one lazily on the
-  first request, caches it, and renews it transparently when the server answers
-  `401` with an `AUT*` code — the failed request is then retried. Callers never
-  see token churn.
+  TypeDB issues expiring JWTs. This driver:
 
-  Concurrent renewals collapse: whoever gets there first signs in, and everyone
-  else takes that token. Under a burst wide enough to outlive a token, the shared
-  token can itself expire between being handed out and being used, so a retry can
-  be rejected in turn; `:max_auth_renewals` (default `2`) bounds how many times a
-  single request will go around that loop before giving up.
+    * acquires one lazily, on the first request that needs it;
+    * reads the token's own lifetime (see `TypeDB.Token`) and renews it
+      *before* it expires, so ordinary traffic never spends a round trip
+      discovering a `401`;
+    * still renews reactively when a `401` arrives anyway — a clock skew, a
+      revoked token, a restarted server — and retries the failed request;
+    * collapses concurrent renewals: whoever reaches the connection first signs
+      in, and everyone queued behind takes that token.
+
+  `:max_auth_renewals` bounds how many times a single request will go around the
+  renew-and-retry loop before surfacing the error.
 
   When a connection is configured with a pre-issued `:token` there is nothing to
   renew, and expiry surfaces as `%TypeDB.Error{kind: :unauthenticated}`.
@@ -47,15 +51,19 @@ defmodule TypeDB.Connection do
 
   use GenServer
 
-  require Logger
-
-  alias TypeDB.{Config, Error, JSON}
+  alias TypeDB.{Config, Error, JSON, Telemetry, Token, Transport}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type t :: atom()
 
   @config_key :config
   @token_key :token
+  @adapter_key :http_state
+
+  # Renew this long before a token actually expires, capped at a quarter of the
+  # token's lifetime so that a short-lived token never looks permanently stale.
+  @refresh_margin_ms :timer.seconds(30)
+  @max_margin_fraction 4
 
   @doc """
   Starts a connection. See `TypeDB.Config` for the supported options.
@@ -91,27 +99,63 @@ defmodule TypeDB.Connection do
   Returns the validated configuration of a running connection.
   """
   @spec config(t()) :: Config.t()
-  def config(conn) do
-    case :ets.lookup(conn, @config_key) do
-      [{@config_key, config}] ->
-        config
+  def config(conn), do: lookup!(conn, @config_key)
 
-      [] ->
-        raise Error.new(:config, "TypeDB connection #{inspect(conn)} is not running")
+  @doc false
+  @spec adapter_state(t()) :: term()
+  def adapter_state(conn), do: lookup!(conn, @adapter_key)
+
+  defp lookup!(conn, key) do
+    case :ets.lookup(conn, key) do
+      [{^key, value}] -> value
+      [] -> raise not_running(conn)
     end
   rescue
-    ArgumentError ->
-      reraise Error.new(
-                :config,
-                "TypeDB connection #{inspect(conn)} is not running. " <>
-                  "Add {TypeDB, name: #{inspect(conn)}, ...} to your supervision tree."
-              ),
-              __STACKTRACE__
+    ArgumentError -> reraise not_running(conn), __STACKTRACE__
   end
 
-  # ----------------------------------------------------------------------------
-  # Request execution (runs in the caller process)
-  # ----------------------------------------------------------------------------
+  defp not_running(conn) do
+    Error.new(
+      :config,
+      "TypeDB connection #{inspect(conn)} is not running. " <>
+        "Add {TypeDB, name: #{inspect(conn)}, ...} to your supervision tree."
+    )
+  end
+
+  @doc """
+  Returns a token that is not about to expire, minting one if needed.
+  """
+  @spec token(t()) :: {:ok, String.t()} | {:error, Error.t()}
+  def token(conn) do
+    case :ets.lookup(conn, @token_key) do
+      [{@token_key, token, deadline}] ->
+        if usable?(deadline), do: {:ok, token}, else: renew_token(conn, :any)
+
+      [] ->
+        renew_token(conn, :any)
+    end
+  rescue
+    ArgumentError -> reraise not_running(conn), __STACKTRACE__
+  end
+
+  @doc """
+  Renews the access token.
+
+  `failed_at` is the monotonic millisecond at which the caller's request was
+  sent, or `:any` when the caller simply has no usable token. Passing the send
+  time is what lets the connection tell "my token really is stale" from "another
+  process already replaced it while I was queued".
+  """
+  @spec renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, Error.t()}
+  def renew_token(conn, failed_at) do
+    GenServer.call(conn, {:renew_token, failed_at}, call_timeout(config(conn)))
+  end
+
+  defp call_timeout(%Config{timeout: :infinity}), do: :infinity
+  defp call_timeout(%Config{timeout: timeout}), do: timeout + :timer.seconds(5)
+
+  defp usable?(:unknown), do: true
+  defp usable?(deadline), do: System.monotonic_time(:millisecond) < deadline
 
   @typedoc """
   Options for `request/4`:
@@ -136,185 +180,7 @@ defmodule TypeDB.Connection do
   """
   @spec request(t(), TypeDB.HTTP.method(), String.t(), request_opts()) ::
           {:ok, term()} | {:error, Error.t()}
-  def request(conn, method, path, opts \\ []) do
-    config = config(conn)
-    do_request(conn, config, method, path, opts, _renewals = 0)
-  end
-
-  defp do_request(conn, config, method, path, opts, renewals) do
-    authenticated? = Keyword.get(opts, :authenticated, true)
-
-    # The send time is stamped once the token is in hand, never before: acquiring
-    # it can block on a sign-in, and a timestamp from before that would make the
-    # connection believe the token it just minted is newer than this failure.
-    with {:ok, token} <- maybe_token(conn, config, authenticated?),
-         sent_at = System.monotonic_time(:millisecond),
-         {:ok, response} <- send_request(conn, config, method, path, opts, token) do
-      case handle_status(response, opts) do
-        {:retry_unauthenticated, error} when authenticated? and renewals < config.max_auth_renewals ->
-          case renew_token(conn, config, sent_at) do
-            {:ok, _new_token} -> do_request(conn, config, method, path, opts, renewals + 1)
-            {:error, renew_error} -> {:error, auth_error(error, renew_error)}
-          end
-
-        # A 401 we cannot act on: an unauthenticated endpoint rejected us, or the
-        # renewal budget is spent.
-        {:retry_unauthenticated, error} ->
-          {:error, error}
-
-        other ->
-          other
-      end
-    end
-  end
-
-  # A renewal that failed for authentication reasons explains the problem better
-  # than the 401 that triggered it ("bad password", "static token cannot be
-  # renewed"), so it wins — but it inherits the server's stable error code. A
-  # renewal that failed for transport reasons says nothing about authentication,
-  # so the original 401 stands.
-  defp auth_error(original, %Error{kind: :unauthenticated} = renew_error) do
-    %{renew_error | code: renew_error.code || original.code, status: renew_error.status || original.status}
-  end
-
-  defp auth_error(original, _renew_error), do: original
-
-  defp maybe_token(_conn, _config, false), do: {:ok, nil}
-
-  defp maybe_token(conn, config, true) do
-    case read_token(conn) do
-      token when is_binary(token) -> {:ok, token}
-      nil -> renew_token(conn, config, :any)
-    end
-  end
-
-  defp read_token(conn) do
-    case :ets.lookup(conn, @token_key) do
-      [{@token_key, token}] when is_binary(token) -> token
-      _ -> nil
-    end
-  end
-
-  # `:any` means "any token will do", used before the first request. A timestamp
-  # means "the token I used at that moment was rejected", which is what lets the
-  # connection tell a genuinely stale token from one another process has already
-  # replaced.
-  defp renew_token(conn, config, failed_at) do
-    GenServer.call(conn, {:renew_token, failed_at}, call_timeout(config))
-  end
-
-  defp call_timeout(%Config{timeout: :infinity}), do: :infinity
-  defp call_timeout(%Config{timeout: timeout}), do: timeout + :timer.seconds(5)
-
-  defp send_request(conn, config, method, path, opts, token) do
-    url = build_url(config, path, opts)
-    headers = build_headers(token, opts)
-    body = encode_body(opts)
-
-    http_opts = [
-      # `timeout: nil` reaches here whenever a caller forwards an absent option.
-      timeout: opts[:timeout] || config.timeout,
-      connect_timeout: config.connect_timeout
-    ]
-
-    adapter = config.http_adapter
-    adapter_state = adapter_state(conn)
-    attempts = if idempotent?(method, opts), do: config.max_retries + 1, else: 1
-
-    attempt(adapter, adapter_state, method, url, headers, body, http_opts, config, 1, attempts)
-  end
-
-  defp attempt(adapter, state, method, url, headers, body, http_opts, config, attempt_no, attempts) do
-    case adapter.request(state, method, url, headers, body, http_opts) do
-      {:ok, response} ->
-        {:ok, response}
-
-      {:error, %Error{kind: kind}} when kind in [:transport, :timeout] and attempt_no < attempts ->
-        delay = Config.backoff(config, attempt_no)
-
-        Logger.debug(fn ->
-          "TypeDB: #{kind} on #{method} #{url} (attempt #{attempt_no}/#{attempts}), retrying in #{delay}ms"
-        end)
-
-        Process.sleep(delay)
-        attempt(adapter, state, method, url, headers, body, http_opts, config, attempt_no + 1, attempts)
-
-      {:error, error} ->
-        {:error, error}
-    end
-  end
-
-  defp idempotent?(method, opts) do
-    Keyword.get_lazy(opts, :idempotent, fn -> method in [:get, :delete] end)
-  end
-
-  defp adapter_state(conn) do
-    case :ets.lookup(conn, :http_state) do
-      [{:http_state, state}] -> state
-      [] -> raise Error.new(:config, "TypeDB connection #{inspect(conn)} has no HTTP adapter state")
-    end
-  end
-
-  defp build_url(config, path, opts) do
-    if Keyword.get(opts, :versioned, true) do
-      Config.url(config, path)
-    else
-      Config.raw_url(config, path)
-    end
-  end
-
-  defp build_headers(token, opts) do
-    headers = [{"accept", "application/json, text/plain"}]
-
-    headers =
-      if Keyword.has_key?(opts, :body), do: [{"content-type", "application/json"} | headers], else: headers
-
-    if is_binary(token), do: [{"authorization", "Bearer " <> token} | headers], else: headers
-  end
-
-  defp encode_body(opts) do
-    case Keyword.fetch(opts, :body) do
-      {:ok, body} -> JSON.encode_to_iodata!(body)
-      :error -> nil
-    end
-  end
-
-  # ----------------------------------------------------------------------------
-  # Response handling
-  # ----------------------------------------------------------------------------
-
-  defp handle_status(%{status: status} = response, opts) when status in 200..299 do
-    decode_success(response, Keyword.get(opts, :expect, :json))
-  end
-
-  defp handle_status(%{status: 401} = response, _opts) do
-    {:retry_unauthenticated, error_from(response)}
-  end
-
-  defp handle_status(response, _opts), do: {:error, error_from(response)}
-
-  defp decode_success(%{status: 204}, _expect), do: {:ok, :ok}
-  defp decode_success(%{body: ""}, :json), do: {:ok, :ok}
-  defp decode_success(_response, :empty), do: {:ok, :ok}
-  defp decode_success(%{body: body}, :text), do: {:ok, body}
-
-  defp decode_success(%{body: body}, :json) do
-    case JSON.decode(body) do
-      {:ok, decoded} ->
-        {:ok, decoded}
-
-      {:error, reason} ->
-        {:error,
-         Error.new(:decode, "TypeDB returned a body that is not valid JSON", reason: reason, body: body)}
-    end
-  end
-
-  defp error_from(%{status: status, body: body}) do
-    case JSON.decode(body) do
-      {:ok, decoded} -> Error.from_response(status, decoded)
-      {:error, _} -> Error.from_response(status, body)
-    end
-  end
+  defdelegate request(conn, method, path, opts \\ []), to: Transport
 
   # ----------------------------------------------------------------------------
   # GenServer
@@ -325,35 +191,17 @@ defmodule TypeDB.Connection do
     Process.flag(:trap_exit, true)
 
     with {:ok, http_state} <- init_adapter(config) do
-      table =
-        :ets.new(config.name, [
-          :named_table,
-          :protected,
-          :set,
-          read_concurrency: true
-        ])
+      table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
+      :ets.insert(table, [{@config_key, config}, {@adapter_key, http_state}])
 
-      :ets.insert(table, [{@config_key, config}, {:http_state, http_state}])
+      state = %{config: config, table: table, http_state: http_state, issued_at: nil}
 
-      if is_binary(config.static_token) do
-        :ets.insert(table, {@token_key, config.static_token})
-      end
-
-      {:ok,
-       %{
-         config: config,
-         table: table,
-         http_state: http_state,
-         token: config.static_token,
-         issued_at: if(is_binary(config.static_token), do: now(), else: nil)
-       }}
+      {:ok, cache_static_token(state)}
     end
   end
 
   defp init_adapter(%Config{http_adapter: adapter, http_opts: opts, name: name}) do
-    opts = Keyword.put_new(opts, :profile, :"#{name}.HTTP")
-
-    case adapter.init(opts) do
+    case adapter.init(name, opts) do
       {:ok, state} ->
         {:ok, state}
 
@@ -365,73 +213,106 @@ defmodule TypeDB.Connection do
     end
   end
 
+  defp cache_static_token(%{config: %Config{static_token: nil}} = state), do: state
+
+  defp cache_static_token(%{config: %Config{static_token: token}} = state) do
+    # A pre-issued token cannot be renewed, so it is cached without a deadline:
+    # its expiry can only ever be discovered from a 401.
+    :ets.insert(state.table, {@token_key, token, :unknown})
+    %{state | issued_at: System.monotonic_time(:millisecond)}
+  end
+
   @impl true
   def handle_call({:renew_token, failed_at}, _from, state) do
     cond do
-      # The cached token was minted after the caller's request failed, so another
-      # process has already replaced the one that was rejected. Comparing issue
-      # times rather than token values matters under a burst: token equality
-      # would happily hand back a token that was already stale when it was
-      # cached, burning the caller's renewal budget on a request that cannot
-      # succeed.
-      is_binary(state.token) and newer_than?(state.issued_at, failed_at) ->
-        {:reply, {:ok, state.token}, state}
+      reusable?(state, failed_at) ->
+        {:reply, {:ok, current_token(state)}, state}
 
       is_binary(state.config.static_token) ->
-        {:reply,
-         {:error,
-          Error.new(
-            :unauthenticated,
-            "the pre-issued :token was rejected by TypeDB and cannot be renewed; " <>
-              "configure :username and :password for automatic renewal"
-          )}, state}
+        {:reply, {:error, static_token_error()}, state}
 
       true ->
-        case sign_in(state) do
-          {:ok, token} ->
-            :ets.insert(state.table, {@token_key, token})
-            {:reply, {:ok, token}, %{state | token: token, issued_at: now()}}
-
-          {:error, error} ->
-            :ets.delete(state.table, @token_key)
-            {:reply, {:error, error}, %{state | token: nil, issued_at: nil}}
-        end
+        sign_in_and_cache(state)
     end
   end
-
-  defp newer_than?(_issued_at, :any), do: true
-  defp newer_than?(nil, _failed_at), do: false
-  defp newer_than?(issued_at, failed_at), do: issued_at > failed_at
-
-  defp now, do: System.monotonic_time(:millisecond)
 
   @impl true
   def terminate(_reason, state) do
     adapter = state.config.http_adapter
-
-    if function_exported?(adapter, :terminate, 1) do
-      adapter.terminate(state.http_state)
-    end
-
+    if function_exported?(adapter, :terminate, 1), do: adapter.terminate(state.http_state)
     :ok
   end
 
-  defp sign_in(%{config: config, http_state: http_state}) do
-    body = JSON.encode_to_iodata!(%{username: config.username, password: config.password})
-    url = Config.url(config, "/signin")
+  # The cached token can be reused when it is still valid *and* it was minted
+  # after the caller's request failed — otherwise the caller would retry with a
+  # token that was already stale when it was cached, burning its renewal budget
+  # on a request that cannot succeed.
+  defp reusable?(state, failed_at) do
+    case :ets.lookup(state.table, @token_key) do
+      [{@token_key, _token, deadline}] -> usable?(deadline) and minted_after?(state.issued_at, failed_at)
+      [] -> false
+    end
+  end
 
-    headers = [{"content-type", "application/json"}, {"accept", "application/json"}]
-    http_opts = [timeout: config.timeout, connect_timeout: config.connect_timeout]
+  defp minted_after?(_issued_at, :any), do: true
+  defp minted_after?(nil, _failed_at), do: false
+  defp minted_after?(issued_at, failed_at), do: issued_at > failed_at
 
-    case config.http_adapter.request(http_state, :post, url, headers, body, http_opts) do
-      {:ok, %{status: status, body: response_body}} when status in 200..299 ->
-        decode_token(response_body)
+  defp current_token(state) do
+    [{@token_key, token, _deadline}] = :ets.lookup(state.table, @token_key)
+    token
+  end
 
-      {:ok, response} ->
-        {:error, error_from(response)}
+  defp static_token_error do
+    Error.new(
+      :unauthenticated,
+      "the pre-issued :token was rejected by TypeDB and cannot be renewed; " <>
+        "configure :username and :password for automatic renewal"
+    )
+  end
+
+  defp sign_in_and_cache(state) do
+    case sign_in(state) do
+      {:ok, token} ->
+        now = System.monotonic_time(:millisecond)
+        :ets.insert(state.table, {@token_key, token, deadline(token, now)})
+        {:reply, {:ok, token}, %{state | issued_at: now}}
 
       {:error, error} ->
-        {:error, error}
+        :ets.delete(state.table, @token_key)
+        {:reply, {:error, error}, %{state | issued_at: nil}}
+    end
+  end
+
+  # Only the token's own lifetime is used, never its absolute timestamps: both
+  # come from the server's clock, so their difference is meaningful where a
+  # comparison against the local clock would not be.
+  defp deadline(token, now) do
+    case Token.lifetime_ms(token) do
+      :unknown -> :unknown
+      lifetime -> now + lifetime - min(@refresh_margin_ms, div(lifetime, @max_margin_fraction))
+    end
+  end
+
+  defp sign_in(%{config: config} = state) do
+    Telemetry.span_sign_in(%{connection: config.name}, fn ->
+      case do_sign_in(state) do
+        {:ok, token} -> {{:ok, token}, %{connection: config.name}}
+        {:error, error} -> {{:error, error}, %{connection: config.name, error: error}}
+      end
+    end)
+  end
+
+  defp do_sign_in(%{config: config, http_state: http_state}) do
+    body = JSON.encode_to_iodata!(%{username: config.username, password: config.password})
+    headers = [{"content-type", "application/json"}, {"accept", "application/json"}]
+    http_opts = [timeout: config.timeout, connect_timeout: config.connect_timeout]
+    url = Config.url(config, "/signin")
+
+    case config.http_adapter.request(http_state, :post, url, headers, body, http_opts) do
+      {:ok, %{status: status, body: response_body}} when status in 200..299 -> decode_token(response_body)
+      {:ok, response} -> {:error, Transport.error_from(response)}
+      {:error, error} -> {:error, error}
     end
   end
 

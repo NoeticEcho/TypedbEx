@@ -27,6 +27,7 @@ defmodule TypeDB.Stub.Router do
       {:password, Keyword.get(opts, :password, "password")},
       {:token_uses, Keyword.get(opts, :token_uses, :infinity)},
       {:token_ttl_ms, Keyword.get(opts, :token_ttl_ms, :infinity)},
+      {:token_lifetime_seconds, Keyword.get(opts, :token_lifetime_seconds)},
       {:databases, MapSet.new(Keyword.get(opts, :databases, []))},
       {:users, MapSet.new(Keyword.get(opts, :users, ["admin"]))},
       {:transactions, %{}},
@@ -241,11 +242,34 @@ defmodule TypeDB.Stub.Router do
       # Counter and token row are updated atomically: sign-in is concurrent, and
       # a lost update here would surface as a spurious "unknown token".
       counter = :ets.update_counter(state, :token_counter, 1)
-      token = "stub-token-#{counter}"
+      token = mint_token(state, counter)
       :ets.insert(state, {{:token, token}, 0, System.monotonic_time(:millisecond)})
       json(200, %{token: token})
     else
       error(401, "AUT1", "Invalid credential supplied.")
+    end
+  end
+
+  # Real TypeDB hands out JWTs carrying `iat`/`exp`, which is what lets the driver
+  # renew before a token expires. `:token_lifetime_seconds` controls the claim;
+  # `:token_ttl_ms` controls when the stub actually starts rejecting it, so a test
+  # can make the two disagree on purpose.
+  defp mint_token(state, counter) do
+    claims =
+      case get(state, :token_lifetime_seconds) do
+        nil -> nil
+        seconds -> %{"sub" => get(state, :username), "iat" => 0, "exp" => seconds}
+      end
+
+    case claims do
+      nil ->
+        "stub-token-#{counter}"
+
+      claims ->
+        segment = fn term -> term |> JSON.encode!() |> Base.url_encode64(padding: false) end
+
+        segment.(%{"typ" => "JWT", "alg" => "HS256"}) <>
+          "." <> segment.(Map.put(claims, "jti", counter)) <> ".stub-signature"
     end
   end
 
@@ -274,7 +298,9 @@ defmodule TypeDB.Stub.Router do
     age = System.monotonic_time(:millisecond) - issued_at
 
     cond do
-      ttl != :infinity and age > ttl ->
+      # `>=` so that `token_ttl_ms: 0` means "already expired" deterministically,
+      # rather than depending on whether the request beat the clock's next tick.
+      ttl != :infinity and age >= ttl ->
         {:error, error(401, "AUT3", "Invalid token supplied.")}
 
       get(state, :token_uses) == :infinity ->

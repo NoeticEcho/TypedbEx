@@ -20,6 +20,8 @@ defmodule TypeDB.Stub do
 
   use GenServer
 
+  alias TypeDB.Stub.Router
+
   @type request :: %{method: String.t(), path: String.t(), headers: map(), body: binary()}
   @type response :: {status :: pos_integer(), headers :: [{String.t(), String.t()}], body :: binary()}
   @type handler :: (String.t(), String.t(), map(), binary() -> response())
@@ -78,7 +80,7 @@ defmodule TypeDB.Stub do
     {:ok, listen_socket} = :gen_tcp.listen(0, listen_opts)
     {:ok, port} = :inet.port(listen_socket)
 
-    handler = Keyword.get(opts, :handler) || TypeDB.Stub.Router.build(opts)
+    handler = Keyword.get(opts, :handler) || Router.build(opts)
 
     state = %State{listen_socket: listen_socket, port: port, handler: handler, owner: owner}
     send(self(), :accept)

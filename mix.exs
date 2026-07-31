@@ -18,7 +18,9 @@ defmodule TypeDB.MixProject do
       name: "TypeDB",
       source_url: @source_url,
       dialyzer: [
-        plt_add_apps: [:inets, :ssl, :public_key],
+        plt_add_apps: [:inets, :ssl, :public_key, :mix, :ex_unit],
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true,
         flags: [:error_handling, :extra_return, :missing_return, :unmatched_returns]
       ],
       test_coverage: [summary: [threshold: 0]]
@@ -40,10 +42,16 @@ defmodule TypeDB.MixProject do
 
   defp deps do
     [
-      # This driver has *no* runtime dependencies. JSON is handled by the
+      # This driver has *no* required runtime dependencies. JSON comes from the
       # built-in `JSON` module (Elixir >= 1.18), falling back to `Jason` if the
       # host application happens to depend on it. See `TypeDB.JSON`.
       #
+      # `:finch` backs the default transport. `:req` is optional and only needed
+      # by `TypeDB.HTTP.Req`. See "Choosing a transport" in the README.
+      {:finch, "~> 0.19"},
+      {:telemetry, "~> 1.0"},
+      {:req, "~> 0.5", optional: true},
+
       # Tooling below is never required by consumers of this library.
       {:ex_doc, "~> 0.34", only: :docs, runtime: false},
       {:credo, "~> 1.7", only: [:dev], runtime: false},
@@ -78,7 +86,7 @@ defmodule TypeDB.MixProject do
       source_url: @source_url,
       extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
       groups_for_modules: [
-        Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
+        Connection: [TypeDB, TypeDB.Connection, TypeDB.Config, TypeDB.Token, TypeDB.Transport],
         Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Querying: [
           TypeDB.Transaction,
@@ -107,12 +115,14 @@ defmodule TypeDB.MixProject do
         ],
         Extending: [
           TypeDB.HTTP,
-          TypeDB.HTTP.Httpc,
+          TypeDB.HTTP.Finch,
           TypeDB.HTTP.Req,
+          TypeDB.HTTP.Httpc,
           TypeDB.JSON,
           TypeDB.JSON.Native,
           TypeDB.JSON.Jason
         ],
+        Observability: [TypeDB.Telemetry],
         Errors: [TypeDB.Error]
       ]
     ]

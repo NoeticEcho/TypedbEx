@@ -1,9 +1,12 @@
 defmodule TypeDB.HTTP.Req do
   @moduledoc """
-  Optional `TypeDB.HTTP` adapter backed by [Req](https://hex.pm/packages/req).
+  `TypeDB.HTTP` adapter backed by [Req](https://hex.pm/packages/req) and Finch.
 
-  `:req` is **not** a dependency of this library; add it yourself if you want to
-  use this adapter:
+  Recommended for production. Finch gives real per-host connection pools, HTTP/2
+  support and a supervised pool you can size and observe, where OTP's `:httpc`
+  gives you a global profile and much less control.
+
+  `:req` is an *optional* dependency of this library — add it yourself:
 
       # mix.exs
       {:req, "~> 0.5"}
@@ -14,9 +17,10 @@ defmodule TypeDB.HTTP.Req do
         http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
       )
 
-  All options are forwarded to `Req.new/1`, so Finch pools, retries and
-  `:connect_options` are configured the Req way. This adapter disables Req's own
-  retry and redirect handling: `TypeDB` decides what is safe to retry.
+  All options are forwarded to `Req.new/1`, so Finch pools, connect options and
+  transport tuning are configured the Req way. The adapter pins three of them:
+  redirects and Req's own retries are off, and the body is left undecoded —
+  `TypeDB` decides what is safe to retry and owns JSON decoding.
   """
 
   @behaviour TypeDB.HTTP
@@ -28,7 +32,7 @@ defmodule TypeDB.HTTP.Req do
   @type t :: %__MODULE__{req: term()}
 
   @impl true
-  def init(opts) do
+  def init(_name, opts) do
     if Code.ensure_loaded?(Req) do
       req =
         opts
@@ -51,23 +55,14 @@ defmodule TypeDB.HTTP.Req do
   @impl true
   def request(%__MODULE__{req: req}, method, url, headers, body, opts) do
     options =
-      [
-        method: method,
-        url: url,
-        headers: headers,
-        body: body || "",
-        receive_timeout: normalise_timeout(Keyword.get(opts, :timeout))
-      ]
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      [method: method, url: url, headers: headers]
+      |> put_body(body)
+      |> put_timeout(Keyword.get(opts, :timeout))
+      |> put_connect_timeout(req, Keyword.get(opts, :connect_timeout))
 
     case Req.request(req, options) do
       {:ok, %{status: status, headers: resp_headers, body: resp_body}} ->
-        {:ok,
-         %{
-           status: status,
-           headers: flatten_headers(resp_headers),
-           body: IO.iodata_to_binary(resp_body)
-         }}
+        {:ok, %{status: status, headers: flatten_headers(resp_headers), body: to_binary(resp_body)}}
 
       {:error, %{__exception__: true} = exception} ->
         {:error,
@@ -80,16 +75,35 @@ defmodule TypeDB.HTTP.Req do
     end
   end
 
-  defp normalise_timeout(:infinity), do: :infinity
-  defp normalise_timeout(nil), do: nil
-  defp normalise_timeout(timeout) when is_integer(timeout), do: timeout
+  # Req infers POST from the presence of a body, overriding an explicit
+  # `method: :get`. A bodyless request must therefore carry no :body key at all,
+  # not an empty string.
+  defp put_body(options, nil), do: options
+  defp put_body(options, body), do: Keyword.put(options, :body, IO.iodata_to_binary(body))
 
-  # Req >= 0.4 returns headers as a map of name => [values].
-  defp flatten_headers(headers) when is_map(headers) do
-    for {name, values} <- headers, value <- List.wrap(values), do: {String.downcase(name), value}
+  defp put_timeout(options, nil), do: options
+  defp put_timeout(options, timeout), do: Keyword.put(options, :receive_timeout, timeout)
+
+  defp put_connect_timeout(options, _req, nil), do: options
+
+  # Req merges per-request options *over* the base ones key by key, so setting
+  # :connect_options here would discard whatever was configured at init —
+  # including TLS options, silently turning off a pinned CA. The base is read
+  # back and merged instead.
+  defp put_connect_timeout(options, req, timeout) do
+    base = Map.get(req.options, :connect_options, [])
+    Keyword.put(options, :connect_options, Keyword.put_new(base, :timeout, timeout))
   end
 
-  defp flatten_headers(headers) when is_list(headers) do
-    for {name, value} <- headers, do: {String.downcase(to_string(name)), to_string(value)}
+  defp to_binary(body) when is_binary(body), do: body
+  defp to_binary(body) when is_list(body), do: IO.iodata_to_binary(body)
+  defp to_binary(nil), do: ""
+  # Req decodes some content types even with decode_body: false disabled upstream;
+  # anything non-binary is re-encoded so callers always see raw bytes.
+  defp to_binary(body), do: TypeDB.JSON.encode!(body)
+
+  # Req returns headers as a map of name => [values].
+  defp flatten_headers(headers) do
+    for {name, values} <- headers, value <- List.wrap(values), do: {String.downcase(name), value}
   end
 end

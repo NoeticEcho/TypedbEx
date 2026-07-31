@@ -66,13 +66,26 @@ defmodule TypeDB.Options do
   @doc """
   Extracts query options from a keyword list, returning the wire payload or `nil`
   when none were given.
-  """
-  @spec query_payload(keyword() | Query.t() | nil) :: map() | nil
-  def query_payload(nil), do: nil
-  def query_payload(%Query{} = options), do: encode(Map.from_struct(options), @query_keys)
 
-  def query_payload(opts) when is_list(opts),
-    do: opts |> Keyword.take(@query_keys) |> Map.new() |> encode(@query_keys)
+  `defaults` fills in options the caller did not set — used for the
+  connection-level `:answer_count_limit`.
+  """
+  @spec query_payload(keyword() | Query.t() | nil, keyword()) :: map() | nil
+  def query_payload(options, defaults \\ [])
+
+  def query_payload(nil, defaults), do: query_payload([], defaults)
+
+  def query_payload(%Query{} = options, defaults) do
+    options |> Map.from_struct() |> Enum.reject(&match?({_key, nil}, &1)) |> query_payload(defaults)
+  end
+
+  def query_payload(opts, defaults) when is_list(opts) do
+    defaults
+    |> Keyword.take(@query_keys)
+    |> Keyword.merge(Keyword.take(opts, @query_keys))
+    |> Map.new()
+    |> encode(@query_keys)
+  end
 
   @doc false
   @spec transaction_keys() :: [atom()]

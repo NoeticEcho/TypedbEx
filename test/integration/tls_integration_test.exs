@@ -35,8 +35,9 @@ defmodule TypeDB.TLSIntegrationTest do
 
   use ExUnit.Case, async: false
 
+  # Deliberately *not* tagged :integration: this suite needs its own TLS-enabled
+  # server, so `--include integration` must not drag it in.
   @moduletag :tls
-  @moduletag :integration
   @moduletag timeout: 60_000
 
   alias TypeDB.Error
@@ -63,14 +64,14 @@ defmodule TypeDB.TLSIntegrationTest do
   test "an untrusted certificate is rejected by default", context do
     # The whole point: no configuration is needed to be safe, only to be
     # permissive. The server's CA is not in the OS trust store.
-    conn = start_connection(context, http: {TypeDB.HTTP.Httpc, []}, max_retries: 0)
+    conn = start_connection(context, http: adapter_without_ca(), max_retries: 0)
 
     assert {:error, %Error{kind: :transport, message: message}} = TypeDB.health(conn)
     assert message =~ "Unknown CA" or message =~ "unknown_ca" or message =~ "certificate"
   end
 
   test "pinning the CA lets the whole API through", context do
-    conn = start_connection(context, http: {TypeDB.HTTP.Httpc, cacertfile: context.cacertfile})
+    conn = start_connection(context, http: adapter_with_ca(context.cacertfile))
 
     assert :ok = TypeDB.health(conn)
     assert {:ok, %{version: version}} = TypeDB.version(conn)
@@ -112,12 +113,29 @@ defmodule TypeDB.TLSIntegrationTest do
         conn =
           start_connection(context,
             url: wrong_host_url,
-            http: {TypeDB.HTTP.Httpc, cacertfile: context.cacertfile},
+            http: adapter_with_ca(context.cacertfile),
             max_retries: 0
           )
 
         assert {:error, %Error{kind: :transport, message: message}} = TypeDB.health(conn)
         assert message =~ "hostname_check_failed" or message =~ "handshake"
+    end
+  end
+
+  # The same guarantees must hold under every transport, so the CA is pinned in
+  # whichever way the adapter under test expects.
+  defp adapter_without_ca do
+    case TypeDB.Case.adapter() do
+      nil -> {TypeDB.HTTP.Finch, []}
+      {module, _opts} -> {module, []}
+    end
+  end
+
+  defp adapter_with_ca(cacertfile) do
+    case adapter_without_ca() do
+      {TypeDB.HTTP.Httpc, _} -> {TypeDB.HTTP.Httpc, cacertfile: cacertfile}
+      {TypeDB.HTTP.Finch, _} -> {TypeDB.HTTP.Finch, conn_opts: [transport_opts: [cacertfile: cacertfile]]}
+      {TypeDB.HTTP.Req, _} -> {TypeDB.HTTP.Req, connect_options: [transport_opts: [cacertfile: cacertfile]]}
     end
   end
 

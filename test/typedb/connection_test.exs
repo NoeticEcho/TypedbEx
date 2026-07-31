@@ -169,6 +169,40 @@ defmodule TypeDB.ConnectionTest do
     end
   end
 
+  describe "proactive token refresh" do
+    @tag stub_opts: [databases: ["social"], token_lifetime_seconds: 2, token_ttl_ms: 2_000]
+    test "renews before the token expires, so no request is ever rejected", %{conn: conn, stub: stub} do
+      # The token lives two seconds and the driver's margin is a quarter of that,
+      # so it should be replaced at ~1.5s without a single 401 on the wire.
+      calls = 30
+
+      for _ <- 1..calls do
+        assert {:ok, _} = TypeDB.Database.list(conn)
+        Process.sleep(100)
+      end
+
+      assert length(requests(stub, "/signin")) > 1, "expected the token to have been refreshed"
+
+      # One request on the wire per call: a 401 would have forced a second.
+      assert length(requests(stub, "/databases")) == calls
+    end
+
+    @tag stub_opts: [databases: ["social"], token_lifetime_seconds: 3600]
+    test "a long-lived token is minted once and reused", %{conn: conn, stub: stub} do
+      for _ <- 1..20, do: assert({:ok, _} = TypeDB.Database.list(conn))
+
+      assert length(requests(stub, "/signin")) == 1
+    end
+
+    test "a token with no readable lifetime falls back to reactive renewal", %{conn: conn, stub: stub} do
+      # The default stub token is not a JWT, so the driver cannot know when it
+      # expires and must simply use it until the server objects.
+      for _ <- 1..5, do: assert({:ok, _} = TypeDB.Database.list(conn))
+
+      assert length(requests(stub, "/signin")) == 1
+    end
+  end
+
   describe "token renewal under concurrency" do
     @tag stub_opts: [databases: ["social"], token_uses: 1]
     test "concurrent renewals coalesce into far fewer sign-ins than callers", %{conn: conn, stub: stub} do

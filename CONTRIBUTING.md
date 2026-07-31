@@ -35,6 +35,15 @@ mix dialyzer
 mix typedb.check          # validates priv/**/*.tql, needs the typeql-check CLI
 ```
 
+The suite runs against whichever transport `TYPEDB_TEST_ADAPTER` names, and CI
+runs all of them. Anything touching `lib/typedb/http/` should be checked the same
+way, because an adapter exercised only by its own unit tests is an adapter that
+is quietly broken:
+
+```shell
+for adapter in finch req httpc; do TYPEDB_TEST_ADAPTER=$adapter mix test; done
+```
+
 ## Fidelity to the server
 
 The stub in `test/support/` is only useful while it behaves like TypeDB. Where
