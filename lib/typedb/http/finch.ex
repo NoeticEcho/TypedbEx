@@ -138,14 +138,16 @@ defmodule TypeDB.HTTP.Finch do
   @impl true
   def terminate(%__MODULE__{owned?: false}), do: :ok
 
-  def terminate(%__MODULE__{name: name, owned?: true}) do
-    case Process.whereis(name) do
-      nil -> :ok
-      pid -> Supervisor.stop(pid, :normal, 5_000)
-    end
+  # The supervisor pid `Finch.start_link/1` returned, not `Process.whereis(name)`
+  # — under that name Finch registers its *Registry*, and stopping a registry
+  # leaves the supervisor to restart it, so the pool never actually goes away.
+  def terminate(%__MODULE__{owned?: true, supervisor: pid}) when is_pid(pid) do
+    Supervisor.stop(pid, :normal, 5_000)
   catch
     :exit, _ -> :ok
   end
+
+  def terminate(%__MODULE__{}), do: :ok
 
   @impl true
   def request(%__MODULE__{name: name, pool_timeout: pool_timeout}, method, url, headers, body, opts) do

@@ -84,8 +84,17 @@ defmodule TypeDB.HTTPTest do
       assert state.owned?
       assert is_pid(Process.whereis(state.name))
 
+      # The name registers Finch's *Registry*, not the supervisor that owns it,
+      # so terminate/1 has to stop the pid start_link returned — stopping the
+      # registry only gets it restarted.
+      assert is_pid(state.supervisor)
+      refute state.supervisor == Process.whereis(state.name)
+
       assert :ok = FinchAdapter.terminate(state)
-      assert Process.whereis(state.name) == nil
+      refute Process.alive?(state.supervisor)
+
+      Process.sleep(50)
+      assert Process.whereis(state.name) == nil, "the pool came back after terminate/1"
     end
 
     test "reuses an externally supplied pool without owning it" do
