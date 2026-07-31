@@ -14,5 +14,8 @@ erl_crash.dump
 # `typeql-check` drops this next to the working directory when a check fails.
 /typeql-check.FAILED
 
+# `mix hex.build` drops the package tarball in the project root.
+/typedb-*.tar
+
 # ExUnit's :tmp_dir tag writes here.
 /tmp/
