@@ -144,6 +144,13 @@ defmodule TypeDB.Transaction do
   earlier answer; `nil` leaves an optional column unbound. `TypeDB.Given` lists
   the accepted types and explains why the driver encodes them rather than
   forwarding raw JSON.
+
+  ## Raises
+
+  A `:given_rows` value the driver cannot encode raises `TypeDB.Error` with kind
+  `:config`. That happens while the request is being built, so there is no
+  request to return an error for. Everything the *server* rejects comes back as
+  `{:error, %TypeDB.Error{}}` as usual.
   """
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do

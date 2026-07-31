@@ -52,25 +52,49 @@ defmodule TypeDB.Duration do
   @doc """
   Renders the duration back to ISO-8601.
 
-  When the duration was parsed from the wire, the original string is returned
-  verbatim.
+  A duration that came off the wire renders as the exact string TypeDB sent, so
+  nanosecond precision and TypeDB's own choice of units survive the round trip —
+  but only while `raw` still describes the components. Edit any of `:months`,
+  `:days` or `:nanos` and the components win, because otherwise a
+  read-modify-write would silently send the *original* value back.
+
+  Raises `TypeDB.Error` for a negative component. TypeDB has no negative
+  durations: TypeQL's grammar rejects `P-1Y`, `-P1Y` and every other form, and
+  `P-1Y-2M` is misread as a *type label*, so the server answers "Type label
+  'P-1Y-2M' not found". Failing here says what is actually wrong. Note this is a
+  deliberate divergence from Elixir's own `Duration`, which does render
+  `"P-14M"` — that type does calendar arithmetic, where a negative duration is
+  meaningful; this one is a wire value for a database that has no such thing.
   """
   @spec to_iso8601(t()) :: String.t()
-  def to_iso8601(%__MODULE__{raw: raw}) when is_binary(raw), do: raw
-
-  # ISO-8601 has no per-component sign, so a negative component would render as
-  # "P-1Y-2M" — which this module's own parse/1 rejects, and which TypeDB would
-  # reject too. Only reachable from a hand-built struct, since TypeDB durations
-  # are non-negative; raising says so instead of emitting something unusable.
-  def to_iso8601(%__MODULE__{months: months, days: days, nanos: nanos})
-      when months < 0 or days < 0 or nanos < 0 do
-    raise ArgumentError,
-          "cannot render a negative duration as ISO-8601: " <>
-            "months: #{months}, days: #{days}, nanos: #{nanos}. " <>
-            "TypeDB durations are non-negative."
+  def to_iso8601(%__MODULE__{raw: raw} = duration) when is_binary(raw) do
+    # `raw` is set by `parse/1` on every duration the driver hands back, so
+    # returning it unconditionally discarded every edit a caller made — with no
+    # error, and no way to notice short of reading the database afterwards.
+    if describes?(raw, duration), do: raw, else: render(duration)
   end
 
-  def to_iso8601(%__MODULE__{months: months, days: days, nanos: nanos}) do
+  def to_iso8601(%__MODULE__{} = duration), do: render(duration)
+
+  # Whether the wire string still says what the components say.
+  defp describes?(raw, %__MODULE__{months: months, days: days, nanos: nanos}) do
+    case do_parse(raw) do
+      {:ok, %__MODULE__{months: ^months, days: ^days, nanos: ^nanos}} -> true
+      _other -> false
+    end
+  end
+
+  defp render(%__MODULE__{months: months, days: days, nanos: nanos})
+       when months < 0 or days < 0 or nanos < 0 do
+    raise TypeDB.Error.new(
+            :config,
+            "cannot render a negative duration as ISO-8601 " <>
+              "(months: #{months}, days: #{days}, nanos: #{nanos}). " <>
+              "TypeDB has no negative durations — TypeQL's grammar rejects every form of one."
+          )
+  end
+
+  defp render(%__MODULE__{months: months, days: days, nanos: nanos}) do
     date_part =
       [{div(months, 12), "Y"}, {rem(months, 12), "M"}, {days, "D"}]
       |> Enum.reject(fn {value, _} -> value == 0 end)

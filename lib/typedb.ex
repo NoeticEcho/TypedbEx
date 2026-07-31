@@ -115,6 +115,17 @@ defmodule TypeDB do
     * plus all query and transaction options from `TypeDB.Options`, and
       `:timeout`.
 
+  ## Raises
+
+  Unlike the rest of this module, `query/4` has two failure paths. Anything the
+  *server* rejects comes back as `{:error, %TypeDB.Error{}}`; anything rejected
+  before the request is built raises, because there is no request to fail:
+
+    * `ArgumentError` for an invalid `:transaction_type` — that is a literal in
+      your source, not data.
+    * `TypeDB.Error` with kind `:config` for a `:given_rows` value the driver
+      cannot encode, including a negative `TypeDB.Duration`.
+
   ## Examples
 
       TypeDB.query(conn, "social", "match $p isa person; select $p;",

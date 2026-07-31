@@ -82,15 +82,38 @@ defmodule TypeDB.TemporalTest do
           {"nanos", %Duration{nanos: -1}}
         ] do
       test "refuses to render a negative #{label} rather than emitting nonsense" do
-        assert_raise ArgumentError, ~r/negative duration/, fn ->
+        # TypeDB.Error, not ArgumentError: this is on the wire path via
+        # TypeDB.Given.encode/1, so it surfaces out of TypeDB.query/4, and
+        # everything that comes out of there is a TypeDB.Error.
+        assert_raise TypeDB.Error, ~r/negative duration/, fn ->
           Duration.to_iso8601(unquote(Macro.escape(duration)))
         end
       end
     end
 
-    test "a negative duration that came off the wire is still returned verbatim" do
-      # `raw` wins, because whatever TypeDB sent is what TypeDB will accept back.
-      assert Duration.to_iso8601(%Duration{months: -14, raw: "P-1Y-2M"}) == "P-1Y-2M"
+    test "a negative raw that no longer describes the components does not survive" do
+      # The components are what the caller last said; `raw` is stale.
+      assert_raise TypeDB.Error, fn ->
+        Duration.to_iso8601(%Duration{months: -14, raw: "P-1Y-2M"})
+      end
+    end
+
+    test "an unedited duration renders as the exact string TypeDB sent" do
+      # Round-tripping the wire string is what preserves nanosecond precision
+      # and TypeDB's own choice of units.
+      for wire <- ["P1Y2M3DT4H5M6.123456789S", "PT0.5S", "P1M"] do
+        assert wire |> Duration.parse() |> Duration.to_iso8601() == wire
+      end
+    end
+
+    test "editing a component wins over the wire string it came from" do
+      # Otherwise a read-modify-write silently writes the ORIGINAL value back.
+      original = Duration.parse("P1Y")
+      assert original.months == 12
+
+      assert Duration.to_iso8601(%{original | months: 24}) == "P2Y"
+      assert Duration.to_iso8601(%{original | days: 3}) == "P1Y3D"
+      assert Duration.to_iso8601(%{original | nanos: 1_500_000_000}) == "P1YT1.5S"
     end
   end
 
