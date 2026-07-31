@@ -1,8 +1,10 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
+All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 ## [0.1.0] - 2026-07-31
 
@@ -21,7 +23,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.Server` — health, version and cluster membership.
 - `TypeDB.Transaction` — explicit `:read`, `:write` and `:schema` transactions
   with `query/3`, `analyze/3`, `commit/1`, `rollback/1` and idempotent `close/1`.
-- `TypeDB.Answer` — `Ok`, `ConceptRows` and `ConceptDocuments`, all `Enumerable`.
+- `TypeDB.Answer` — `Ok`, `ConceptRows` and `ConceptDocuments`; the latter two
+  are `Enumerable`.
 - `TypeDB.ConceptRow` — `Access`-backed rows, plus `value/2`, `typed_value/2` and
   `to_map/1`.
 - `TypeDB.Concept` — structs for entities, relations, attributes, values and
@@ -69,4 +72,5 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/v0.1.0

@@ -64,6 +64,65 @@ defmodule TypeDB.APIConventionTest do
     end
   end
 
+  describe "the TypeDB delegates" do
+    # `TypeDB.version/1` was specced `{:ok, map()}` while `TypeDB.Server.version/1`
+    # promised a concrete two-key map — so the convenience delegate was strictly
+    # less useful than the thing it delegates to, and nothing noticed. A
+    # defdelegate is the same function under another name; its spec should say
+    # the same thing.
+    @delegates [
+      {TypeDB, :health, 1, TypeDB.Server, :health},
+      {TypeDB, :health!, 1, TypeDB.Server, :health!},
+      {TypeDB, :version, 1, TypeDB.Server, :version},
+      {TypeDB, :version!, 1, TypeDB.Server, :version!},
+      {TypeDB, :databases, 1, TypeDB.Database, :list},
+      {TypeDB, :databases!, 1, TypeDB.Database, :list!},
+      {TypeDB, :create_database, 2, TypeDB.Database, :create},
+      {TypeDB, :create_database!, 2, TypeDB.Database, :create!},
+      {TypeDB, :delete_database, 2, TypeDB.Database, :delete},
+      {TypeDB, :delete_database!, 2, TypeDB.Database, :delete!}
+    ]
+
+    test "each one's return type matches the function it delegates to" do
+      mismatched =
+        for {module, name, arity, target_module, target_name} <- @delegates,
+            returns = return_type(module, name, arity),
+            target_returns = return_type(target_module, target_name, arity),
+            returns != target_returns,
+            do:
+              "#{inspect(module)}.#{name}/#{arity} returns #{returns}, but " <>
+                "#{inspect(target_module)}.#{target_name}/#{arity} returns #{target_returns}"
+
+      assert mismatched == [], Enum.join(mismatched, "\n")
+    end
+
+    test "every delegate in the list still exists" do
+      for {module, name, arity, target_module, target_name} <- @delegates do
+        assert function_exported?(module, name, arity)
+        assert function_exported?(target_module, target_name, arity)
+      end
+    end
+
+    # Compared as rendered text, with module qualifiers stripped: the same type
+    # renders as `version()` when read from the module that defines it and
+    # `TypeDB.Server.version()` when read from the module that refers to it, and
+    # neither spelling is the interesting difference. `map()` versus `version()`
+    # is.
+    defp return_type(module, name, arity) do
+      {:ok, specs} = Code.Typespec.fetch_specs(module)
+
+      {_signature, [spec | _]} = Enum.find(specs, fn {sig, _} -> sig == {name, arity} end)
+
+      name
+      |> Code.Typespec.spec_to_quoted(spec)
+      |> Macro.to_string()
+      |> String.split("::", parts: 2)
+      |> List.last()
+      |> String.trim()
+      |> String.replace(~r/(?:[A-Z][A-Za-z0-9_]*\.)+([a-z_][A-Za-z0-9_]*)\(/, "\\1(")
+    end
+  end
+
   # A spec whose return type mentions the atom :error — which, in this codebase,
   # means `{:error, TypeDB.Error.t()}`. Remote types such as `GenServer.on_start/0`
   # are opaque here and are therefore not treated as fallible, which is what we

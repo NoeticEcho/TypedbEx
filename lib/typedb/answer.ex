@@ -15,17 +15,23 @@ defmodule TypeDB.Answer do
   Every answer carries `query_type` (`:read`, `:write` or `:schema`), which is
   what TypeDB determined the query to be — not what you asked for.
 
-      case TypeDB.query!(conn, "social", "match $p isa person; select $p;") do
+      query = "match $p isa person; select $p;"
+
+      case TypeDB.query!(conn, "social", query, transaction_type: :read) do
         %TypeDB.Answer.ConceptRows{rows: rows} -> length(rows)
         %TypeDB.Answer.Ok{} -> 0
       end
 
   `ConceptRows` and `ConceptDocuments` are `Enumerable`, so they can be piped
-  straight into `Enum` and `Stream`:
+  straight into `Enum` and `Stream`. Select an *attribute* if you want values —
+  `typed_value/2` on an entity answers `nil`, because an entity is a thing with
+  an identity rather than a value:
 
       conn
-      |> TypeDB.query!("social", "match $p isa person; select $p;")
-      |> Enum.map(&TypeDB.ConceptRow.typed_value(&1, "p"))
+      |> TypeDB.query!("social", "match $p isa person, has name $name; select $name;",
+           transaction_type: :read)
+      |> Enum.map(&TypeDB.ConceptRow.typed_value(&1, "name"))
+      #=> ["Alice", "Bob"]
   """
 
   alias TypeDB.{ConceptRow, Error}

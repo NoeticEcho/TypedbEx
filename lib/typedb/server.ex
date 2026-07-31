@@ -39,8 +39,10 @@ defmodule TypeDB.Server do
 
   Unauthenticated.
   """
-  @spec version(Connection.t()) ::
-          {:ok, %{distribution: String.t(), version: String.t()}} | {:error, Error.t()}
+  @typedoc "What TypeDB reports about itself."
+  @type version :: %{distribution: String.t(), version: String.t()}
+
+  @spec version(Connection.t()) :: {:ok, version()} | {:error, Error.t()}
   def version(conn) do
     case Connection.request(conn, :get, "/version", authenticated: false) do
       {:ok, %{"distribution" => distribution, "version" => version}} ->
@@ -57,7 +59,7 @@ defmodule TypeDB.Server do
   @doc """
   Returns the server's distribution and version, raising on failure.
   """
-  @spec version!(Connection.t()) :: %{distribution: String.t(), version: String.t()}
+  @spec version!(Connection.t()) :: version()
   def version!(conn), do: unwrap!(version(conn))
 
   @doc """

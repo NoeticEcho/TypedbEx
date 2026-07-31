@@ -16,6 +16,12 @@ encoding, token renewal and error mapping are all exercised without one.
 ```shell
 docker compose up -d
 TYPEDB_INTEGRATION_URL=http://localhost:8000 mix test --include integration
+
+# Opt-in suites that an ordinary run skips:
+#   TYPEDB_SLOW_TESTS=1              tests that wait out real timeouts
+#   TYPEDB_SHORT_TOKEN_URL=...       token renewal, see the moduledoc of
+#                                    TypeDB.TokenRenewalIntegrationTest
+#   TYPEDB_TLS_URL=...               the TLS suite, see TypeDB.TLSIntegrationTest
 ```
 
 The integration suite creates and drops its own databases, so it is safe against
@@ -55,19 +61,57 @@ transaction succeeds, while committing one does not.
 If you change the stub to make a test pass, check the real server first and
 record what you found.
 
+## Versioning
+
+This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+
+It is in `0.x`, which under SemVer means the public API may change in any
+release. That is an accurate description of where it stands: the driver is
+tested against a live TypeDB 3.12.1 and used as though it were finished, but no
+application has yet met the API, and a shape that has never had a user is not a
+shape worth freezing. `1.0.0` is the promise that it is, and it will be made
+once the API has survived real use rather than before.
+
+Until then, a **minor** bump carries anything a `1.x` would call breaking, and a
+**patch** carries anything it would not.
+
+The public API is every documented module and function on
+[hexdocs](https://hexdocs.pm/typedb). Modules marked `@moduledoc false` and
+functions marked `@doc false` are internal: they are callable, but they are not
+promises, and they change in patch releases.
+
+Breaking, for this project, includes all of:
+
+- removing or renaming a public function, module, struct field, or `:kind` of
+  `TypeDB.Error`
+- adding a required argument, or changing what a function returns on success
+- turning something that returned `{:error, _}` into something that raises,
+  or the reverse
+- a new mandatory dependency, or raising the floor of an existing one
+- raising the minimum Elixir or OTP version
+- changing a default — `:transaction_type`, `:max_retries`, the default adapter
+
+Widening an upstream constraint (`~> 0.23` to `~> 0.23 or ~> 1.0`) is a patch,
+and is done *after* testing against the new version, never in anticipation.
+
 ## Releasing
 
-1. Update `@version` in `mix.exs` and add a `CHANGELOG.md` entry.
-2. `mix hex.build` and read the file list.
-3. Tag `vX.Y.Z` and push it. The release workflow verifies the tag against
-   `mix.exs`, runs the tests, and publishes to hex.pm using the `HEX_API_KEY`
-   secret.
+1. Bump `@version` in `mix.exs` per the rules above.
+2. Add the matching `## [X.Y.Z]` section to `CHANGELOG.md` and its link at the
+   bottom. The release workflow refuses to publish a tag the CHANGELOG does not
+   document.
+3. Update the version in the README's installation snippet.
+4. `mix hex.build` and read the file list.
+5. Tag `vX.Y.Z` and push it.
 
-To publish by hand instead:
+The release workflow then re-runs the gate — format, `--warnings-as-errors`,
+credo, dialyzer, and the suite through all three adapters — checks the tag
+against `mix.exs` and the CHANGELOG, publishes to hex.pm with the `HEX_API_KEY`
+secret, and creates the GitHub Release. Documentation is built by `ex_doc` and
+published to hexdocs.pm as part of `mix hex.publish`.
+
+To publish by hand instead, run the gate yourself first, then:
 
 ```shell
 mix hex.publish
 ```
-
-Documentation is built by `ex_doc` and published to hexdocs.pm as part of that
-step.

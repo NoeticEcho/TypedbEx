@@ -13,11 +13,8 @@ defmodule TypeDB.HTTP.Req do
       # mix.exs
       {:req, "~> 0.7"}
 
-      # wherever you start the driver
-      TypeDB.start_link(
-        url: "http://localhost:8000",
-        http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
-      )
+      # then, in the connection's options
+      http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
 
   All options are forwarded to `Req.new/1`, so Finch pools, connect options and
   transport tuning are configured the Req way. The adapter pins three of them:

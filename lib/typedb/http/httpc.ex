@@ -30,12 +30,9 @@ defmodule TypeDB.HTTP.Httpc do
   `:public_key.cacerts_get/0`, hostname checking via
   `:public_key.pkix_verify_hostname_match_fun(:https)`, and TLS 1.2/1.3.
 
-  To pin a private CA:
+  To pin a private CA, in the connection's options:
 
-      TypeDB.start_link(
-        url: "https://typedb.internal:8000",
-        http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/private-ca.pem"}
-      )
+      http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/private-ca.pem"}
   """
 
   @behaviour TypeDB.HTTP

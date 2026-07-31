@@ -30,6 +30,8 @@ defmodule TypeDB do
   `query/4` runs a single query in its own transaction — TypeDB opens it, runs
   the query, and commits or closes it in one round trip. Reads never commit;
   writes and schema changes commit by default, which `commit: false` turns off.
+  Every function takes the connection's registered name as its first argument;
+  `conn` below is that name, `TypeDB` unless you chose another.
 
       TypeDB.query(conn, "social", "insert $p isa person, has name 'Alice';")
 
@@ -56,6 +58,10 @@ defmodule TypeDB do
   `{:ok, _} | {:error, %TypeDB.Error{}}` form and a `!` form that raises.
   `TypeDB.Error` carries TypeDB's own error `:code`, which is what you want to
   branch on.
+
+  The one exception is `transaction/5`: it returns whatever your block returned,
+  so its `{:error, _}` may be your own value rather than an exception, and a
+  bang form would have to guess whether to raise it.
 
   ## Concurrency
 
@@ -106,8 +112,14 @@ defmodule TypeDB do
   ## Options
 
     * `:transaction_type` — `:read`, `:write` or `:schema`. Defaults to
-      `:schema`, which accepts every kind of query. Narrow it to `:read` to have
-      the server reject an accidental write.
+      `:schema`, the only type that accepts every kind of query.
+
+      **A `:schema` transaction takes TypeDB's exclusive, database-wide schema
+      lock for the duration of the call.** One-shot queries left on the default
+      therefore serialise against each other, and against anything else holding
+      that lock. Pass `transaction_type: :read` for reads and `:write` for data
+      changes — both are concurrent — and leave the default to `define` and
+      `undefine`. Narrowing also has the server reject an accidental write.
     * `:commit` — whether to commit a write or schema query. Defaults to `true`.
       Read queries never commit.
     * `:given_rows` — input rows for the query's `given` stage; see
@@ -289,14 +301,14 @@ defmodule TypeDB do
   @doc """
   Returns the server distribution and version. See `TypeDB.Server.version/1`.
   """
-  @spec version(conn()) :: {:ok, map()} | {:error, Error.t()}
+  @spec version(conn()) :: {:ok, Server.version()} | {:error, Error.t()}
   defdelegate version(conn), to: Server
 
   @doc """
   Returns the server distribution and version, raising on failure.
   See `TypeDB.Server.version!/1`.
   """
-  @spec version!(conn()) :: map()
+  @spec version!(conn()) :: Server.version()
   defdelegate version!(conn), to: Server
 
   @doc """

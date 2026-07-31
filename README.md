@@ -30,6 +30,10 @@ end
 Requires Elixir 1.18+ and OTP 25+. Developed and tested on Linux; the driver is
 pure Elixir, so it runs on anything the BEAM does.
 
+Versioned per [SemVer](https://semver.org/spec/v2.0.0.html). While in `0.x`, a
+minor bump may change the public API and a patch will not — see
+[CONTRIBUTING](CONTRIBUTING.md#versioning) for exactly what counts as breaking.
+
 [telemetry](https://hex.pm/packages/telemetry) is the only hard dependency — one
 small application, no dependencies of its own. Every transport's dependency is
 optional, so your footprint follows the transport you pick:
@@ -55,7 +59,7 @@ config :typedb, :json_codec, TypeDB.JSON.Jason
 Start a TypeDB server:
 
 ```shell
-docker compose up -d     # or: typedb server
+typedb server            # or, from a clone of this repository: docker compose up -d
 ```
 
 Add a connection to your supervision tree:
@@ -71,25 +75,46 @@ children = [
 Supervisor.start_link(children, strategy: :one_for_one)
 ```
 
-Define a schema, insert some data, read it back:
+`start_link/1` validates the options and starts the process; it does **not**
+contact the server. A wrong password or an unreachable host starts cleanly and
+fails on the first request instead, which is deliberate — the driver signs in
+lazily, so your application boots whether or not TypeDB is up yet. If you would
+rather find out at boot, call `TypeDB.Server.health/1` yourself once the
+supervisor is running.
+
+Run several connections by giving each a name, which is also how you address it:
 
 ```elixir
-TypeDB.create_database(TypeDB, "social")
+children = [
+  {TypeDB, name: :analytics, url: "http://analytics:8000", username: "admin", password: pw},
+  {TypeDB, name: :ingest, url: "http://ingest:8000", username: "admin", password: pw}
+]
 
-TypeDB.query!(TypeDB, "social", """
+TypeDB.query(:analytics, "events", "match $e isa event;", transaction_type: :read)
+```
+
+Define a schema, insert some data, read it back. `conn` below is a connection
+name — `TypeDB` is the default one:
+
+```elixir
+conn = TypeDB
+
+TypeDB.create_database(conn, "social")
+
+TypeDB.query!(conn, "social", """
   define
     attribute name, value string;
     attribute age, value integer;
     entity person, owns name, owns age;
 """)
 
-TypeDB.query!(TypeDB, "social", """
+TypeDB.query!(conn, "social", """
   insert
     $alice isa person, has name "Alice", has age 30;
     $bob isa person, has name "Bob", has age 41;
-""")
+""", transaction_type: :write)
 
-TypeDB.query!(TypeDB, "social", """
+TypeDB.query!(conn, "social", """
   match $p isa person, has name $name;
   select $name;
 """, transaction_type: :read)
@@ -111,6 +136,12 @@ the query, and commits or closes it, all in a single round trip.
 Reads never commit. Writes and schema changes commit by default; pass
 `commit: false` for a dry run.
 
+`:transaction_type` defaults to `:schema`, because that is the only type that
+accepts every kind of query — including `define`. It is also the type that takes
+an exclusive, database-wide lock (see the table below), so **pass `:read` or
+`:write` explicitly** for anything that is not a schema change. Left on the
+default, one-shot queries serialise against each other.
+
 ### Multi-statement transactions
 
 ```elixir
@@ -123,6 +154,12 @@ end)
 
 The block commits on success, and rolls back if it returns `{:error, _}`, raises,
 throws or exits. A `:read` block is closed rather than committed.
+
+The commit itself can fail after your block succeeded — most often because a
+concurrent `:write` transaction touched the same data — and that surfaces as
+`{:error, %TypeDB.Error{}}` from `transaction/5`. Retry the whole block if you
+want to survive it; `:max_retries` does not cover this, as it retries *transport*
+failures on requests that never reached the server.
 
 For a commit point that isn't lexically scoped, drive it yourself with
 `TypeDB.Transaction.open/4`, `commit/1`, `rollback/1` and `close/1`.
@@ -267,13 +304,24 @@ TypeDB.User.create(conn, "alice", password)      # 400 USC2 if alice already exi
 TypeDB.User.set_password(conn, "alice", new_password)
 TypeDB.User.delete(conn, "alice")
 
+TypeDB.Database.get(conn, "social")              # 404 if it does not exist
+TypeDB.Database.exists?(conn, "social")
+TypeDB.Database.create_if_not_exists(conn, "social")
+TypeDB.Database.type_schema(conn, "social")      # types only, without functions
+
+TypeDB.User.get(conn, "alice")
+TypeDB.User.exists?(conn, "alice")
+
 TypeDB.Server.health(conn)                       # unauthenticated readiness probe
 TypeDB.Server.version(conn)
+TypeDB.Server.servers(conn)                      # cluster membership
 ```
 
 Note the asymmetry, which is TypeDB's own: creating a database that already
-exists succeeds, creating a user that already exists does not. Use
-`TypeDB.User.exists?/2` first if you need the idempotent form.
+exists succeeds, creating a user that already exists does not.
+`TypeDB.Database.create_if_not_exists/2` states that intent explicitly for
+databases and also copes with a server that rejects the duplicate; for users,
+check `TypeDB.User.exists?/2` first.
 
 ## Errors
 
@@ -298,8 +346,10 @@ on that, not on messages.
 Every function that can fail also has a `!` form that returns the value and
 raises `TypeDB.Error` instead — `TypeDB.Database.list!/1`, `TypeDB.User.create!/3`,
 `TypeDB.Transaction.commit!/1` and so on. The one exception is
-`TypeDB.transaction/5`, which returns whatever your block returned and so has no
-error of its own to raise.
+`TypeDB.transaction/5`, which returns whatever your block returned — except that
+a `:write` or `:schema` block that succeeded but whose *commit* failed returns
+`{:error, %TypeDB.Error{}}`. Because that error can be indistinguishable from one
+your own block returned, there is no `!` form to decide what to raise.
 
 ## Configuration
 
@@ -404,7 +454,7 @@ one-shot queries, and query analysis.
 ```shell
 mix deps.get
 mix test                              # unit tests, no server required
-docker compose up -d                  # TypeDB 3.12.1 on :8000
+docker compose up -d                  # TypeDB 3.12.1 on :8000, from a clone
 TYPEDB_INTEGRATION_URL=http://localhost:8000 mix test --include integration
 ```
 
@@ -413,16 +463,23 @@ server that speaks the TypeDB API — so transport, encoding and error mapping a
 exercised without a database. The integration suite runs the same paths against a
 real TypeDB server.
 
-Two further opt-in suites cover things an ordinary run never reaches:
+Two further opt-in suites cover things an ordinary run never reaches. Both live
+in the [repository](https://github.com/NoeticEcho/TypedbEx/tree/main/test/integration)
+rather than in the published package, and each module's doc carries the exact
+command to stand up the server it needs:
 
-- `TypeDB.TLSIntegrationTest` — untrusted certificate rejected, pinned CA
-  accepted, hostname mismatch refused, against a server started with
-  `--server.encryption.enabled`.
-- `TypeDB.TokenRenewalIntegrationTest` — 200-way bursts, concurrent writes and a
-  long transaction, all straddling token expiry, against a server started with
-  `--server.authentication.token-expiration-seconds 5`.
+- [`TypeDB.TLSIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/tls_integration_test.exs)
+  — untrusted certificate rejected, pinned CA accepted, hostname mismatch
+  refused, against a server started with `--server.encryption.enabled`.
+- [`TypeDB.TokenRenewalIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/token_renewal_integration_test.exs)
+  — 200-way bursts, concurrent writes and a long transaction, all straddling
+  token expiry, against a server started with
+  `--server.authentication.token-expiration-seconds 5`. Set
+  `TYPEDB_SHORT_TOKEN_URL` to run it; without that it reports as skipped.
 
-Each module's doc carries the exact commands to stand up the server it needs.
+`TYPEDB_SLOW_TESTS=1` additionally runs the tests that wait out real timeouts,
+and `TYPEDB_TEST_ADAPTER=finch|req|httpc` runs the whole suite through one
+transport. CI runs all of them.
 
 ## License
 

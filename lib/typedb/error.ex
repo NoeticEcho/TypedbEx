@@ -46,7 +46,22 @@ defmodule TypeDB.Error do
 
   defexception [:kind, :message, :code, :status, :reason, :body]
 
-  @doc false
+  @doc """
+  Builds an error.
+
+  Public because `TypeDB.HTTP` is a public extension point and `c:TypeDB.HTTP.request/6`
+  is required to return one of these. Application code should be matching on
+  errors, not constructing them.
+
+      TypeDB.Error.new(:transport, "connection refused", reason: :econnrefused)
+
+  ## Options
+
+    * `:code` — TypeDB's own error code, for `:server` errors
+    * `:status` — the HTTP status
+    * `:reason` — the underlying term, whatever it was
+    * `:body` — the response body that could not be understood
+  """
   @spec new(kind(), String.t(), keyword()) :: t()
   def new(kind, message, opts \\ []) do
     %__MODULE__{

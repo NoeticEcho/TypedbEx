@@ -10,9 +10,9 @@ defmodule TypeDB.HTTP do
   | `TypeDB.HTTP.Req` | Req, over Finch | your app already configures HTTP through Req |
   | `TypeDB.HTTP.Httpc` | OTP's `:httpc` | you must run on OTP alone |
 
-  Select one when starting a connection:
+  Select one with the `:http` option when starting a connection:
 
-      TypeDB.start_link(url: "http://localhost:8000", http: {TypeDB.HTTP.Req, []})
+      http: {TypeDB.HTTP.Req, []}
 
   ## Why Finch is the default
 
@@ -25,16 +25,33 @@ defmodule TypeDB.HTTP do
   | 200 | 77 req/s, p50 2477ms | 1981 req/s, p50 19ms |
 
   `:httpc` does not degrade gracefully — throughput *falls* as concurrency rises,
-  and tail latency reaches seconds. It remains supported, because running with no
-  dependencies is sometimes worth that price, but it should be a deliberate
-  choice.
+  and tail latency reaches seconds. It remains supported, because running on OTP
+  alone is sometimes worth that price, but it should be a deliberate choice.
 
   ## Implementing an adapter
+
+  Four callbacks, two of them optional, and the optional two are the ones worth
+  reading about.
 
   `c:init/2` runs once, inside the connection process, and may start pools or
   register profiles. Its return value is passed to every `c:request/6`, which is
   invoked **in the calling process** — adapters must therefore be safe to call
-  concurrently from many processes.
+  concurrently from many processes. `c:request/6` must return
+  `{:ok, response}` or `{:error, TypeDB.Error.t()}`; see `TypeDB.Error.new/3`
+  for building one. Raising is contained rather than fatal, but it costs you the
+  error kind, so returning is better.
+
+  `c:owner/1` is optional and you almost certainly want it. Return the process
+  your adapter cannot work without — a pool, a connection manager — and the
+  connection links itself to it and stops when it dies, so a supervisor rebuilds
+  both together. Return `nil` if there is no such process, as
+  `TypeDB.HTTP.Httpc` does. Omit the callback entirely and your pool can die
+  while the connection lives on, answering every later request with the same
+  failure and never being restarted.
+
+  `c:terminate/1` is optional and runs when the connection stops. Release
+  anything `c:init/2` acquired. Do not rely on it for a pool you started *and*
+  reported through `c:owner/1` — the link already takes that down with you.
   """
 
   @type method :: :get | :post | :put | :delete

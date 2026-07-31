@@ -96,9 +96,23 @@ defmodule TypeDB.ConceptRow do
   @doc """
   Returns the row as a plain map of variable name to wire value.
 
-  Handy for turning attribute-only projections straight into structs:
+  The keys are **strings** — the query's own variable names, exactly as TypeDB
+  sent them back.
 
-      row |> TypeDB.ConceptRow.to_map() |> then(&struct(Person, &1))
+  That matters if you are reaching for `Kernel.struct/2`, which ignores keys
+  that are not atoms naming a field: handed a string-keyed map it returns the
+  struct's defaults and reports nothing, so the conversion silently produces a
+  struct full of `nil`s. Convert the keys first:
+
+      row
+      |> TypeDB.ConceptRow.to_map()
+      |> Map.new(fn {variable, value} -> {String.to_existing_atom(variable), value} end)
+      |> then(&struct(Person, &1))
+
+  `String.to_existing_atom/1` rather than `String.to_atom/1` so a query variable
+  cannot grow the atom table; the struct's own fields already exist as atoms
+  wherever `Person` is loaded. It raises `ArgumentError` for a variable that
+  does not name one, which is the failure you want over a silent `nil`.
   """
   @spec to_map(t()) :: %{optional(String.t()) => term()}
   def to_map(%__MODULE__{data: data}) do
