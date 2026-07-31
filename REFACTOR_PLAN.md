@@ -235,9 +235,14 @@ leave the connection alive and usable, with the fault named in the error. Plus t
 - If a step breaks the suite and cannot be fixed in two or three attempts, I will revert it, mark it
   **blocked** here with what went wrong, and move to the next.
 
-## What I need from you
+## What I needed from you — answered
 
-1. **Step 9** — bang variants: add the ~15 missing functions (my recommendation) or narrow the docs?
-2. **Step 12** — drop the documented `:closed` error kind (my recommendation) or implement
-   client-side transaction state to produce it?
-3. Anything in `AUDIT.md` you want me to leave alone.
+1. **Step 9** — bang variants: **add them** (option a). Done.
+2. **Step 12** — the `:closed` error kind: **drop it**. Done.
+3. Nothing was ruled out of scope.
+
+## Outcome
+
+All fifteen steps are complete; none was blocked, none was reverted. Each was committed on its own
+after passing the gate. See the "Status after the refactor" section of `AUDIT.md` for the
+finding-to-commit mapping and the three judgement calls left open for you.

@@ -7,6 +7,11 @@ line — the reproduction script is named where one exists.
 
 Duplicates reported by more than one auditor have been merged.
 
+> **All findings below are fixed.** The refactor ran as `REFACTOR_PLAN.md` sequenced it, in fifteen
+> commits from `0e5b005` to `babcbe3`. See [Status after the refactor](#status-after-the-refactor) at
+> the end for what changed where, what was found along the way, and what is left for you to decide.
+> The findings are kept in their original wording so the fixes can be checked against them.
+
 ## Reference: what the driver must do
 
 Taken from README.md, CONTRIBUTING.md, the moduledocs and mix.exs.
@@ -229,6 +234,69 @@ does not — only token minting), and assorted style preferences.
 
 ---
 
-## Status
+## Status after the refactor
 
-Nothing has been changed yet. `REFACTOR_PLAN.md` sequences the work.
+Audited at `b96ae98`; refactor executed in fifteen commits, `0e5b005` … `babcbe3`. **All 31 findings
+are fixed** — the 28 from the audit plus three found while executing (C3, and the two extra stub
+inaccuracies folded into M9).
+
+Every step ran the same gate before being committed: `mix format --check-formatted`,
+`mix compile --warnings-as-errors`, `mix test` under all three HTTP adapters, `mix credo --strict`,
+`mix dialyzer`, and the integration suite against a live TypeDB 3.12.1. Final state: **307 unit tests
+× 3 adapters, 346 with integration**, credo clean, dialyzer clean.
+
+### Fixed
+
+| Finding | Commit | What changed |
+| --- | --- | --- |
+| C1 | `0e5b005` | Finch pools are named per *instance*, so a restarted connection cannot adopt its predecessor's corpse. |
+| C2 | `aeb4df6` | The connection links to the adapter's owning process and stops when it dies, so a supervisor rebuilds both. |
+| M1 | `5d40738` | `Enumerable.slice/1` returns the backing list instead of delegating to `Enumerable.List`, which sent `Enum` into a reduce that could not take the struct. `Enum.at/2` and `Enum.slice/2` work on both answer types. |
+| M2 | `ad44ee1` | `:connect_timeout` reaches Mint through the pool's `transport_opts`, where it is actually read. Measured against a black hole: 5040 ms → 1002 ms for a 1000 ms budget. |
+| M3, M4 | `b15b8aa` | Every adapter call goes through fault containment: a raise, throw, exit or nonsense return becomes a `%TypeDB.Error{}`. Pool exhaustion classifies as `:timeout`. |
+| M5 | `2269065` | A renewal that overruns returns `%TypeDB.Error{kind: :timeout}` instead of exiting the caller, and the call budget is derived from what a sign-in costs rather than from the per-request timeout. |
+| M6 | `ad44ee1` | Req and httpc classify a timeout as `:timeout`, as Finch already did, so the kind no longer depends on the adapter. |
+| M7 | `78cc002` | URLs are parsed with `URI.new/1` and the port, host and userinfo checked explicitly. All four laundering cases are now errors; IPv6 literals keep their brackets. |
+| M8 | `2a5812a` | The ~15 missing `!` variants exist, and a test generated from the typespecs keeps the convention from rotting. `TypeDB.transaction/5` is exempt, and says why. |
+| M9 | `b19e061` | The stub emulates the server's real user-endpoint codes — `SRV4`, `USC2`, `USU4`, `USD3` — all read off a live server, and an integration test asserts the same ones so the two cannot drift. |
+| m1 | `241f6d0` | A commit that fails at transport level closes the transaction instead of leaving it holding locks. |
+| m2, m3 | `29f86f3`, `0e5b005` | `terminate/1` stops the supervisor `start_link` returned, not the registry; an adopted external pool is never marked owned. |
+| m4, m7–m10 | `0249ff1` | Documentation truth pass: the `:closed` kind is gone, httpc no longer calls itself the default, Req no longer claims to be faster, the two real runtime dependencies are stated, and `:transaction_timeout_millis` no longer claims to bound the driver. |
+| m5, m6, m16–m20 | `1751ec1` | `typeql-check` gets its input on stdin (a 1.4 MB schema: exit 7 through argv, 0 through stdin); negative durations raise instead of emitting unparseable ISO-8601; the duplicated helpers live in `TypeDB.Wire` and `TypeDB.Bang`; `Options` has one payload path; the stray tracked file is gone. |
+| m11–m15 | `01f850a`, `5d40738` | The four vacuous tests now drive real retries, real spans and real option merges; the token-renewal suite skips instead of reporting green; `ConceptDocuments` has `Enumerable` coverage. |
+
+### Found while executing
+
+| # | Where | Problem | Commit |
+| --- | --- | --- | --- |
+| C3 | `lib/typedb/connection.ex` | `do_sign_in/1` called the adapter directly, so the containment added for M4 did not cover it — and this code runs *inside* the connection process. A raising adapter killed the connection, and the caller got `kind: :config, "… is not running"`, naming neither the adapter nor the fault. Found while writing the M5 test. | `babcbe3` |
+| M9b | `test/support/typedb_stub_router.ex` | Checking the user endpoint for M9 turned up three more disagreements: the stub answered a single invented `USR2` where the server uses `SRV4` on GET, `USU4` on PUT and `USD3` on DELETE. | `b19e061` |
+
+### Deliberately not done
+
+- **`:pool_timeout` has no connection-level option.** It is set per adapter
+  (`http: {TypeDB.HTTP.Finch, pool_timeout: …}`), not on the connection, because it is a Finch concept
+  — httpc has no equivalent and Req's belongs to Req. Promoting it would put an option on every
+  connection that two of the three adapters ignore.
+- **`TypeDB.transaction/5` has no `!` variant.** It returns whatever the block returned, so its
+  `{:error, _}` may be the caller's own value and not an exception at all. A bang form would have to
+  guess whether to raise it. Recorded as the single exemption in `test/typedb/api_convention_test.exs`,
+  which asserts the exemption still names a real function.
+- **The `:slow` tests are opt-in.** They wait out real timeouts, so `mix test` stays quick and hermetic;
+  CI runs them via `TYPEDB_SLOW_TESTS=1` in the job that already takes seconds.
+
+### For your decision
+
+Nothing is blocking, but three things are judgement calls you may want to overrule:
+
+1. **The `:closed` error kind is gone** (you approved this). If you would rather have it, it means
+   client-side transaction state — the driver currently holds none by design, and adding it would make
+   `close/1` and `commit/1` mutate a struct the caller holds by value.
+2. **`Duration.to_iso8601/1` now raises on a negative component** rather than emitting `"P-1Y-2M"`.
+   Raising from a rendering function is a strong choice; the alternative is returning
+   `{:error, reason}` and changing the signature, or normalising silently. Only reachable from a
+   hand-built struct — TypeDB never sends one.
+3. **`mix typedb.check` shells out through `sh -c`** to reach the child's stdin, which neither
+   `System.cmd/3` nor Erlang ports can do. The file path travels as a positional argument, so
+   filenames are data rather than script, but the task now needs a POSIX shell — it will not run on
+   Windows without one.
