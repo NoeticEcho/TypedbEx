@@ -63,14 +63,8 @@ defmodule TypeDB.HTTP.Req do
   def terminate(_state), do: :ok
 
   @impl true
-  def request(%__MODULE__{req: req}, method, url, headers, body, opts) do
-    options =
-      [method: method, url: url, headers: headers]
-      |> put_body(body)
-      |> put_timeout(Keyword.get(opts, :timeout))
-      |> put_connect_timeout(req, Keyword.get(opts, :connect_timeout))
-
-    case Req.request(req, options) do
+  def request(%__MODULE__{req: req} = state, method, url, headers, body, opts) do
+    case Req.request(req, request_options(state, method, url, headers, body, opts)) do
       {:ok, %{status: status, headers: resp_headers, body: resp_body}} ->
         {:ok, %{status: status, headers: flatten_headers(resp_headers), body: to_binary(resp_body)}}
 
@@ -94,6 +88,29 @@ defmodule TypeDB.HTTP.Req do
         reason: exception
       )
     end
+  end
+
+  @doc """
+  The options this adapter hands to `Req.request/2`.
+
+  Public so that the merge below can be asserted on directly: whether a
+  per-request option quietly replaced a configured one is not observable from
+  the outside of a successful request.
+  """
+  @spec request_options(
+          t(),
+          TypeDB.HTTP.method(),
+          String.t(),
+          TypeDB.HTTP.headers(),
+          iodata() | nil,
+          keyword()
+        ) ::
+          keyword()
+  def request_options(%__MODULE__{req: req}, method, url, headers, body, opts) do
+    [method: method, url: url, headers: headers]
+    |> put_body(body)
+    |> put_timeout(Keyword.get(opts, :timeout))
+    |> put_connect_timeout(req, Keyword.get(opts, :connect_timeout))
   end
 
   # Req infers POST from the presence of a body, overriding an explicit

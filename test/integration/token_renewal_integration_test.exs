@@ -31,6 +31,13 @@ defmodule TypeDB.TokenRenewalIntegrationTest do
 
   @schema "define attribute name, value string; entity person, owns name;"
 
+  # Reporting three passing tests when the server they need is not configured is
+  # worse than reporting none: CI showed green for a suite that never ran.
+  @moduletag :short_token
+  if is_nil(System.get_env("TYPEDB_SHORT_TOKEN_URL")) do
+    @moduletag skip: "set TYPEDB_SHORT_TOKEN_URL to run the token renewal suite"
+  end
+
   setup_all do
     case System.get_env("TYPEDB_SHORT_TOKEN_URL") do
       nil ->
@@ -63,92 +70,76 @@ defmodule TypeDB.TokenRenewalIntegrationTest do
   end
 
   setup context do
-    if context[:skip] do
-      {:ok, skip: true}
-    else
-      database = "renewal_test_#{System.unique_integer([:positive])}"
-      :ok = Database.create(context.conn, database)
-      {:ok, _} = TypeDB.query(context.conn, database, @schema)
-      on_exit(fn -> Database.delete(context.conn, database) end)
+    database = "renewal_test_#{System.unique_integer([:positive])}"
+    :ok = Database.create(context.conn, database)
+    {:ok, _} = TypeDB.query(context.conn, database, @schema)
+    on_exit(fn -> Database.delete(context.conn, database) end)
 
-      {:ok, database: database}
-    end
+    {:ok, database: database}
   end
 
   test "a wide concurrent burst survives token expiry", context do
-    if context[:skip] do
-      :ok
-    else
-      %{conn: conn, database: database, ttl_ms: ttl_ms} = context
+    %{conn: conn, database: database, ttl_ms: ttl_ms} = context
 
-      # Warm the connection pool, then wait out the token so the burst starts
-      # with one that is already dead.
-      assert {:ok, _} = Database.list(conn)
-      Process.sleep(ttl_ms + 1_000)
+    # Warm the connection pool, then wait out the token so the burst starts
+    # with one that is already dead.
+    assert {:ok, _} = Database.list(conn)
+    Process.sleep(ttl_ms + 1_000)
 
-      results =
-        1..200
-        |> Task.async_stream(
-          fn _ -> TypeDB.query(conn, database, "match $p isa person;", transaction_type: :read) end,
-          max_concurrency: 200,
-          timeout: 120_000
-        )
-        |> Enum.map(fn {:ok, result} -> result end)
+    results =
+      1..200
+      |> Task.async_stream(
+        fn _ -> TypeDB.query(conn, database, "match $p isa person;", transaction_type: :read) end,
+        max_concurrency: 200,
+        timeout: 120_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
 
-      failures = Enum.reject(results, &match?({:ok, _}, &1))
-      assert failures == [], "#{length(failures)}/200 failed, e.g. #{inspect(Enum.take(failures, 2))}"
-    end
+    failures = Enum.reject(results, &match?({:ok, _}, &1))
+    assert failures == [], "#{length(failures)}/200 failed, e.g. #{inspect(Enum.take(failures, 2))}"
   end
 
   test "concurrent writes across an expiry all land", context do
-    if context[:skip] do
-      :ok
-    else
-      %{conn: conn, database: database, ttl_ms: ttl_ms} = context
+    %{conn: conn, database: database, ttl_ms: ttl_ms} = context
 
-      assert {:ok, _} = Database.list(conn)
-      Process.sleep(ttl_ms + 1_000)
+    assert {:ok, _} = Database.list(conn)
+    Process.sleep(ttl_ms + 1_000)
 
-      results =
-        1..100
-        |> Task.async_stream(
-          fn i -> TypeDB.query(conn, database, ~s(insert $p isa person, has name "W#{i}";)) end,
-          max_concurrency: 100,
-          timeout: 120_000
-        )
-        |> Enum.map(fn {:ok, result} -> result end)
+    results =
+      1..100
+      |> Task.async_stream(
+        fn i -> TypeDB.query(conn, database, ~s(insert $p isa person, has name "W#{i}";)) end,
+        max_concurrency: 100,
+        timeout: 120_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
 
-      assert Enum.reject(results, &match?({:ok, _}, &1)) == []
+    assert Enum.reject(results, &match?({:ok, _}, &1)) == []
 
-      assert {:ok, answer} =
-               TypeDB.query(conn, database, "match $p isa person;",
-                 transaction_type: :read,
-                 answer_count_limit: 10_000
-               )
+    assert {:ok, answer} =
+             TypeDB.query(conn, database, "match $p isa person;",
+               transaction_type: :read,
+               answer_count_limit: 10_000
+             )
 
-      assert length(Answer.rows(answer)) == 100
-    end
+    assert length(Answer.rows(answer)) == 100
   end
 
   test "a transaction that outlives its token still commits", context do
-    if context[:skip] do
-      :ok
-    else
-      %{conn: conn, database: database, ttl_ms: ttl_ms} = context
+    %{conn: conn, database: database, ttl_ms: ttl_ms} = context
 
-      assert :ok =
-               TypeDB.transaction(conn, database, :write, fn tx ->
-                 # The token that opened this transaction is gone by the time the
-                 # query and the commit go out.
-                 Process.sleep(ttl_ms + 1_000)
-                 {:ok, _} = Transaction.query(tx, ~s(insert $p isa person, has name "Patient";))
-                 :ok
-               end)
+    assert :ok =
+             TypeDB.transaction(conn, database, :write, fn tx ->
+               # The token that opened this transaction is gone by the time the
+               # query and the commit go out.
+               Process.sleep(ttl_ms + 1_000)
+               {:ok, _} = Transaction.query(tx, ~s(insert $p isa person, has name "Patient";))
+               :ok
+             end)
 
-      assert {:ok, answer} =
-               TypeDB.query(conn, database, "match $p isa person;", transaction_type: :read)
+    assert {:ok, answer} =
+             TypeDB.query(conn, database, "match $p isa person;", transaction_type: :read)
 
-      assert length(Answer.rows(answer)) == 1
-    end
+    assert length(Answer.rows(answer)) == 1
   end
 end

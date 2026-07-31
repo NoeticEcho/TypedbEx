@@ -331,24 +331,44 @@ defmodule TypeDB.HTTPTest do
                Req.request(state, :get, TypeDB.Stub.url(stub) <> "/v1/databases", [], nil, [])
     end
 
-    test "a connect timeout does not discard the configured connect options", %{state: _state} do
-      # Req merges per-request options over the base ones key by key. Setting
-      # :connect_options per request therefore replaces whatever was configured
-      # at init — and since TLS lives in there, that silently turns off a pinned
-      # CA. This asserts the base survives.
+    test "a connect timeout does not discard the configured connect options" do
+      # Req merges per-request options over the base ones key by key, so setting
+      # :connect_options per request replaces whatever was configured at init —
+      # and since TLS lives in there, that silently turns off a pinned CA.
+      #
+      # Asserted on the options actually sent, not on the init state: the init
+      # state is immutable and would look identical even if the merge were
+      # broken, which is exactly how this went unnoticed.
       {:ok, state} =
         Req.init(:req_ca_test, connect_options: [transport_opts: [cacertfile: "/nonexistent/ca.pem"]])
 
+      sent =
+        Req.request_options(state, :get, "http://example.test/v1/databases", [], nil, connect_timeout: 1_000)
+
+      assert sent[:connect_options][:timeout] == 1_000
+      assert sent[:connect_options][:transport_opts] == [cacertfile: "/nonexistent/ca.pem"]
+    end
+
+    test "a caller's own connect timeout is not overridden by the per-request one" do
+      {:ok, state} = Req.init(:req_ct_base, connect_options: [timeout: 42])
+
+      sent = Req.request_options(state, :get, "http://example.test/v1/x", [], nil, connect_timeout: 1_000)
+
+      assert sent[:connect_options][:timeout] == 42
+    end
+
+    test "the request still goes out with those options", %{state: _state} do
+      {:ok, state} =
+        Req.init(:req_ca_live, connect_options: [transport_opts: [cacertfile: "/nonexistent/ca.pem"]])
+
       {:ok, stub} = echo_stub()
 
+      # Over plain HTTP the pinned CA is simply unused, which is why this
+      # succeeds; the point is that carrying it does not break the request.
       assert {:ok, %{status: 200}} =
                Req.request(state, :get, TypeDB.Stub.url(stub) <> "/v1/databases", [], nil,
                  connect_timeout: 1_000
                )
-
-      # The pinned CA must still be in effect for an HTTPS request; over plain
-      # HTTP it is simply unused, which is why the request above succeeds.
-      assert state.req.options[:connect_options][:transport_opts] == [cacertfile: "/nonexistent/ca.pem"]
     end
 
     test "a refused connection is a transport error, not an exception", %{state: state} do

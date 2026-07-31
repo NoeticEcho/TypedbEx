@@ -112,11 +112,7 @@ defmodule TypeDB.ConnectionTest do
       TypeDB.stop(pid)
     end
 
-    test "retries idempotent requests", %{stub: stub} do
-      # A handler that fails the first request by closing the socket is hard to
-      # arrange; instead assert the retry budget is honoured by counting attempts
-      # against a handler that always 503s (which is not retried) versus a
-      # transport failure (which is).
+    test "a server error is not a transport failure and is not retried", %{stub: stub} do
       handler = fn _method, _path, _headers, _body ->
         {503, [], ~s({"code":"SRV9","message":"unavailable"})}
       end
@@ -127,12 +123,138 @@ defmodule TypeDB.ConnectionTest do
       {:ok, pid} = TypeDB.start_link(name: name, url: Stub.url(failing), token: "t")
 
       assert {:error, %Error{kind: :server, status: 503, code: "SRV9"}} = TypeDB.Database.list(name)
-      # 503 is a server answer, not a transport failure: exactly one attempt.
       assert length(requests(failing, "/databases")) == 1
 
       TypeDB.stop(pid)
       Stub.stop(failing)
       Stub.stop(stub)
+    end
+
+    # Fails the first N requests at transport level, then delegates to the real
+    # adapter. The only way to see the retry path from the outside.
+    defmodule FlakyAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(name, opts) do
+        {inner, inner_opts} = Keyword.fetch!(opts, :inner)
+        counter = :counters.new(1, [:atomics])
+
+        with {:ok, state} <- inner.init(name, inner_opts) do
+          {:ok, {inner, state, counter, Keyword.fetch!(opts, :failures), opts[:test]}}
+        end
+      end
+
+      # Only /databases is counted and failed; sign-in has to keep working or
+      # nothing gets as far as the retry path being tested.
+      def request({inner, state, counter, failures, test}, method, url, headers, body, opts) do
+        if String.ends_with?(url, "/databases") do
+          attempt = :counters.get(counter, 1) + 1
+          :counters.add(counter, 1, 1)
+          send(test, {:attempt, attempt, System.monotonic_time(:millisecond)})
+
+          if attempt <= failures do
+            {:error, TypeDB.Error.new(:transport, "flaky adapter failing attempt #{attempt}")}
+          else
+            inner.request(state, method, url, headers, body, opts)
+          end
+        else
+          inner.request(state, method, url, headers, body, opts)
+        end
+      end
+
+      def owner({inner, state, _c, _f, _t}) do
+        if function_exported?(inner, :owner, 1), do: inner.owner(state), else: nil
+      end
+
+      def terminate({inner, state, _c, _f, _t}) do
+        if function_exported?(inner, :terminate, 1), do: inner.terminate(state), else: :ok
+      end
+    end
+
+    defp flaky_connection(stub, failures, conn_opts) do
+      name = :"flaky_#{System.unique_integer([:positive])}"
+      inner = TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          [
+            name: name,
+            url: Stub.url(stub),
+            username: "admin",
+            password: "password",
+            http: {FlakyAdapter, [inner: inner, failures: failures, test: self()]}
+          ] ++ conn_opts
+        )
+
+      on_exit(fn ->
+        try do
+          TypeDB.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
+      end)
+
+      name
+    end
+
+    test "a transport failure on an idempotent request is retried", %{stub: stub} do
+      conn = flaky_connection(stub, 1, max_retries: 1)
+
+      assert {:ok, _} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, _}
+      assert_received {:attempt, 2, _}
+      refute_received {:attempt, 3, _}
+      # The retry reached the server; the failed attempt never did.
+      assert length(requests(stub, "/databases")) == 1
+    end
+
+    test ":max_retries bounds the attempts and the last error surfaces", %{stub: stub} do
+      conn = flaky_connection(stub, 10, max_retries: 2)
+
+      assert {:error, %Error{kind: :transport, message: message}} = TypeDB.Database.list(conn)
+      assert message =~ "attempt 3"
+
+      assert_received {:attempt, 1, _}
+      assert_received {:attempt, 2, _}
+      assert_received {:attempt, 3, _}
+      refute_received {:attempt, 4, _}
+      assert requests(stub, "/databases") == []
+    end
+
+    test "max_retries: 0 means one attempt", %{stub: stub} do
+      conn = flaky_connection(stub, 10, max_retries: 0)
+
+      assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, _}
+      refute_received {:attempt, 2, _}
+    end
+
+    test ":retry_backoff decides how long the driver waits between attempts", %{stub: stub} do
+      conn = flaky_connection(stub, 10, max_retries: 2, retry_backoff: {:exponential, 100})
+
+      assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, first}
+      assert_received {:attempt, 2, second}
+      assert_received {:attempt, 3, third}
+
+      # {:exponential, 100} is 100ms then 200ms. Lower bounds only: a loaded
+      # scheduler can always make a sleep longer than it asked for.
+      assert second - first >= 100
+      assert third - second >= 200
+    end
+
+    test ":retry_backoff accepts a function of the attempt number", %{stub: stub} do
+      conn = flaky_connection(stub, 10, max_retries: 1, retry_backoff: fn attempt -> attempt * 50 end)
+
+      assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, first}
+      assert_received {:attempt, 2, second}
+      assert second - first >= 50
     end
   end
 

@@ -95,24 +95,88 @@ defmodule TypeDB.TelemetryTest do
     Stub.stop(stub)
   end
 
-  @tag stub_opts: [databases: ["social"], token_uses: 1]
-  test "each retry gets its own span, numbered", %{conn: conn} do
-    assert {:ok, _} = TypeDB.Database.list(conn)
-    assert {:ok, _} = TypeDB.Database.list(conn)
+  # Fails the first two /databases requests at transport level so the retry path
+  # actually runs. Without this the attempt counter never leaves 1 and the test
+  # asserting on it asserts nothing.
+  defmodule TwiceFailingAdapter do
+    @moduledoc false
+    @behaviour TypeDB.HTTP
 
-    attempts =
-      for _ <- 1..10, into: [] do
-        receive do
-          {:telemetry, [:typedb, :request, :start], _, %{attempt: attempt}} -> attempt
-        after
-          200 -> nil
+    def init(name, opts) do
+      {inner, inner_opts} = Keyword.fetch!(opts, :inner)
+      counter = :counters.new(1, [:atomics])
+
+      with {:ok, state} <- inner.init(name, inner_opts), do: {:ok, {inner, state, counter}}
+    end
+
+    def request({inner, state, counter}, method, url, headers, body, opts) do
+      if String.ends_with?(url, "/databases") do
+        attempt = :counters.get(counter, 1) + 1
+        :counters.add(counter, 1, 1)
+
+        if attempt <= 2 do
+          {:error, TypeDB.Error.new(:transport, "failing attempt #{attempt}")}
+        else
+          inner.request(state, method, url, headers, body, opts)
         end
+      else
+        inner.request(state, method, url, headers, body, opts)
       end
-      |> Enum.reject(&is_nil/1)
+    end
 
-    # Retries after a 401 re-enter the span with attempt back at 1, because the
-    # attempt counter tracks transport retries within one send.
-    assert Enum.all?(attempts, &(&1 >= 1))
-    assert length(attempts) >= 3, "expected the rejected request to have been re-sent"
+    def owner({inner, state, _c}) do
+      if function_exported?(inner, :owner, 1), do: inner.owner(state), else: nil
+    end
+
+    def terminate({inner, state, _c}) do
+      if function_exported?(inner, :terminate, 1), do: inner.terminate(state), else: :ok
+    end
+  end
+
+  @tag stub_opts: [databases: ["social"]]
+  test "each transport retry gets its own span, numbered", %{stub: stub} do
+    name = :"telemetry_retry_#{System.unique_integer([:positive])}"
+    test = self()
+    handler = "typedb-telemetry-retry-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach_many(
+      handler,
+      [[:typedb, :request, :start], [:typedb, :request, :stop]],
+      fn event, _measurements, metadata, _config ->
+        if metadata[:connection] == name and metadata[:path] == "/databases" do
+          send(test, {:span, List.last(event), metadata})
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {:ok, pid} =
+      TypeDB.start_link(
+        name: name,
+        url: Stub.url(stub),
+        username: "admin",
+        password: "password",
+        max_retries: 2,
+        retry_backoff: {:exponential, 1},
+        http: {TwiceFailingAdapter, [inner: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}]}
+      )
+
+    assert {:ok, _} = TypeDB.Database.list(name)
+
+    # Three attempts: two that failed in transport, then the one that reached
+    # the server. Each is its own span, and the number counts up.
+    assert_receive {:span, :start, %{attempt: 1}}
+    assert_receive {:span, :stop, %{attempt: 1, error: %Error{kind: :transport}}}
+    assert_receive {:span, :start, %{attempt: 2}}
+    assert_receive {:span, :stop, %{attempt: 2, error: %Error{kind: :transport}}}
+    assert_receive {:span, :start, %{attempt: 3}}
+    assert_receive {:span, :stop, %{attempt: 3, status: 200} = final}
+    refute Map.has_key?(final, :error)
+
+    refute_receive {:span, :start, %{attempt: 4}}, 100
+
+    TypeDB.stop(pid)
   end
 end
