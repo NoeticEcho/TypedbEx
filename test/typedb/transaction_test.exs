@@ -174,5 +174,66 @@ defmodule TypeDB.TransactionTest do
       assert {:error, %Error{code: "TSV6"}} =
                TypeDB.transaction(conn, "social", :write, fn _tx -> :all_good end)
     end
+
+    @tag stub_opts: [databases: ["social"], fail_commit: true]
+    test "a commit the server rejected needs no close", %{conn: conn, stub: stub} do
+      assert {:error, %Error{code: "TSV6"}} =
+               TypeDB.transaction(conn, "social", :write, fn _tx -> :all_good end)
+
+      # The server finished the transaction when it rejected the commit.
+      assert requests(stub, "/close") == []
+    end
+
+    # Delegates everything to the real adapter except the commit, which never
+    # reaches the server — the one case where the transaction is still open
+    # afterwards and nobody but this driver can close it.
+    defmodule CommitLosingAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(name, opts) do
+        {inner, inner_opts} = Keyword.fetch!(opts, :inner)
+
+        with {:ok, state} <- inner.init(name, inner_opts), do: {:ok, {inner, state}}
+      end
+
+      def request({inner, state}, method, url, headers, body, opts) do
+        if String.ends_with?(url, "/commit") do
+          {:error, TypeDB.Error.new(:transport, "the commit never left the building")}
+        else
+          inner.request(state, method, url, headers, body, opts)
+        end
+      end
+
+      def owner({inner, state}) do
+        if function_exported?(inner, :owner, 1), do: inner.owner(state), else: nil
+      end
+
+      def terminate({inner, state}) do
+        if function_exported?(inner, :terminate, 1), do: inner.terminate(state), else: :ok
+      end
+    end
+
+    test "a commit that never reached the server still closes the transaction", %{stub: stub} do
+      name = :"lost_commit_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: TypeDB.Stub.url(stub),
+          username: "admin",
+          password: "password",
+          http: {CommitLosingAdapter, [inner: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}]}
+        )
+
+      assert {:error, %Error{kind: :transport}} =
+               TypeDB.transaction(name, "social", :write, fn _tx -> :all_good end)
+
+      # Otherwise it stays open, holding its locks, until TypeDB's own
+      # transaction timeout expires.
+      assert length(requests(stub, "/close")) == 1
+
+      TypeDB.stop(pid)
+    end
   end
 end

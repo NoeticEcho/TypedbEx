@@ -242,8 +242,19 @@ defmodule TypeDB do
 
   defp finish(tx, result) do
     case Transaction.commit(tx) do
-      :ok -> result
-      {:error, error} -> {:error, error}
+      :ok ->
+        result
+
+      # A commit the server rejected has already finished the transaction. A
+      # commit that never reached the server has not: without this the
+      # transaction stays open until TypeDB's own timeout expires, holding its
+      # schema lock for as long as that takes.
+      {:error, %Error{kind: kind} = error} when kind in [:transport, :timeout] ->
+        _ = Transaction.close(tx)
+        {:error, error}
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 
