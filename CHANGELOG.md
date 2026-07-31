@@ -34,6 +34,9 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   for arbitrary input. The API's raw-JSON form is not: TypeDB parses a bare
   string as a TypeQL literal, so a value containing a quote is a parse error.
 - `TypeDB.Error` — a single exception type carrying TypeDB's stable error codes.
+  Every function that can fail has both a `{:ok, _} | {:error, %TypeDB.Error{}}`
+  form and a `!` form that raises, except `TypeDB.transaction/5`, which returns
+  the block's own value.
 - `TypeDB.HTTP` — a transport behaviour with three adapters: `TypeDB.HTTP.Finch`
   (the default, a Finch pool per connection), `TypeDB.HTTP.Req` for applications
   already running Finch through Req, and `TypeDB.HTTP.Httpc` for deployments that

@@ -40,6 +40,8 @@ defmodule TypeDB.Transaction do
   requires `:schema`, an `insert` requires `:write` or `:schema`.
   """
 
+  use TypeDB.Bang
+
   alias TypeDB.{Answer, Connection, Error, Given, Options}
 
   @type type :: :read | :write | :schema
@@ -186,6 +188,12 @@ defmodule TypeDB.Transaction do
   end
 
   @doc """
+  Analyses a query, raising on failure.
+  """
+  @spec analyze!(t(), String.t(), keyword()) :: map()
+  def analyze!(%__MODULE__{} = tx, query, opts \\ []), do: unwrap!(analyze(tx, query, opts))
+
+  @doc """
   Commits the transaction.
 
   The transaction is finished afterwards, whether or not the commit succeeded —
@@ -208,12 +216,7 @@ defmodule TypeDB.Transaction do
   Commits the transaction, raising on failure.
   """
   @spec commit!(t()) :: :ok
-  def commit!(%__MODULE__{} = tx) do
-    case commit(tx) do
-      :ok -> :ok
-      {:error, error} -> raise error
-    end
-  end
+  def commit!(%__MODULE__{} = tx), do: ok!(commit(tx))
 
   @doc """
   Discards everything written so far, leaving the transaction open.
@@ -233,6 +236,12 @@ defmodule TypeDB.Transaction do
   end
 
   @doc """
+  Discards everything written so far, raising on failure.
+  """
+  @spec rollback!(t()) :: :ok
+  def rollback!(%__MODULE__{} = tx), do: ok!(rollback(tx))
+
+  @doc """
   Closes the transaction, discarding uncommitted writes.
 
   Closing is idempotent and never fails on an already-closed transaction — it is
@@ -249,9 +258,12 @@ defmodule TypeDB.Transaction do
     end
   end
 
+  @doc """
+  Closes the transaction, raising on failure.
+  """
+  @spec close!(t()) :: :ok
+  def close!(%__MODULE__{} = tx), do: ok!(close(tx))
+
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
-
-  defp unwrap!({:ok, value}), do: value
-  defp unwrap!({:error, error}), do: raise(error)
 end

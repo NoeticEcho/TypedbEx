@@ -51,9 +51,11 @@ defmodule TypeDB do
 
   ## Errors
 
-  Every function has a `{:ok, _} | {:error, %TypeDB.Error{}}` form and a `!` form
-  that raises. `TypeDB.Error` carries TypeDB's own error `:code`, which is what
-  you want to branch on.
+  Every function in this module and in `TypeDB.Database`, `TypeDB.User`,
+  `TypeDB.Server` and `TypeDB.Transaction` that can fail has both a
+  `{:ok, _} | {:error, %TypeDB.Error{}}` form and a `!` form that raises.
+  `TypeDB.Error` carries TypeDB's own error `:code`, which is what you want to
+  branch on.
 
   ## Concurrency
 
@@ -256,10 +258,24 @@ defmodule TypeDB do
   defdelegate health(conn), to: Server
 
   @doc """
+  Returns `:ok` when the server is reachable, raising otherwise.
+  See `TypeDB.Server.health!/1`.
+  """
+  @spec health!(conn()) :: :ok
+  defdelegate health!(conn), to: Server
+
+  @doc """
   Returns the server distribution and version. See `TypeDB.Server.version/1`.
   """
   @spec version(conn()) :: {:ok, map()} | {:error, Error.t()}
   defdelegate version(conn), to: Server
+
+  @doc """
+  Returns the server distribution and version, raising on failure.
+  See `TypeDB.Server.version!/1`.
+  """
+  @spec version!(conn()) :: map()
+  defdelegate version!(conn), to: Server
 
   @doc """
   Lists databases. See `TypeDB.Database.list/1`.
@@ -268,16 +284,34 @@ defmodule TypeDB do
   defdelegate databases(conn), to: Database, as: :list
 
   @doc """
+  Lists databases, raising on failure. See `TypeDB.Database.list!/1`.
+  """
+  @spec databases!(conn()) :: [String.t()]
+  defdelegate databases!(conn), to: Database, as: :list!
+
+  @doc """
   Creates a database. See `TypeDB.Database.create/2`.
   """
   @spec create_database(conn(), String.t()) :: :ok | {:error, Error.t()}
   defdelegate create_database(conn, name), to: Database, as: :create
 
   @doc """
+  Creates a database, raising on failure. See `TypeDB.Database.create!/2`.
+  """
+  @spec create_database!(conn(), String.t()) :: :ok
+  defdelegate create_database!(conn, name), to: Database, as: :create!
+
+  @doc """
   Deletes a database and all of its data. See `TypeDB.Database.delete/2`.
   """
   @spec delete_database(conn(), String.t()) :: :ok | {:error, Error.t()}
   defdelegate delete_database(conn, name), to: Database, as: :delete
+
+  @doc """
+  Deletes a database, raising on failure. See `TypeDB.Database.delete!/2`.
+  """
+  @spec delete_database!(conn(), String.t()) :: :ok
+  defdelegate delete_database!(conn, name), to: Database, as: :delete!
 
   defp put_unless_nil(map, _key, nil), do: map
   defp put_unless_nil(map, key, value), do: Map.put(map, key, value)

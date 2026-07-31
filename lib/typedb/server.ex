@@ -7,6 +7,8 @@ defmodule TypeDB.Server do
   readiness probe.
   """
 
+  use TypeDB.Bang
+
   alias TypeDB.{Connection, Error}
 
   @doc """
@@ -23,6 +25,12 @@ defmodule TypeDB.Server do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc """
+  Returns `:ok` when the server is up, raising otherwise.
+  """
+  @spec health!(Connection.t()) :: :ok
+  def health!(conn), do: ok!(health(conn))
 
   @doc """
   Returns the server's distribution and version.
@@ -47,6 +55,12 @@ defmodule TypeDB.Server do
   end
 
   @doc """
+  Returns the server's distribution and version, raising on failure.
+  """
+  @spec version!(Connection.t()) :: %{distribution: String.t(), version: String.t()}
+  def version!(conn), do: unwrap!(version(conn))
+
+  @doc """
   Lists the servers in the cluster.
 
   A single-server deployment reports one entry. Fields vary by distribution, so
@@ -60,4 +74,10 @@ defmodule TypeDB.Server do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc """
+  Lists the servers in the cluster, raising on failure.
+  """
+  @spec servers!(Connection.t()) :: [map()]
+  def servers!(conn), do: unwrap!(servers(conn))
 end

@@ -278,6 +278,12 @@ end
 own error code (`"TSV11"`, `"AUT3"`, …), which is stable across releases — branch
 on that, not on messages.
 
+Every function that can fail also has a `!` form that returns the value and
+raises `TypeDB.Error` instead — `TypeDB.Database.list!/1`, `TypeDB.User.create!/3`,
+`TypeDB.Transaction.commit!/1` and so on. The one exception is
+`TypeDB.transaction/5`, which returns whatever your block returned and so has no
+error of its own to raise.
+
 ## Configuration
 
 | Option | Default | |

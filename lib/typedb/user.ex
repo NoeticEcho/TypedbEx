@@ -11,6 +11,8 @@ defmodule TypeDB.User do
       :ok = TypeDB.User.delete(conn, "alice")
   """
 
+  use TypeDB.Bang
+
   alias TypeDB.{Connection, Error}
 
   @doc """
@@ -31,6 +33,12 @@ defmodule TypeDB.User do
   end
 
   @doc """
+  Lists all usernames, raising on failure.
+  """
+  @spec list!(Connection.t()) :: [String.t()]
+  def list!(conn), do: unwrap!(list(conn))
+
+  @doc """
   Returns a username, or an error when the user does not exist.
   """
   @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
@@ -41,6 +49,12 @@ defmodule TypeDB.User do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc """
+  Returns a username, raising when the user does not exist.
+  """
+  @spec get!(Connection.t(), String.t()) :: String.t()
+  def get!(conn, username), do: unwrap!(get(conn, username))
 
   @doc """
   Returns whether a user exists.
@@ -64,6 +78,12 @@ defmodule TypeDB.User do
   end
 
   @doc """
+  Creates a user, raising on failure.
+  """
+  @spec create!(Connection.t(), String.t(), String.t()) :: :ok
+  def create!(conn, username, password), do: ok!(create(conn, username, password))
+
+  @doc """
   Replaces a user's password.
 
   Existing tokens issued to that user are not revoked by this call; they expire
@@ -82,6 +102,12 @@ defmodule TypeDB.User do
   end
 
   @doc """
+  Replaces a user's password, raising on failure.
+  """
+  @spec set_password!(Connection.t(), String.t(), String.t()) :: :ok
+  def set_password!(conn, username, password), do: ok!(set_password(conn, username, password))
+
+  @doc """
   Deletes a user.
   """
   @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
@@ -91,6 +117,12 @@ defmodule TypeDB.User do
       {:error, error} -> {:error, error}
     end
   end
+
+  @doc """
+  Deletes a user, raising on failure.
+  """
+  @spec delete!(Connection.t(), String.t()) :: :ok
+  def delete!(conn, username), do: ok!(delete(conn, username))
 
   defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 end

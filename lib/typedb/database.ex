@@ -10,6 +10,8 @@ defmodule TypeDB.Database do
   `delete/2` destroys the database and everything in it, irreversibly.
   """
 
+  use TypeDB.Bang
+
   alias TypeDB.{Connection, Error}
 
   @doc """
@@ -49,6 +51,12 @@ defmodule TypeDB.Database do
   end
 
   @doc """
+  Returns a database name, raising on failure.
+  """
+  @spec get!(Connection.t(), String.t()) :: String.t()
+  def get!(conn, name), do: unwrap!(get(conn, name))
+
+  @doc """
   Returns whether a database exists.
   """
   @spec exists?(Connection.t(), String.t()) :: boolean()
@@ -76,12 +84,7 @@ defmodule TypeDB.Database do
   Creates a database, raising on failure.
   """
   @spec create!(Connection.t(), String.t()) :: :ok
-  def create!(conn, name) do
-    case create(conn, name) do
-      :ok -> :ok
-      {:error, error} -> raise error
-    end
-  end
+  def create!(conn, name), do: ok!(create(conn, name))
 
   @doc """
   Creates a database unless it already exists.
@@ -101,6 +104,12 @@ defmodule TypeDB.Database do
   end
 
   @doc """
+  Creates a database unless it already exists, raising on failure.
+  """
+  @spec create_if_not_exists!(Connection.t(), String.t()) :: :ok
+  def create_if_not_exists!(conn, name), do: ok!(create_if_not_exists(conn, name))
+
+  @doc """
   Deletes a database and all of its data. This cannot be undone.
 
   Deleting a database that does not exist is an error (`DBD1`), unlike
@@ -118,12 +127,7 @@ defmodule TypeDB.Database do
   Deletes a database, raising on failure.
   """
   @spec delete!(Connection.t(), String.t()) :: :ok
-  def delete!(conn, name) do
-    case delete(conn, name) do
-      :ok -> :ok
-      {:error, error} -> raise error
-    end
-  end
+  def delete!(conn, name), do: ok!(delete(conn, name))
 
   @doc """
   Returns the full schema of a database as TypeQL source: types *and* functions.
@@ -144,8 +148,17 @@ defmodule TypeDB.Database do
     Connection.request(conn, :get, "/databases/#{encode(name)}/type-schema", expect: :text)
   end
 
-  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
+  @doc """
+  Returns the full schema of a database, raising on failure.
+  """
+  @spec schema!(Connection.t(), String.t()) :: String.t()
+  def schema!(conn, name), do: unwrap!(schema(conn, name))
 
-  defp unwrap!({:ok, value}), do: value
-  defp unwrap!({:error, error}), do: raise(error)
+  @doc """
+  Returns a database's type definitions, raising on failure.
+  """
+  @spec type_schema!(Connection.t(), String.t()) :: String.t()
+  def type_schema!(conn, name), do: unwrap!(type_schema(conn, name))
+
+  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 end
