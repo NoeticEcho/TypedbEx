@@ -40,7 +40,7 @@ defmodule TypeDB.Transaction do
   requires `:schema`, an `insert` requires `:write` or `:schema`.
   """
 
-  alias TypeDB.{Answer, Connection, Error, Options}
+  alias TypeDB.{Answer, Connection, Error, Given, Options}
 
   @type type :: :read | :write | :schema
 
@@ -108,9 +108,8 @@ defmodule TypeDB.Transaction do
 
     * `:timeout` — overrides the connection timeout for this request. Long
       analytical reads usually want this.
-    * `:given_rows` — bind input rows to the query's variables, TypeDB's
-      server-side alternative to building a giant literal query. Each row is a
-      map of variable name to a value or concept.
+    * `:given_rows` — input rows for the query's `given` stage. See
+      "Parameterised queries" below.
 
   ## Examples
 
@@ -118,13 +117,38 @@ defmodule TypeDB.Transaction do
         include_instance_types: false,
         answer_count_limit: 1_000
       )
+
+  ## Parameterised queries
+
+  Never interpolate user input into a query string — TypeQL injection is as real
+  as SQL injection. Use TypeDB's `given` stage (3.12+) instead: the values travel
+  beside the query rather than inside it, so they can never be parsed as TypeQL.
+
+      TypeDB.Transaction.query(tx, \"""
+        given $n: string;
+        insert $p isa person, has name == $n;
+      \""", given_rows: [%{"n" => "Alice"}, %{"n" => "Bob"}])
+
+  The rest of the pipeline runs once per row, which also makes this the fast way
+  to write many rows: one request and one query compilation instead of N.
+
+  Declare every input variable in the `given` stage, and mark optional columns
+  with `?`:
+
+      given $name: string, $age: integer?;
+
+  A query with a `given` stage requires rows, and rows require a `given` stage.
+  Each row is a map of variable name to a plain Elixir term or a concept from an
+  earlier answer; `nil` leaves an optional column unbound. `TypeDB.Given` lists
+  the accepted types and explains why the driver encodes them rather than
+  forwarding raw JSON.
   """
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     body =
       %{"query" => query}
       |> put_unless_nil("queryOptions", Options.query_payload(opts))
-      |> put_unless_nil("givenRows", Keyword.get(opts, :given_rows))
+      |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-
            Connection.request(tx.conn, :post, "/transactions/#{tx.id}/query",

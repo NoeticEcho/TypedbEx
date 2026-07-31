@@ -106,6 +106,27 @@ throws or exits. A `:read` block is closed rather than committed.
 For a commit point that isn't lexically scoped, drive it yourself with
 `TypeDB.Transaction.open/4`, `commit/1`, `rollback/1` and `close/1`.
 
+### Parameterised queries
+
+Never interpolate user input into a query string. TypeQL injection is as real
+as SQL injection, and TypeDB 3.12's `given` stage is the fix: values travel
+beside the query rather than inside it, so they can never be parsed as TypeQL.
+
+```elixir
+TypeDB.query(conn, "social", """
+  given $n: string;
+  insert $p isa person, has name == $n;
+""", given_rows: [%{"n" => "Alice"}, %{"n" => "Bob"}])
+```
+
+The pipeline runs once per row, so this is also the fast way to write many rows
+— one request and one query compilation instead of N. Declare every input
+variable in the `given` stage, marking optional columns with `?`:
+
+```typeql
+given $name: string, $age: integer?;
+```
+
 ### Transaction types
 
 | Type | Use for | Notes |

@@ -70,7 +70,7 @@ defmodule TypeDB do
   streaming answers — are not available over HTTP and so are not here.
   """
 
-  alias TypeDB.{Answer, Connection, Database, Error, Options, Server, Transaction}
+  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Transaction}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type conn :: Connection.t()
@@ -108,6 +108,8 @@ defmodule TypeDB do
       the server reject an accidental write.
     * `:commit` — whether to commit a write or schema query. Defaults to `true`.
       Read queries never commit.
+    * `:given_rows` — input rows for the query's `given` stage; see
+      `TypeDB.Transaction.query/3` for how to parameterise a query safely.
     * plus all query and transaction options from `TypeDB.Options`, and
       `:timeout`.
 
@@ -120,6 +122,12 @@ defmodule TypeDB do
 
       # Dry run: execute the write, then throw it away.
       TypeDB.query(conn, "social", "insert $p isa person;", commit: false)
+
+      # Parameterised, and therefore safe against TypeQL injection.
+      TypeDB.query(conn, "social", \"""
+        given $n: string;
+        insert $p isa person, has name == $n;
+      \""", given_rows: [%{"n" => user_supplied_name}])
   """
   @spec query(conn(), String.t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(conn, database, query, opts \\ []) when is_binary(database) and is_binary(query) do
@@ -139,7 +147,7 @@ defmodule TypeDB do
       |> put_unless_nil("commit", Keyword.get(opts, :commit))
       |> put_unless_nil("queryOptions", Options.query_payload(opts))
       |> put_unless_nil("transactionOptions", Options.transaction_payload(opts))
-      |> put_unless_nil("givenRows", Keyword.get(opts, :given_rows))
+      |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-
            Connection.request(conn, :post, "/query",

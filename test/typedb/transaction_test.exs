@@ -55,12 +55,22 @@ defmodule TypeDB.TransactionTest do
       assert payload["queryOptions"] == %{"answerCountLimit" => 3}
     end
 
-    test "forwards given_rows", %{tx: tx, stub: stub} do
-      rows = [%{"name" => "Alice"}, %{"name" => "Bob"}]
-      assert {:ok, _} = Transaction.query(tx, "insert $p isa person, has name $name;", given_rows: rows)
+    test "forwards given_rows, tagging values so they cannot be parsed as TypeQL", %{tx: tx, stub: stub} do
+      rows = [%{"name" => "Alice"}, %{"name" => ~s(evil "; delete $p isa person;)}]
+      assert {:ok, _} = Transaction.query(tx, "insert $p isa person, has name == $name;", given_rows: rows)
 
       payload = stub |> requests("/query") |> hd() |> Map.fetch!(:body) |> JSON.decode!()
-      assert payload["givenRows"] == [%{"name" => "Alice"}, %{"name" => "Bob"}]
+
+      assert payload["givenRows"] == [
+               %{"name" => %{"kind" => "value", "value" => "Alice", "valueType" => "string"}},
+               %{
+                 "name" => %{
+                   "kind" => "value",
+                   "value" => ~s(evil "; delete $p isa person;),
+                   "valueType" => "string"
+                 }
+               }
+             ]
     end
 
     test "query!/3 raises", %{conn: conn} do

@@ -209,7 +209,9 @@ defmodule TypeDB.Concept do
     * `double` → `float`
     * `string` → `String.t()`
     * `decimal` → `Decimal.t()` when the optional `Decimal` library is loaded,
-      otherwise the original string
+      otherwise the original string. TypeDB renders decimals with TypeQL's
+      literal suffix (`"12.345dec"`); the suffix is stripped before conversion
+      but kept in the raw value
     * `date` → `Date.t()`
     * `datetime` → `NaiveDateTime.t()`
     * `datetime-tz` → `TypeDB.DateTimeTZ.t()`
@@ -234,7 +236,8 @@ defmodule TypeDB.Concept do
   def cast(value, "string") when is_binary(value), do: value
 
   def cast(value, "decimal") when is_binary(value) do
-    if Code.ensure_loaded?(Decimal), do: to_decimal(value), else: value
+    # TypeDB renders decimals with TypeQL's literal suffix, e.g. "12.345dec".
+    if Code.ensure_loaded?(Decimal), do: to_decimal(String.trim_trailing(value, "dec")), else: value
   end
 
   def cast(value, "date") when is_binary(value) do

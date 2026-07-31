@@ -226,6 +226,193 @@ defmodule TypeDB.IntegrationTest do
     end
   end
 
+  describe "parameterised queries (given)" do
+    setup %{conn: conn, database: database} do
+      assert {:ok, _} = TypeDB.query(conn, database, @schema)
+      :ok
+    end
+
+    test "given binds one row per input", %{conn: conn, database: database} do
+      assert {:ok, answer} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   given $n: string;
+                   insert $p isa person, has name == $n;
+                 """,
+                 given_rows: [%{"n" => "Alice"}, %{"n" => "Bob"}]
+               )
+
+      assert length(Answer.rows(answer)) == 2
+
+      assert {:ok, read} =
+               TypeDB.query(conn, database, "match $p isa person, has name $n; select $n;",
+                 transaction_type: :read
+               )
+
+      names = read |> Answer.rows() |> Enum.map(&ConceptRow.value(&1, "n")) |> Enum.sort()
+      assert names == ["Alice", "Bob"]
+    end
+
+    test "given carries non-string values", %{conn: conn, database: database} do
+      assert {:ok, _} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   given $n: string, $a: integer;
+                   insert $p isa person, has name == $n, has age == $a;
+                 """,
+                 given_rows: [%{"n" => "Alice", "a" => 30}]
+               )
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(conn, database, "match $p isa person, has age $a; select $a;",
+                 transaction_type: :read
+               )
+
+      assert ConceptRow.typed_value(row, "a") == 30
+    end
+
+    test "a value that looks like TypeQL is data, not code", %{conn: conn, database: database} do
+      # The whole point of `given`, and the reason the driver tags values rather
+      # than forwarding raw JSON: quotes, semicolons and newlines are all data.
+      injection = ~s(x"; delete $p isa person; insert $q isa person, has name "pwned\n--)
+
+      assert {:ok, _} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   given $n: string;
+                   insert $p isa person, has name == $n;
+                 """,
+                 given_rows: [%{"n" => injection}]
+               )
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(conn, database, "match $p isa person, has name $n; select $n;",
+                 transaction_type: :read
+               )
+
+      assert ConceptRow.value(row, "n") == injection
+    end
+
+    test "given also works inside an explicit transaction", %{conn: conn, database: database} do
+      assert :ok =
+               TypeDB.transaction(conn, database, :write, fn tx ->
+                 {:ok, _} =
+                   Transaction.query(
+                     tx,
+                     """
+                       given $n: string;
+                       insert $p isa person, has name == $n;
+                     """,
+                     given_rows: [%{"n" => "Carol"}]
+                   )
+
+                 :ok
+               end)
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(conn, database, "match $p isa person, has name $n; select $n;",
+                 transaction_type: :read
+               )
+
+      assert ConceptRow.value(row, "n") == "Carol"
+    end
+
+    test "given carries every TypeDB value type", %{conn: conn, database: database} do
+      assert {:ok, _} =
+               TypeDB.query(conn, database, """
+                 define
+                   attribute flag, value boolean;
+                   attribute ratio, value double;
+                   attribute amount, value decimal;
+                   attribute born, value date;
+                   attribute seen, value datetime;
+                   attribute zoned, value datetime-tz;
+                   attribute elapsed, value duration;
+                   entity sample,
+                     owns flag, owns ratio, owns amount, owns born,
+                     owns seen, owns zoned, owns elapsed;
+               """)
+
+      cases = [
+        {"flag", "boolean", true},
+        {"ratio", "double", 3.5},
+        {"amount", "decimal", %Concept.Value{value: "12.345", value_type: "decimal"}},
+        {"born", "date", ~D[2024-03-01]},
+        {"seen", "datetime", ~N[2024-03-01 10:30:00]},
+        {"zoned", "datetime-tz", TypeDB.DateTimeTZ.parse("2024-03-01T10:30:00+02:00")},
+        {"zoned", "datetime-tz", DateTime.from_naive!(~N[2024-03-01 10:30:00], "Etc/UTC")},
+        {"elapsed", "duration", TypeDB.Duration.parse("P1Y2M3DT4H5M6S")}
+      ]
+
+      for {attribute, value_type, value} <- cases do
+        assert {:ok, _} =
+                 TypeDB.query(
+                   conn,
+                   database,
+                   """
+                     given $v: #{value_type};
+                     insert $s isa sample, has #{attribute} == $v;
+                   """,
+                   given_rows: [%{"v" => value}],
+                   commit: false
+                 ),
+               "expected #{value_type} value #{inspect(value)} to be accepted"
+      end
+    end
+
+    test "a concept from an earlier answer can be given back", %{conn: conn, database: database} do
+      assert {:ok, _} = TypeDB.query(conn, database, ~s(insert $p isa person, has name "Anchor";))
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(conn, database, "match $p isa person; select $p;", transaction_type: :read)
+
+      entity = row["p"]
+      assert %Concept.Entity{} = entity
+
+      assert {:ok, %{rows: [found]}} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   given $p: person;
+                   match $p has name $n;
+                   select $n;
+                 """,
+                 given_rows: [%{"p" => entity}],
+                 transaction_type: :read
+               )
+
+      assert ConceptRow.value(found, "n") == "Anchor"
+    end
+
+    test "nil leaves an optional column unbound", %{conn: conn, database: database} do
+      assert {:ok, _} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   given $n: string?;
+                   insert $p isa person;
+                 """,
+                 given_rows: [%{"n" => nil}]
+               )
+    end
+
+    test "a given stage without rows is rejected by the server", %{conn: conn, database: database} do
+      assert {:error, %Error{kind: :server}} =
+               TypeDB.query(conn, database, """
+                 given $n: string;
+                 insert $p isa person, has name == $n;
+               """)
+    end
+  end
+
   describe "transactions" do
     setup %{conn: conn, database: database} do
       assert {:ok, _} = TypeDB.query(conn, database, @schema)
