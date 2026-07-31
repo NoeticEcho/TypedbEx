@@ -78,7 +78,9 @@ defmodule TypeDB.HTTPTest do
       name = :"finch_test_#{System.unique_integer([:positive])}"
 
       assert {:ok, state} = FinchAdapter.init(name, [])
-      assert state.name == :"#{name}.Finch"
+      # Unique per instance so a restarted connection cannot collide with the
+      # corpse of its predecessor; the connection name stays as the prefix.
+      assert Atom.to_string(state.name) =~ ~r/^#{name}\.Finch\.\d+$/
       assert state.owned?
       assert is_pid(Process.whereis(state.name))
 

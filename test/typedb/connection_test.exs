@@ -169,6 +169,56 @@ defmodule TypeDB.ConnectionTest do
     end
   end
 
+  describe "supervision" do
+    test "a connection restarted by its supervisor still works", %{stub: stub} do
+      # Finch does not release its registered name synchronously when a pool
+      # dies, so a per-connection-name pool would make the restarted connection
+      # adopt the corpse of its predecessor and fail every request afterwards.
+      name = :"restart_probe_#{System.unique_integer([:positive])}"
+
+      children = [
+        {TypeDB, name: name, url: Stub.url(stub), username: "admin", password: "password", max_retries: 0}
+      ]
+
+      {:ok, supervisor} = Supervisor.start_link(children, strategy: :one_for_one)
+
+      assert {:ok, _} = TypeDB.Database.list(name)
+
+      first = Process.whereis(name)
+      Process.exit(first, :kill)
+
+      wait_until(fn ->
+        case Process.whereis(name) do
+          nil -> false
+          pid -> pid != first
+        end
+      end)
+
+      assert {:ok, _} = TypeDB.Database.list(name),
+             "a supervised connection must be usable again after a restart"
+
+      Supervisor.stop(supervisor)
+    end
+
+    test "two connections started under different names do not share a pool", %{stub: stub} do
+      names = for _ <- 1..2, do: :"pool_isolation_#{System.unique_integer([:positive])}"
+
+      pids =
+        for name <- names do
+          {:ok, pid} =
+            TypeDB.start_link(name: name, url: Stub.url(stub), username: "admin", password: "password")
+
+          assert {:ok, _} = TypeDB.Database.list(name)
+          pid
+        end
+
+      adapter_states = Enum.map(names, &TypeDB.Connection.adapter_state/1)
+      assert Enum.map(adapter_states, & &1.name) |> Enum.uniq() |> length() == 2
+
+      Enum.each(pids, &TypeDB.stop/1)
+    end
+  end
+
   describe "proactive token refresh" do
     @tag stub_opts: [databases: ["social"], token_lifetime_seconds: 2, token_ttl_ms: 2_000]
     test "renews before the token expires, so no request is ever rejected", %{conn: conn, stub: stub} do
@@ -297,6 +347,25 @@ defmodule TypeDB.ConnectionTest do
 
       # The connection process handled at most the sign-in; it is not a bottleneck.
       assert Process.alive?(conn_pid)
+    end
+  end
+
+  defp wait_until(fun, timeout \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_until(fun, deadline)
+  end
+
+  defp do_wait_until(fun, deadline) do
+    cond do
+      fun.() ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("condition did not become true within the timeout")
+
+      true ->
+        Process.sleep(20)
+        do_wait_until(fun, deadline)
     end
   end
 end

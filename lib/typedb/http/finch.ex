@@ -65,16 +65,23 @@ defmodule TypeDB.HTTP.Finch do
         {:ok, %__MODULE__{name: existing, owned?: false}}
 
       true ->
-        start_pool(:"#{connection_name}.Finch", opts)
+        start_pool(pool_name(connection_name), opts)
     end
+  end
+
+  # Unique per *instance*, not per connection name. Finch does not release its
+  # registered name synchronously when a pool dies, so a connection restarted by
+  # its supervisor would otherwise collide with the corpse of its predecessor —
+  # and `Finch.start_link/1` answers `{:error, {:already_started, _}}` for a name
+  # whose registry is already gone for good. The connection name stays as the
+  # prefix so pools remain identifiable in Finch's own telemetry.
+  defp pool_name(connection_name) do
+    :"#{connection_name}.Finch.#{System.unique_integer([:positive])}"
   end
 
   defp start_pool(name, opts) do
     case Finch.start_link(name: name, pools: pools(opts)) do
       {:ok, _pid} ->
-        {:ok, %__MODULE__{name: name, owned?: true}}
-
-      {:error, {:already_started, _pid}} ->
         {:ok, %__MODULE__{name: name, owned?: true}}
 
       {:error, reason} ->
