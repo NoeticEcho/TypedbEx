@@ -150,11 +150,46 @@ defmodule TypeDB.Connection do
   """
   @spec renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, Error.t()}
   def renew_token(conn, failed_at) do
-    GenServer.call(conn, {:renew_token, failed_at}, call_timeout(config(conn)))
+    timeout = call_timeout(config(conn))
+
+    try do
+      GenServer.call(conn, {:renew_token, failed_at}, timeout)
+    catch
+      :exit, {:timeout, {GenServer, :call, _args}} ->
+        {:error, renewal_timeout_error(conn, timeout)}
+
+      # The connection stopped while we were queued on it. Every other entry
+      # point answers a connection that is not running by raising, so this one
+      # does too rather than inventing an error kind for it.
+      :exit, {_reason, {GenServer, :call, _args}} ->
+        reraise not_running(conn), __STACKTRACE__
+    end
   end
 
+  # Renewals are serialised through the connection process, so the wait is
+  # bounded by what a *sign-in* costs — connecting plus one round trip — not by
+  # the per-request timeout, which describes something else entirely and used to
+  # expire before a single slow sign-in could even finish. Doubled because a
+  # caller may have to wait out a sign-in already in flight before its own is
+  # attempted, plus a fixed margin for queueing.
+  @renewal_queue_margin_ms :timer.seconds(1)
+
   defp call_timeout(%Config{timeout: :infinity}), do: :infinity
-  defp call_timeout(%Config{timeout: timeout}), do: timeout + :timer.seconds(5)
+  defp call_timeout(%Config{connect_timeout: :infinity}), do: :infinity
+
+  defp call_timeout(%Config{timeout: timeout, connect_timeout: connect_timeout}) do
+    2 * (timeout + connect_timeout) + @renewal_queue_margin_ms
+  end
+
+  defp renewal_timeout_error(conn, timeout) do
+    Error.new(
+      :timeout,
+      "TypeDB connection #{inspect(conn)} did not renew its access token within #{timeout}ms. " <>
+        "Sign-in is serialised through the connection process, so either sign-in itself is slower " <>
+        "than :timeout and :connect_timeout allow for, or the HTTP adapter is ignoring them.",
+      reason: :renewal_timeout
+    )
+  end
 
   defp usable?(:unknown), do: true
   defp usable?(deadline), do: System.monotonic_time(:millisecond) < deadline

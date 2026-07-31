@@ -333,6 +333,54 @@ defmodule TypeDB.ConnectionTest do
       assert {:error, %Error{kind: :unauthenticated, code: "AUT3"}} = TypeDB.Database.list(conn)
     end
 
+    defmodule StuckAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      # An adapter that ignores the timeouts it is handed. Real ones should not,
+      # but `TypeDB.HTTP` is public and this is the shape of every "my whole pool
+      # wedged" incident, so the driver has to survive it.
+      def init(_name, opts), do: {:ok, opts[:block_ms]}
+
+      def request(block_ms, _m, url, _h, _b, _o) do
+        Process.sleep(block_ms)
+        {:error, TypeDB.Error.new(:timeout, "wedged: #{url}")}
+      end
+    end
+
+    test "callers queued behind a wedged sign-in get an error, and never exit" do
+      # Budget: 2 * (timeout + connect_timeout) + 1s of queueing margin, so ~1.1s
+      # here. The adapter blocks well past it, which is the only way to overrun a
+      # budget derived from the sign-in's own cost.
+      name = :"wedged_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:1",
+          username: "admin",
+          password: "password",
+          timeout: 50,
+          connect_timeout: 10,
+          http: {StuckAdapter, [block_ms: 4_000]}
+        )
+
+      on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
+
+      results =
+        1..6
+        |> Task.async_stream(fn _ -> Connection.token(name) end, max_concurrency: 6, timeout: 30_000)
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      # None of these may be an exit: `Connection.token/1` is documented to
+      # answer {:ok, token} | {:error, %TypeDB.Error{}}, and a caller that has
+      # merely queued too long is not a caller that should be killed.
+      for result <- results do
+        assert {:error, %Error{kind: :timeout, message: message}} = result
+        assert message =~ "did not renew its access token"
+      end
+    end
+
     @tag stub_opts: [databases: ["social"], token_uses: 1]
     test "a rejected token is renewed and the request retried", %{conn: conn, stub: stub} do
       assert {:ok, _} = TypeDB.Database.list(conn)
