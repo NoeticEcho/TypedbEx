@@ -176,17 +176,63 @@ defmodule TypeDB.Config do
     {:error, config_error("invalid :url #{inspect(other)}, expected a string")}
   end
 
+  # `URI.parse/1` never fails: it launders a mistyped port into the scheme's
+  # default, mangles an unbalanced bracket into a plausible host and drops
+  # embedded credentials without a word. This function exists to reject bad
+  # configuration, so every one of those is an error instead.
   defp parse_absolute_url(candidate, original) do
-    uri = URI.parse(candidate)
+    with {:ok, uri} <- parse_uri(candidate, original),
+         :ok <- check_scheme_and_host(uri, original),
+         :ok <- check_port(uri, original),
+         :ok <- check_userinfo(uri, original) do
+      {:ok, "#{uri.scheme}://#{host(uri)}#{port_suffix(uri)}#{trim_path(uri.path)}"}
+    end
+  end
 
+  defp parse_uri(candidate, original) do
+    case URI.new(candidate) do
+      {:ok, uri} ->
+        {:ok, uri}
+
+      {:error, part} ->
+        {:error,
+         config_error(
+           "invalid :url #{inspect(original)}: unexpected #{inspect(part)}. A port must be numeric, " <>
+             "and a host must contain no spaces and no unbalanced brackets."
+         )}
+    end
+  end
+
+  defp check_scheme_and_host(uri, original) do
     if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" do
-      {:ok, "#{uri.scheme}://#{uri.host}#{port_suffix(uri)}#{trim_path(uri.path)}"}
+      :ok
     else
       {:error, config_error("invalid :url #{inspect(original)}, expected an http(s) URL")}
     end
   end
 
-  defp port_suffix(%URI{port: nil}), do: ""
+  defp check_port(%URI{port: port}, _original) when port in 1..65_535, do: :ok
+
+  defp check_port(%URI{port: port}, original) do
+    {:error, config_error("invalid :url #{inspect(original)}: port #{inspect(port)} is outside 1..65535")}
+  end
+
+  defp check_userinfo(%URI{userinfo: nil}, _original), do: :ok
+
+  defp check_userinfo(%URI{}, original) do
+    {:error,
+     config_error(
+       "invalid :url #{inspect(original)}: credentials must not be embedded in the URL, because " <>
+         "TypeDB signs in over its own endpoint. Pass :username and :password instead."
+     )}
+  end
+
+  # `URI` strips the brackets from an IPv6 literal, and putting the host back
+  # without them yields an unusable "http://::1:8000".
+  defp host(%URI{host: host}) do
+    if String.contains?(host, ":"), do: "[#{host}]", else: host
+  end
+
   defp port_suffix(%URI{scheme: "http", port: 80}), do: ""
   defp port_suffix(%URI{scheme: "https", port: 443}), do: ""
   defp port_suffix(%URI{port: port}), do: ":#{port}"

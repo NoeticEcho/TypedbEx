@@ -48,6 +48,34 @@ defmodule TypeDB.ConfigTest do
     test "rejects a non-string url" do
       assert {:error, %Error{kind: :config}} = Config.new(url: :localhost, token: "t")
     end
+
+    test "keeps an IPv6 literal usable" do
+      # URI strips the brackets; putting the host back without them yields
+      # "http://::1:8000", which no HTTP client can connect to.
+      assert {:ok, config} = Config.new(url: "http://[::1]:8000", token: "t")
+      assert config.base_url == "http://[::1]:8000"
+      assert Config.url(config, "/databases") == "http://[::1]:8000/v1/databases"
+    end
+
+    # `URI.parse/1` accepts all of these and quietly turns them into something
+    # else. Config exists to reject bad configuration, not to launder it.
+    for {url, expected} <- [
+          {"http://host:abc", "A port must be numeric"},
+          {"http://host:99999999", "outside 1..65535"},
+          {"http://host:0", "outside 1..65535"},
+          {"http://user:pw@host:8000", "Pass :username and :password instead"},
+          {"http://[bad", "unbalanced brackets"},
+          {"http://ho st:8000", "no spaces"},
+          {"http://", "expected an http(s) URL"}
+        ] do
+      test "rejects #{inspect(url)}" do
+        assert {:error, %Error{kind: :config, message: message}} =
+                 Config.new(url: unquote(url), token: "t")
+
+        assert message =~ unquote(expected)
+        assert message =~ inspect(unquote(url))
+      end
+    end
   end
 
   describe "new/1 credentials" do
