@@ -26,13 +26,13 @@ defmodule TypeDB.Stub.Router do
       {:username, Keyword.get(opts, :username, "admin")},
       {:password, Keyword.get(opts, :password, "password")},
       {:token_uses, Keyword.get(opts, :token_uses, :infinity)},
+      {:token_ttl_ms, Keyword.get(opts, :token_ttl_ms, :infinity)},
       {:databases, MapSet.new(Keyword.get(opts, :databases, []))},
       {:users, MapSet.new(Keyword.get(opts, :users, ["admin"]))},
       {:transactions, %{}},
       {:answers, Keyword.get(opts, :answers, %{})},
       {:fail_commit, Keyword.get(opts, :fail_commit, false)},
-      {:token_counter, 0},
-      {:tokens, %{}}
+      {:token_counter, 0}
     ])
 
     fn method, path, headers, body -> route(state, method, path, headers, body) end
@@ -238,10 +238,11 @@ defmodule TypeDB.Stub.Router do
     payload = decode(body)
 
     if payload["username"] == get(state, :username) and payload["password"] == get(state, :password) do
-      counter = get(state, :token_counter) + 1
-      put(state, :token_counter, counter)
+      # Counter and token row are updated atomically: sign-in is concurrent, and
+      # a lost update here would surface as a spurious "unknown token".
+      counter = :ets.update_counter(state, :token_counter, 1)
       token = "stub-token-#{counter}"
-      put(state, :tokens, Map.put(get(state, :tokens), token, 0))
+      :ets.insert(state, {{:token, token}, 0, System.monotonic_time(:millisecond)})
       json(200, %{token: token})
     else
       error(401, "AUT1", "Invalid credential supplied.")
@@ -249,24 +250,45 @@ defmodule TypeDB.Stub.Router do
   end
 
   defp verify_token(state, headers) do
-    with {:ok, "Bearer " <> token} <- Map.fetch(headers, "authorization"),
-         tokens = get(state, :tokens),
-         {:ok, uses} <- Map.fetch(tokens, token) do
-      case get(state, :token_uses) do
-        :infinity ->
-          :ok
+    case Map.fetch(headers, "authorization") do
+      {:ok, "Bearer " <> token} -> verify_bearer(state, token)
+      _ -> {:error, error(401, "AUT2", "Missing token (expected as the authorization bearer).")}
+    end
+  end
 
-        limit when uses >= limit ->
-          put(state, :tokens, Map.delete(tokens, token))
+  # Two independent expiry models, because they test different things:
+  #
+  #   * `:token_ttl_ms` mirrors a real server — a token is shared by everyone
+  #     holding it and dies at a wall-clock deadline
+  #   * `:token_uses` is a blunt instrument for forcing an exact number of 401s
+  #     in a sequential test
+  defp verify_bearer(state, token) do
+    case :ets.lookup(state, {:token, token}) do
+      [{_key, _uses, issued_at}] -> check_expiry(state, token, issued_at)
+      [] -> {:error, error(401, "AUT3", "Invalid token supplied.")}
+    end
+  end
+
+  defp check_expiry(state, token, issued_at) do
+    ttl = get(state, :token_ttl_ms)
+    age = System.monotonic_time(:millisecond) - issued_at
+
+    cond do
+      ttl != :infinity and age > ttl ->
+        {:error, error(401, "AUT3", "Invalid token supplied.")}
+
+      get(state, :token_uses) == :infinity ->
+        :ok
+
+      true ->
+        # update_counter is atomic, so concurrent uses cannot lose a count.
+        limit = get(state, :token_uses)
+
+        if :ets.update_counter(state, {:token, token}, {2, 1}) <= limit do
+          :ok
+        else
           {:error, error(401, "AUT3", "Invalid token supplied.")}
-
-        _ ->
-          put(state, :tokens, Map.put(tokens, token, uses + 1))
-          :ok
-      end
-    else
-      :error -> {:error, error(401, "AUT2", "Missing token (expected as the authorization bearer).")}
-      {:ok, _other} -> {:error, error(401, "AUT2", "Missing token (expected as the authorization bearer).")}
+        end
     end
   end
 

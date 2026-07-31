@@ -8,7 +8,7 @@ An Elixir driver for [TypeDB](https://typedb.com) 3.x, built on the TypeDB HTTP 
 
 - **No runtime dependencies.** JSON comes from Elixir's built-in `JSON`; HTTP from OTP's `:httpc`. Swap either out if you'd rather use `Req` or `Jason`.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
-- **Tokens handled for you.** Sign-in is lazy, renewal on expiry is transparent, and the request that hit the expired token is retried once.
+- **Tokens handled for you.** Sign-in is lazy, renewal on expiry is transparent, and the request that hit the expired token is retried. Concurrent renewals collapse into a single sign-in — verified with 200-way bursts against a server whose tokens expire mid-flight.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
 - **Errors you can branch on.** Every failure is a `TypeDB.Error` carrying TypeDB's stable error code.
 
@@ -263,6 +263,7 @@ on that, not on messages.
 | `:connect_timeout` | `10_000` | TCP/TLS connect timeout, ms |
 | `:http` | `{TypeDB.HTTP.Httpc, []}` | adapter and its options |
 | `:max_retries` | `1` | transport-failure retries for idempotent requests |
+| `:max_auth_renewals` | `2` | token renewals a single request may make after a `401` |
 | `:retry_backoff` | `{:exponential, 100}` | or a `(attempt -> ms)` function |
 
 ### TLS
@@ -331,10 +332,16 @@ server that speaks the TypeDB API — so transport, encoding and error mapping a
 exercised without a database. The integration suite runs the same paths against a
 real TypeDB server.
 
-A third, opt-in suite checks the TLS posture — untrusted certificate rejected,
-pinned CA accepted, hostname mismatch refused — against a TypeDB server started
-with `--server.encryption.enabled`. `TypeDB.TLSIntegrationTest` documents how to
-mint the certificates and start that server.
+Two further opt-in suites cover things an ordinary run never reaches:
+
+- `TypeDB.TLSIntegrationTest` — untrusted certificate rejected, pinned CA
+  accepted, hostname mismatch refused, against a server started with
+  `--server.encryption.enabled`.
+- `TypeDB.TokenRenewalIntegrationTest` — 200-way bursts, concurrent writes and a
+  long transaction, all straddling token expiry, against a server started with
+  `--server.authentication.token-expiration-seconds 5`.
+
+Each module's doc carries the exact commands to stand up the server it needs.
 
 ## License
 

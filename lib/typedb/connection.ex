@@ -32,8 +32,14 @@ defmodule TypeDB.Connection do
 
   TypeDB issues expiring bearer tokens. This driver acquires one lazily on the
   first request, caches it, and renews it transparently when the server answers
-  `401` with an `AUT*` code — the failed request is then retried once. Callers
-  never see token churn.
+  `401` with an `AUT*` code — the failed request is then retried. Callers never
+  see token churn.
+
+  Concurrent renewals collapse: whoever gets there first signs in, and everyone
+  else takes that token. Under a burst wide enough to outlive a token, the shared
+  token can itself expire between being handed out and being used, so a retry can
+  be rejected in turn; `:max_auth_renewals` (default `2`) bounds how many times a
+  single request will go around that loop before giving up.
 
   When a connection is configured with a pre-issued `:token` there is nothing to
   renew, and expiry surfaces as `%TypeDB.Error{kind: :unauthenticated}`.
@@ -132,23 +138,27 @@ defmodule TypeDB.Connection do
           {:ok, term()} | {:error, Error.t()}
   def request(conn, method, path, opts \\ []) do
     config = config(conn)
-    do_request(conn, config, method, path, opts, _renewed? = false)
+    do_request(conn, config, method, path, opts, _renewals = 0)
   end
 
-  defp do_request(conn, config, method, path, opts, renewed?) do
+  defp do_request(conn, config, method, path, opts, renewals) do
     authenticated? = Keyword.get(opts, :authenticated, true)
 
+    # The send time is stamped once the token is in hand, never before: acquiring
+    # it can block on a sign-in, and a timestamp from before that would make the
+    # connection believe the token it just minted is newer than this failure.
     with {:ok, token} <- maybe_token(conn, config, authenticated?),
+         sent_at = System.monotonic_time(:millisecond),
          {:ok, response} <- send_request(conn, config, method, path, opts, token) do
       case handle_status(response, opts) do
-        {:retry_unauthenticated, error} when authenticated? and not renewed? ->
-          case renew_token(conn, config, token) do
-            {:ok, _new_token} -> do_request(conn, config, method, path, opts, true)
+        {:retry_unauthenticated, error} when authenticated? and renewals < config.max_auth_renewals ->
+          case renew_token(conn, config, sent_at) do
+            {:ok, _new_token} -> do_request(conn, config, method, path, opts, renewals + 1)
             {:error, renew_error} -> {:error, auth_error(error, renew_error)}
           end
 
         # A 401 we cannot act on: an unauthenticated endpoint rejected us, or the
-        # renewed token was rejected too.
+        # renewal budget is spent.
         {:retry_unauthenticated, error} ->
           {:error, error}
 
@@ -172,14 +182,25 @@ defmodule TypeDB.Connection do
   defp maybe_token(_conn, _config, false), do: {:ok, nil}
 
   defp maybe_token(conn, config, true) do
-    case :ets.lookup(conn, @token_key) do
-      [{@token_key, token}] when is_binary(token) -> {:ok, token}
-      _ -> renew_token(conn, config, nil)
+    case read_token(conn) do
+      token when is_binary(token) -> {:ok, token}
+      nil -> renew_token(conn, config, :any)
     end
   end
 
-  defp renew_token(conn, config, stale_token) do
-    GenServer.call(conn, {:renew_token, stale_token}, call_timeout(config))
+  defp read_token(conn) do
+    case :ets.lookup(conn, @token_key) do
+      [{@token_key, token}] when is_binary(token) -> token
+      _ -> nil
+    end
+  end
+
+  # `:any` means "any token will do", used before the first request. A timestamp
+  # means "the token I used at that moment was rejected", which is what lets the
+  # connection tell a genuinely stale token from one another process has already
+  # replaced.
+  defp renew_token(conn, config, failed_at) do
+    GenServer.call(conn, {:renew_token, failed_at}, call_timeout(config))
   end
 
   defp call_timeout(%Config{timeout: :infinity}), do: :infinity
@@ -318,7 +339,14 @@ defmodule TypeDB.Connection do
         :ets.insert(table, {@token_key, config.static_token})
       end
 
-      {:ok, %{config: config, table: table, http_state: http_state, token: config.static_token}}
+      {:ok,
+       %{
+         config: config,
+         table: table,
+         http_state: http_state,
+         token: config.static_token,
+         issued_at: if(is_binary(config.static_token), do: now(), else: nil)
+       }}
     end
   end
 
@@ -338,10 +366,15 @@ defmodule TypeDB.Connection do
   end
 
   @impl true
-  def handle_call({:renew_token, stale_token}, _from, state) do
+  def handle_call({:renew_token, failed_at}, _from, state) do
     cond do
-      # Someone else already renewed while this caller was queued.
-      is_binary(state.token) and state.token != stale_token ->
+      # The cached token was minted after the caller's request failed, so another
+      # process has already replaced the one that was rejected. Comparing issue
+      # times rather than token values matters under a burst: token equality
+      # would happily hand back a token that was already stale when it was
+      # cached, burning the caller's renewal budget on a request that cannot
+      # succeed.
+      is_binary(state.token) and newer_than?(state.issued_at, failed_at) ->
         {:reply, {:ok, state.token}, state}
 
       is_binary(state.config.static_token) ->
@@ -357,14 +390,20 @@ defmodule TypeDB.Connection do
         case sign_in(state) do
           {:ok, token} ->
             :ets.insert(state.table, {@token_key, token})
-            {:reply, {:ok, token}, %{state | token: token}}
+            {:reply, {:ok, token}, %{state | token: token, issued_at: now()}}
 
           {:error, error} ->
             :ets.delete(state.table, @token_key)
-            {:reply, {:error, error}, %{state | token: nil}}
+            {:reply, {:error, error}, %{state | token: nil, issued_at: nil}}
         end
     end
   end
+
+  defp newer_than?(_issued_at, :any), do: true
+  defp newer_than?(nil, _failed_at), do: false
+  defp newer_than?(issued_at, failed_at), do: issued_at > failed_at
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   @impl true
   def terminate(_reason, state) do

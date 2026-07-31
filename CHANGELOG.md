@@ -40,6 +40,13 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   or to a codec you configure.
 - `mix typedb.check` — validates `.tql` files with TypeDB's `typeql-check` CLI.
 
+### Verified under load
+
+- 200-way concurrent bursts, concurrent writes and long transactions straddling
+  token expiry, against a server configured with a five-second token lifetime.
+  Renewals coalesce into a single sign-in per generation, and `:max_auth_renewals`
+  bounds how many times one request will renew before giving up.
+
 ### Verified against
 
 - TypeDB 3.12.1 (HTTP API v1) on Elixir 1.20.2 / OTP 29, including an opt-in

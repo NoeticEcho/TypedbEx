@@ -169,6 +169,65 @@ defmodule TypeDB.ConnectionTest do
     end
   end
 
+  describe "token renewal under concurrency" do
+    @tag stub_opts: [databases: ["social"], token_uses: 1]
+    test "concurrent renewals coalesce into far fewer sign-ins than callers", %{conn: conn, stub: stub} do
+      # Every token is spent by the first request that uses it, so all 40 callers
+      # are forced down the renewal path at once.
+      1..40
+      |> Task.async_stream(fn _ -> TypeDB.Database.list(conn) end, max_concurrency: 40, timeout: 30_000)
+      |> Stream.run()
+
+      signins = length(requests(stub, "/signin"))
+
+      # Whoever gets to the connection first signs in; everyone queued behind
+      # takes that token instead of minting another.
+      assert signins > 1, "expected renewals to happen at all"
+      assert signins < 40, "expected renewals to coalesce, but every caller signed in (#{signins})"
+    end
+
+    @tag stub_opts: [databases: ["social"], token_ttl_ms: 0]
+    test "a token that is stale the moment it is minted gives up rather than looping", %{
+      conn: conn,
+      stub: stub
+    } do
+      # Pathological: no token can ever be used. The request must fail with the
+      # server's own error after a bounded number of renewals, not spin.
+      assert {:error, %Error{kind: :unauthenticated, code: "AUT3"}} = TypeDB.Database.list(conn)
+
+      # One sign-in to get started, then one per renewal in the budget.
+      assert length(requests(stub, "/signin")) <= 3
+      assert length(requests(stub, "/databases")) == 3
+    end
+
+    @tag stub_opts: [databases: ["social"], token_ttl_ms: 0]
+    @tag conn_opts: [max_auth_renewals: 5]
+    test "the renewal budget is what bounds the loop", %{conn: conn, stub: stub} do
+      assert {:error, %Error{code: "AUT3"}} = TypeDB.Database.list(conn)
+      assert length(requests(stub, "/databases")) == 6
+    end
+
+    @tag stub_opts: [databases: ["social"], token_uses: 1]
+    @tag conn_opts: [max_auth_renewals: 0]
+    test "max_auth_renewals: 0 turns renewal-and-retry off", %{conn: conn} do
+      # The first request mints a token and consumes its single use; the second
+      # is rejected and, with no renewal budget, surfaces the 401.
+      assert {:ok, _} = TypeDB.Database.list(conn)
+      assert {:error, %Error{kind: :unauthenticated, code: "AUT3"}} = TypeDB.Database.list(conn)
+    end
+
+    @tag stub_opts: [databases: ["social"], token_uses: 1]
+    test "a rejected token is renewed and the request retried", %{conn: conn, stub: stub} do
+      assert {:ok, _} = TypeDB.Database.list(conn)
+      assert {:ok, _} = TypeDB.Database.list(conn)
+
+      assert length(requests(stub, "/signin")) == 2
+
+      tokens = stub |> requests("/databases") |> Enum.map(& &1.headers["authorization"])
+      assert ["Bearer stub-token-1", "Bearer stub-token-1", "Bearer stub-token-2"] = tokens
+    end
+  end
+
   describe "401 on unauthenticated endpoints" do
     test "is returned as an error rather than an internal retry tuple", %{stub: stub} do
       # /health and /version are called without a token. A server that answers 401

@@ -22,6 +22,10 @@ defmodule TypeDB.Config do
       `{TypeDB.HTTP.Httpc, []}`.
     * `:max_retries` — how many times to retry *idempotent* requests after a
       transport failure. Defaults to `1`.
+    * `:max_auth_renewals` — how many times a single request will renew its
+      token and retry after a `401`. Defaults to `2`; more than one matters only
+      when a burst of requests is wide enough for the freshly minted token to
+      expire before every one of them has used it.
     * `:retry_backoff` — either `{:exponential, base_ms}` or a
       `(attempt -> ms)` function. Defaults to `{:exponential, 100}`.
 
@@ -51,6 +55,7 @@ defmodule TypeDB.Config do
           http_adapter: module(),
           http_opts: keyword(),
           max_retries: non_neg_integer(),
+          max_auth_renewals: non_neg_integer(),
           retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer())
         }
 
@@ -68,6 +73,7 @@ defmodule TypeDB.Config do
     :http_adapter,
     :http_opts,
     :max_retries,
+    :max_auth_renewals,
     :retry_backoff
   ]
 
@@ -99,6 +105,7 @@ defmodule TypeDB.Config do
          http_adapter: adapter,
          http_opts: adapter_opts,
          max_retries: Keyword.get(opts, :max_retries, 1),
+         max_auth_renewals: Keyword.get(opts, :max_auth_renewals, 2),
          retry_backoff: backoff
        }}
     end
