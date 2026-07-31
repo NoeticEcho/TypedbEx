@@ -12,9 +12,9 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 ### Added
 
 - `TypeDB` — connection supervision, one-shot queries and bracketed transactions.
-- `TypeDB.Connection` — lazy sign-in, transparent token renewal with a single
-  retry, and per-connection configuration held in a read-concurrent ETS table so
-  requests run in the caller's process.
+- `TypeDB.Connection` — lazy sign-in, transparent token renewal bounded by
+  `:max_auth_renewals`, and per-connection configuration held in a
+  read-concurrent ETS table so requests run in the caller's process.
 - `TypeDB.Database` — list, get, create, create-if-not-exists, delete, schema and
   type-schema.
 - `TypeDB.User` — list, get, create, set password, delete.
