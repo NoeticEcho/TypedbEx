@@ -254,8 +254,22 @@ defmodule TypeDB.Connection do
 
   # The process the transport cannot work without, if it has one. Adapters that
   # hold no process of their own answer nil.
+  #
+  # The link is made here rather than assumed. `TypeDB.HTTP.Finch` happens to be
+  # linked already — `Finch.start_link/1` runs inside this process's `init/1` and
+  # links to its caller — but an adapter that adopts an existing pool or starts
+  # one with `GenServer.start/3` would not be, and would silently lose the
+  # supervision behaviour `c:TypeDB.HTTP.owner/1` documents. Linking twice is a
+  # no-op, and linking to a pid that is already dead delivers `{:EXIT, pid,
+  # :noproc}`, which the clause below turns into the same clean stop.
   defp adapter_owner(adapter, http_state) do
-    if function_exported?(adapter, :owner, 1), do: adapter.owner(http_state), else: nil
+    with true <- function_exported?(adapter, :owner, 1),
+         pid when is_pid(pid) <- adapter.owner(http_state) do
+      Process.link(pid)
+      pid
+    else
+      _ -> nil
+    end
   end
 
   defp init_adapter(%Config{http_adapter: adapter, http_opts: opts, name: name} = config) do
@@ -388,18 +402,21 @@ defmodule TypeDB.Connection do
   end
 
   defp do_sign_in(%{config: config, http_state: http_state}) do
-    body = JSON.encode_to_iodata!(%{username: config.username, password: config.password})
     headers = [{"content-type", "application/json"}, {"accept", "application/json"}]
     http_opts = [timeout: config.timeout, connect_timeout: config.connect_timeout]
     url = Config.url(config, "/signin")
 
-    # Through `Transport.contain/3` for the same reason every other adapter call
-    # is: an adapter may raise. Here it matters more than anywhere else — this
-    # code runs *inside* the connection process, so an uncontained fault takes
-    # the connection down and every caller sees "connection is not running"
-    # instead of what actually happened.
+    # The whole body is inside `Transport.contain/3`, not just the adapter call.
+    # This runs *inside* the connection process, so anything that escapes takes
+    # the connection down and leaves every caller with "connection is not
+    # running", naming neither the fault nor where it came from. The JSON encode
+    # and decode are as able to raise as the adapter is — a configured codec is
+    # a plug-in point too, and `:password` admits any binary, so a secret that
+    # is not valid UTF-8 raises out of the encoder.
     result =
       Transport.contain(config.http_adapter, "POST #{url}", fn ->
+        body = JSON.encode_to_iodata!(%{username: config.username, password: config.password})
+
         config.http_adapter.request(http_state, :post, url, headers, body, http_opts)
       end)
 

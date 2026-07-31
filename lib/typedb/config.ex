@@ -239,8 +239,24 @@ defmodule TypeDB.Config do
     trunc(base * :math.pow(2, attempt - 1))
   end
 
+  # `parse_backoff` can only check the arity of a function, so the value it
+  # returns is checked here, at the one place it is used. `Transport` hands it
+  # straight to `Process.sleep/1`, which is a BIF that takes a non-negative
+  # integer and nothing else — so without this, a typo in a documented option
+  # raises FunctionClauseError in the *caller's* process, outside `contain/3`,
+  # and escapes as a bare exception rather than a `%TypeDB.Error{}`.
   def backoff(%__MODULE__{retry_backoff: fun}, attempt) when is_function(fun, 1) do
-    fun.(attempt)
+    case fun.(attempt) do
+      delay when is_integer(delay) and delay >= 0 ->
+        delay
+
+      other ->
+        raise TypeDB.Error.new(
+                :config,
+                ":retry_backoff returned #{inspect(other)} for attempt #{attempt}, " <>
+                  "but it must return a non-negative integer number of milliseconds"
+              )
+    end
   end
 
   # Anything before "://" is a scheme. Note that URI.parse/1 reads

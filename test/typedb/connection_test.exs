@@ -355,6 +355,87 @@ defmodule TypeDB.ConnectionTest do
       Supervisor.stop(supervisor)
     end
 
+    # `c:TypeDB.HTTP.owner/1` documents that "the connection links itself to that
+    # process". Finch is linked anyway, because Finch.start_link/1 runs inside
+    # init/1 — so an adapter that adopts a pool, or starts one unlinked, is the
+    # only thing that proves the connection makes the link itself.
+    defmodule UnlinkedOwnerAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(_name, opts) do
+        # Deliberately NOT start_link: nothing links this to the connection
+        # except the connection choosing to.
+        {:ok, pid} = Agent.start(fn -> :pool end)
+        send(opts[:test], {:owner, pid})
+        {:ok, pid}
+      end
+
+      def owner(pid), do: pid
+      def request(_pid, _m, _u, _h, _b, _o), do: {:error, TypeDB.Error.new(:transport, "no")}
+    end
+
+    test "the connection links to an owner the adapter did not link itself" do
+      # The connection is linked to this test process too, and it is about to
+      # die on purpose.
+      Process.flag(:trap_exit, true)
+      on_exit(fn -> Process.flag(:trap_exit, false) end)
+
+      name = :"unlinked_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:1",
+          token: "t",
+          http: {UnlinkedOwnerAdapter, [test: self()]}
+        )
+
+      assert_receive {:owner, owner}
+      {:links, links} = Process.info(pid, :links)
+      assert owner in links, "the connection never linked to the owner"
+
+      Process.exit(owner, :kill)
+
+      wait_until(fn -> not Process.alive?(pid) end)
+      refute Process.alive?(pid), "the connection outlived the transport it cannot work without"
+      assert_received {:EXIT, ^pid, {:transport_down, :killed}}
+    end
+
+    test "an owner that is already dead stops the connection rather than hanging" do
+      name = :"deadowner_#{System.unique_integer([:positive])}"
+      Process.flag(:trap_exit, true)
+      on_exit(fn -> Process.flag(:trap_exit, false) end)
+
+      {:ok, agent} = Agent.start(fn -> :pool end)
+      Process.exit(agent, :kill)
+      wait_until(fn -> not Process.alive?(agent) end)
+
+      # init/1 links to a pid that is already gone; the VM answers with
+      # {:EXIT, pid, :noproc}, which must be handled like any other transport death.
+      result =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:1",
+          token: "t",
+          http: {DeadOwnerAdapter, [pid: agent]}
+        )
+
+      case result do
+        {:ok, pid} -> wait_until(fn -> not Process.alive?(pid) end)
+        {:error, _} -> :ok
+      end
+    end
+
+    defmodule DeadOwnerAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(_name, opts), do: {:ok, opts[:pid]}
+      def owner(pid), do: pid
+      def request(_pid, _m, _u, _h, _b, _o), do: {:error, TypeDB.Error.new(:transport, "no")}
+    end
+
     test "two connections started under different names do not share a pool", %{stub: stub} do
       names = for _ <- 1..2, do: :"pool_isolation_#{System.unique_integer([:positive])}"
 
