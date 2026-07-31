@@ -34,8 +34,13 @@ defmodule TypeDB.HTTP.Req do
   @impl true
   def init(_name, opts) do
     if Code.ensure_loaded?(Req) do
+      # The connection injects :connect_timeout for adapters that configure
+      # connecting at pool-build time. This one does not — it applies the value
+      # per request — and Req rejects options it does not recognise, so the key
+      # is dropped here rather than forwarded.
       req =
         opts
+        |> Keyword.delete(:connect_timeout)
         |> Keyword.merge(retry: false, redirect: false, decode_body: false)
         |> Req.new()
 
@@ -68,13 +73,24 @@ defmodule TypeDB.HTTP.Req do
         {:ok, %{status: status, headers: flatten_headers(resp_headers), body: to_binary(resp_body)}}
 
       {:error, %{__exception__: true} = exception} ->
-        {:error,
-         TypeDB.Error.new(:transport, "request to #{url} failed: #{Exception.message(exception)}",
-           reason: exception
-         )}
+        {:error, transport_error(url, exception)}
 
       {:error, reason} ->
         {:error, TypeDB.Error.new(:transport, "request to #{url} failed: #{inspect(reason)}", reason: reason)}
+    end
+  end
+
+  # Req hands back whatever Mint or Finch raised, so a timeout arrives as an
+  # ordinary transport exception. It is reclassified here for the same reason the
+  # Finch adapter does it: callers branch on `:timeout`, and the same event must
+  # not change kind just because the adapter changed.
+  defp transport_error(url, exception) do
+    if Map.get(exception, :reason) in [:timeout, :pool_timeout] do
+      TypeDB.Error.new(:timeout, "request to #{url} timed out", reason: exception)
+    else
+      TypeDB.Error.new(:transport, "request to #{url} failed: #{Exception.message(exception)}",
+        reason: exception
+      )
     end
   end
 

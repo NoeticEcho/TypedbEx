@@ -134,6 +134,124 @@ defmodule TypeDB.HTTPTest do
     end
   end
 
+  describe "connect timeout" do
+    defmodule RecordingAdapter do
+      @moduledoc false
+      @behaviour TypeDB.HTTP
+
+      def init(_name, opts) do
+        send(opts[:test], {:adapter_opts, opts})
+        {:ok, :state}
+      end
+
+      def request(_s, _m, url, _h, _b, _o) do
+        {:error, TypeDB.Error.new(:transport, "not a real adapter: #{url}")}
+      end
+    end
+
+    # A pool is built once, so this is the only moment the connection's
+    # :connect_timeout can reach Mint — which reads it from transport_opts and
+    # nowhere else.
+    test "Finch turns the connection's :connect_timeout into the pool's transport_opts" do
+      assert %{default: pool} = FinchAdapter.pools(connect_timeout: 1234)
+      assert pool[:conn_opts][:transport_opts][:timeout] == 1234
+    end
+
+    test "a caller's own transport_opts timeout wins, and the rest of them survive" do
+      opts = [
+        connect_timeout: 1234,
+        conn_opts: [transport_opts: [timeout: 99, cacertfile: "/etc/ssl/private-ca.pem"]]
+      ]
+
+      assert %{default: pool} = FinchAdapter.pools(opts)
+      assert pool[:conn_opts][:transport_opts][:timeout] == 99
+      assert pool[:conn_opts][:transport_opts][:cacertfile] == "/etc/ssl/private-ca.pem"
+    end
+
+    test "TLS options survive alongside an injected connect timeout" do
+      opts = [connect_timeout: 1234, conn_opts: [transport_opts: [cacertfile: "/etc/ssl/private-ca.pem"]]]
+
+      assert %{default: pool} = FinchAdapter.pools(opts)
+      assert pool[:conn_opts][:transport_opts][:timeout] == 1234
+      assert pool[:conn_opts][:transport_opts][:cacertfile] == "/etc/ssl/private-ca.pem"
+    end
+
+    test "an explicit :pools map is left exactly as given" do
+      pools = %{"https://a.example" => [size: 2], default: [size: 1]}
+
+      assert FinchAdapter.pools(connect_timeout: 1234, pools: pools) == pools
+    end
+
+    test "the connection injects :connect_timeout, and :http may override it" do
+      name = :"ct_inject_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:1",
+          token: "t",
+          connect_timeout: 777,
+          http: {RecordingAdapter, [test: self()]}
+        )
+
+      assert_receive {:adapter_opts, opts}
+      assert opts[:connect_timeout] == 777
+      TypeDB.stop(pid)
+
+      name = :"ct_override_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:1",
+          token: "t",
+          connect_timeout: 777,
+          http: {RecordingAdapter, [test: self(), connect_timeout: 5]}
+        )
+
+      assert_receive {:adapter_opts, opts}
+      assert opts[:connect_timeout] == 5
+      TypeDB.stop(pid)
+    end
+
+    test "Req drops the injected :connect_timeout instead of handing Req an option it rejects" do
+      assert {:ok, %Req{}} = Req.init(:req_ct, connect_timeout: 1234)
+    end
+
+    @tag :slow
+    test "every adapter gives up on a black hole within its budget, and calls it a timeout" do
+      # 198.51.100.0/24 is TEST-NET-2: reserved for documentation, routed
+      # nowhere, so the SYN is swallowed rather than refused.
+      url = "http://198.51.100.1:8000/v1/health"
+      budget = 1_000
+
+      adapters = [
+        {FinchAdapter, :"finch_blackhole_#{System.unique_integer([:positive])}", [connect_timeout: budget]},
+        {Req, :req_blackhole, []},
+        {Httpc, :"httpc_blackhole_#{System.unique_integer([:positive])}", []}
+      ]
+
+      for {adapter, name, init_opts} <- adapters do
+        {:ok, state} = adapter.init(name, init_opts)
+
+        {elapsed, result} =
+          :timer.tc(fn ->
+            adapter.request(state, :get, url, [], nil, timeout: 30_000, connect_timeout: budget)
+          end)
+
+        elapsed = div(elapsed, 1000)
+
+        assert {:error, %TypeDB.Error{kind: :timeout}} = result,
+               "#{inspect(adapter)} reported #{inspect(result)} instead of a timeout"
+
+        assert elapsed < budget * 3,
+               "#{inspect(adapter)} waited #{elapsed}ms for a #{budget}ms connect budget"
+
+        if function_exported?(adapter, :terminate, 1), do: adapter.terminate(state)
+      end
+    end
+  end
+
   describe "Req adapter" do
     setup do
       unless Code.ensure_loaded?(Req) do

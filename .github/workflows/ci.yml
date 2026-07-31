@@ -110,6 +110,8 @@ jobs:
           TYPEDB_INTEGRATION_URL: http://localhost:8000
           TYPEDB_INTEGRATION_USERNAME: admin
           TYPEDB_INTEGRATION_PASSWORD: password
+          # Timeout tests spend real seconds waiting; this job already does.
+          TYPEDB_SLOW_TESTS: "1"
         run: mix test --include integration
 
       - name: Run integration tests through every adapter

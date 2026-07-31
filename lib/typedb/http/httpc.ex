@@ -88,15 +88,34 @@ defmodule TypeDB.HTTP.Httpc do
       {:error, :timeout} ->
         {:error, TypeDB.Error.new(:timeout, "request to #{url} timed out", reason: :timeout)}
 
+      # httpc buries a connect timeout inside :failed_connect instead of
+      # reporting :timeout. Unwrapped here so that a host that never answers is
+      # `:timeout` under every adapter, not just under Finch.
       {:error, {:failed_connect, _} = reason} ->
-        message = "could not connect to #{url}: #{format_reason(reason)}"
-        {:error, TypeDB.Error.new(:transport, message, reason: reason)}
+        if connect_timeout?(reason) do
+          {:error, TypeDB.Error.new(:timeout, "connecting to #{url} timed out", reason: reason)}
+        else
+          message = "could not connect to #{url}: #{format_reason(reason)}"
+          {:error, TypeDB.Error.new(:transport, message, reason: reason)}
+        end
 
       {:error, reason} ->
         {:error,
          TypeDB.Error.new(:transport, "request to #{url} failed: #{format_reason(reason)}", reason: reason)}
     end
   end
+
+  # `{:failed_connect, [{:to_address, {host, port}}, {:inet, [:inet], :timeout}]}`
+  # is the shape today, but the list is documented as opaque diagnostics, so the
+  # reason is searched for rather than positionally matched.
+  defp connect_timeout?({:failed_connect, info}) when is_list(info) do
+    Enum.any?(info, fn
+      {_transport, _opts, :timeout} -> true
+      _other -> false
+    end)
+  end
+
+  defp connect_timeout?(_reason), do: false
 
   # httpc distinguishes requests with and without an entity body by tuple arity,
   # and rejects the bodyless form for methods that take one — so POST and PUT

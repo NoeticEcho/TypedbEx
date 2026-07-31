@@ -214,7 +214,13 @@ defmodule TypeDB.Connection do
     if function_exported?(adapter, :owner, 1), do: adapter.owner(http_state), else: nil
   end
 
-  defp init_adapter(%Config{http_adapter: adapter, http_opts: opts, name: name}) do
+  defp init_adapter(%Config{http_adapter: adapter, http_opts: opts, name: name} = config) do
+    # Adapters that configure connecting at pool-build time — Finch does — cannot
+    # see the connection's `:connect_timeout` any other way, because `init/2` runs
+    # long before the first request. Injected with put_new so an adapter option of
+    # the same name still wins.
+    opts = Keyword.put_new(opts, :connect_timeout, config.connect_timeout)
+
     case adapter.init(name, opts) do
       {:ok, state} ->
         {:ok, state}

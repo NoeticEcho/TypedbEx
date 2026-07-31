@@ -290,6 +290,11 @@ on that, not on messages.
 | `:answer_count_limit` | — | default cap on answers per query; see below |
 | `:retry_backoff` | `{:exponential, 100}` | or a `(attempt -> ms)` function |
 
+`:connect_timeout` bounds *connecting*, under every adapter, and a host that
+never answers fails with `kind: :timeout` — not `:transport` — whichever adapter
+is in use. Waiting for a free connection when the pool is saturated is a
+different thing with a different knob: `http: {TypeDB.HTTP.Finch, pool_timeout: …}`.
+
 ### TLS
 
 Certificate verification is on by default under every adapter — peer

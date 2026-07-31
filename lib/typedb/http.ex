@@ -54,8 +54,11 @@ defmodule TypeDB.HTTP do
 
   `name` is the connection's registered name. Adapters that own named resources
   derive them from it so that two connections never collide; adapters that do
-  not, ignore it. `opts` is passed through verbatim from `:http`, so no
-  adapter ever receives an option meant for a different one.
+  not, ignore it. `opts` is passed through from `:http`, so no adapter ever
+  receives an option meant for a different one, with one addition: the
+  connection's `:connect_timeout` is injected unless `:http` already carries a
+  key of that name. Adapters that configure connecting once, at pool-build time,
+  need it here — by the time `c:request/6` runs the pool already exists.
   """
   @callback init(name :: atom(), opts :: keyword()) :: {:ok, state()} | {:error, term()}
 

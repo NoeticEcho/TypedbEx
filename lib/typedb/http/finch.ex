@@ -28,8 +28,15 @@ defmodule TypeDB.HTTP.Finch do
       and `:count` when you need per-host tuning.
     * `:conn_opts` — `Mint.HTTP.connect/4` options, merged into the default pool.
       TLS options go here as `transport_opts`.
+    * `:pool_timeout` — how long a request waits for a free connection when the
+      pool is saturated, in ms. Defaults to Finch's own default of `5_000`.
     * `:name` — an existing Finch instance to use instead of starting one. The
       adapter neither starts nor stops it.
+
+  The connection's `:connect_timeout` is applied as `transport_opts[:timeout]` on
+  the default pool, which is the only place Mint reads a connect timeout from.
+  Pass your own `conn_opts: [transport_opts: [timeout: …]]` to override it, or a
+  full `:pools` map to take over pool configuration entirely.
 
   ## TLS
 
@@ -46,9 +53,14 @@ defmodule TypeDB.HTTP.Finch do
   @default_size 50
   @default_count 1
 
-  defstruct [:name, :owned?, :supervisor]
+  defstruct [:name, :owned?, :supervisor, :pool_timeout]
 
-  @type t :: %__MODULE__{name: atom(), owned?: boolean(), supervisor: pid() | nil}
+  @type t :: %__MODULE__{
+          name: atom(),
+          owned?: boolean(),
+          supervisor: pid() | nil,
+          pool_timeout: timeout() | nil
+        }
 
   @impl true
   def init(connection_name, opts) do
@@ -62,7 +74,7 @@ defmodule TypeDB.HTTP.Finch do
          )}
 
       existing = opts[:name] ->
-        {:ok, %__MODULE__{name: existing, owned?: false, supervisor: nil}}
+        {:ok, %__MODULE__{name: existing, owned?: false, supervisor: nil, pool_timeout: opts[:pool_timeout]}}
 
       true ->
         start_pool(pool_name(connection_name), opts)
@@ -82,23 +94,40 @@ defmodule TypeDB.HTTP.Finch do
   defp start_pool(name, opts) do
     case Finch.start_link(name: name, pools: pools(opts)) do
       {:ok, pid} ->
-        {:ok, %__MODULE__{name: name, owned?: true, supervisor: pid}}
+        {:ok, %__MODULE__{name: name, owned?: true, supervisor: pid, pool_timeout: opts[:pool_timeout]}}
 
       {:error, reason} ->
         {:error, TypeDB.Error.new(:config, "could not start the Finch pool for TypeDB", reason: reason)}
     end
   end
 
-  defp pools(opts) do
+  @doc false
+  @spec pools(keyword()) :: map()
+  def pools(opts) do
     Keyword.get_lazy(opts, :pools, fn -> %{default: default_pool(opts)} end)
   end
 
   defp default_pool(opts) do
-    pool = [size: Keyword.get(opts, :size, @default_size), count: Keyword.get(opts, :count, @default_count)]
+    [
+      size: Keyword.get(opts, :size, @default_size),
+      count: Keyword.get(opts, :count, @default_count),
+      conn_opts: conn_opts(opts)
+    ]
+  end
 
-    case Keyword.fetch(opts, :conn_opts) do
-      {:ok, conn_opts} -> Keyword.put(pool, :conn_opts, conn_opts)
-      :error -> pool
+  # Mint reads the connect timeout from transport_opts, and a pool is built once —
+  # so this is the only chance the connection's :connect_timeout gets to apply.
+  # put_new throughout: whatever the caller wrote in :conn_opts wins.
+  defp conn_opts(opts) do
+    conn_opts = Keyword.get(opts, :conn_opts, [])
+
+    case Keyword.get(opts, :connect_timeout) do
+      nil ->
+        conn_opts
+
+      timeout ->
+        transport_opts = Keyword.put_new(Keyword.get(conn_opts, :transport_opts, []), :timeout, timeout)
+        Keyword.put(conn_opts, :transport_opts, transport_opts)
     end
   end
 
@@ -119,13 +148,16 @@ defmodule TypeDB.HTTP.Finch do
   end
 
   @impl true
-  def request(%__MODULE__{name: name}, method, url, headers, body, opts) do
+  def request(%__MODULE__{name: name, pool_timeout: pool_timeout}, method, url, headers, body, opts) do
     request = Finch.build(method, url, headers, body)
 
+    # `:connect_timeout` is *not* `:pool_timeout` — connecting is configured on
+    # the pool, in `conn_opts/1`, and waiting for a free connection has its own
+    # knob so that saturation and an unreachable host stay distinguishable.
     finch_opts =
       []
       |> put_opt(:receive_timeout, Keyword.get(opts, :timeout))
-      |> put_opt(:pool_timeout, Keyword.get(opts, :connect_timeout))
+      |> put_opt(:pool_timeout, pool_timeout)
 
     case Finch.request(request, name, finch_opts) do
       {:ok, %Finch.Response{status: status, headers: resp_headers, body: resp_body}} ->
@@ -139,7 +171,7 @@ defmodule TypeDB.HTTP.Finch do
   # Finch always answers with an exception struct, but which one — and whether it
   # carries a :reason — varies by failure, so the key is read rather than matched.
   defp transport_error(url, exception) do
-    if Map.get(exception, :reason) == :timeout do
+    if Map.get(exception, :reason) in [:timeout, :pool_timeout] do
       TypeDB.Error.new(:timeout, "request to #{url} timed out", reason: exception)
     else
       TypeDB.Error.new(:transport, "request to #{url} failed: #{Exception.message(exception)}",
