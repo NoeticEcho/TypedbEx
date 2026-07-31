@@ -262,10 +262,19 @@ TypeDB's nanosecond precision survives conversion to Elixir's coarser types.
 TypeDB.query(conn, "social", "match $p isa person;",
   transaction_type: :read,
   include_instance_types: false,  # skip a type lookup per concept on hot paths
+  include_query_structure: false, # on by default; ~740 bytes per response, whatever the row count
   answer_count_limit: 1_000,      # the HTTP API is not streaming — cap the result set
   timeout: 120_000                # for long analytical reads
 )
 ```
+
+`include_query_structure` is on by TypeDB's default, so every `ConceptRows`
+answer carries the analysed pipeline in `:query_structure` whether or not you
+read it. Measured against TypeDB 3.12.1, a one-row answer is 1069 bytes with it
+and 326 without — a fixed cost per response, not per row. Turn it off on hot
+paths; leave it on if you are building query tooling. The field is raw decoded
+JSON, passed through exactly as TypeDB sent it, and its shape is TypeDB's to
+change.
 
 `answer_count_limit` matters. The HTTP API is not streaming and TypeDB applies no
 cap of its own, so an unbounded `match` against a large database really does

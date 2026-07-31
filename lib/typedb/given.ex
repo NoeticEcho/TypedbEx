@@ -44,7 +44,20 @@ defmodule TypeDB.Given do
   you bind a `given $p: person;` column.
 
   A map that already carries a `"kind"` key is passed through untouched, as an
-  escape hatch for wire forms this module does not build.
+  escape hatch for wire forms this module does not build. That escape hatch is
+  *not* injection-safe — it is the one input this module does not tag — so build
+  it from your own code, never from a user's value.
+
+  ## Examples
+
+      iex> TypeDB.Given.encode("Alice")
+      %{"kind" => "value", "value" => "Alice", "valueType" => "string"}
+
+  A value that would end a TypeQL string literal is data here, not syntax, which
+  is the whole point:
+
+      iex> TypeDB.Given.encode(~S|Robert"); drop|)
+      %{"kind" => "value", "value" => ~S|Robert"); drop|, "valueType" => "string"}
   """
 
   alias TypeDB.{Concept, DateTimeTZ, Duration, Error}
