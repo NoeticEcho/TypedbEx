@@ -69,7 +69,7 @@ defmodule TypeDB.HTTP.Finch do
         {:error,
          TypeDB.Error.new(
            :config,
-           ~s(TypeDB.HTTP.Finch requires the :finch package. Add {:finch, "~> 0.19"} to your dependencies, ) <>
+           ~s(TypeDB.HTTP.Finch requires the :finch package. Add {:finch, "~> 0.23"} to your dependencies, ) <>
              ~s(or select http: {TypeDB.HTTP.Httpc, []} to run on OTP's own HTTP client instead.)
          )}
 

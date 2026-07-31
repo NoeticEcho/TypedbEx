@@ -60,12 +60,38 @@ jobs:
         run: mix test
 
       - name: Test every HTTP adapter
-        if: matrix.lint
         run: |
           for adapter in finch req httpc; do
             echo "--- $adapter ---"
             TYPEDB_TEST_ADAPTER=$adapter mix test
           done
+
+      # CONTRIBUTING asks contributors to run both before opening a PR. Until
+      # now nothing enforced either, so "the gate" was a request rather than a
+      # gate. The release workflow runs the same two.
+      #
+      # MIX_ENV: dev on both, overriding the workflow-level `test` — credo and
+      # dialyxir are `only: [:dev]` deps, so under `test` the tasks do not exist
+      # and the step fails with "The task could not be found".
+      - name: Lint
+        if: matrix.lint
+        env:
+          MIX_ENV: dev
+        run: mix credo --strict
+
+      - name: Cache the dialyzer PLT
+        if: matrix.lint
+        uses: actions/cache@v4
+        with:
+          path: _build/dev/*.plt*
+          key: ${{ runner.os }}-plt-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-plt-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      - name: Typecheck
+        if: matrix.lint
+        env:
+          MIX_ENV: dev
+        run: mix dialyzer
 
   integration:
     name: Integration (TypeDB ${{ matrix.typedb }})

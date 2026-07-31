@@ -3,6 +3,12 @@ name: Release
 # Publishes to hex.pm when a version tag is pushed. Requires a HEX_API_KEY
 # secret: generate one with `mix hex.user key generate` on the maintainer
 # account and store it in the repository's Actions secrets.
+#
+# The gate below is deliberately the same set of checks CI runs on every push,
+# minus the integration and TypeQL jobs. Those need a TypeDB container and the
+# typeql-check CLI from repo.typedb.com, and an outage in either would block a
+# release for reasons that have nothing to do with the release. They gate the
+# commit through CI instead; this gates the artefact.
 on:
   push:
     tags: ["v*"]
@@ -15,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: hex
 
+    permissions:
+      contents: write # to create the GitHub Release for the tag
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,22 +32,67 @@ jobs:
           elixir-version: "1.20"
           otp-version: "29"
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-release-${{ hashFiles('**/mix.exs') }}
+          restore-keys: ${{ runner.os }}-release-
+
       - run: mix deps.get
+
+      # Before the version check, so that a compile failure is reported as a
+      # compile failure — and so the check below reads a version rather than a
+      # screenful of "Compiling N files".
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
 
       - name: Verify the tag matches the version in mix.exs
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          version="$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])')"
+          # tail -n1: mix writes dependency and compilation progress to stdout,
+          # so anything but the last line is noise. Without this the comparison
+          # can never match and no release ever publishes.
+          version="$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])' | tail -n1)"
           if [ "$tag" != "$version" ]; then
             echo "tag $tag does not match mix.exs version $version" >&2
             exit 1
           fi
 
-      - run: mix test
+      - name: Verify the CHANGELOG documents this version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [$tag]' section" >&2
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Lint
+        run: mix credo --strict
+
+      - name: Typecheck
+        run: mix dialyzer
+
+      - name: Test every HTTP adapter
         env:
           MIX_ENV: test
+        run: |
+          for adapter in finch req httpc; do
+            echo "--- $adapter ---"
+            TYPEDB_TEST_ADAPTER=$adapter mix test
+          done
 
       - name: Publish to hex.pm
         env:
           HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
         run: mix hex.publish --yes
+
+      # `gh` ships on the runner, so this needs no third-party action.
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag --verify-tag

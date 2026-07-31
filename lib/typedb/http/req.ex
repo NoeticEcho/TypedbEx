@@ -11,7 +11,7 @@ defmodule TypeDB.HTTP.Req do
   `:req` is an *optional* dependency of this library — add it yourself:
 
       # mix.exs
-      {:req, "~> 0.5"}
+      {:req, "~> 0.7"}
 
       # wherever you start the driver
       TypeDB.start_link(
@@ -51,7 +51,7 @@ defmodule TypeDB.HTTP.Req do
       {:error,
        TypeDB.Error.new(
          :config,
-         ~s(TypeDB.HTTP.Req requires the :req package. Add {:req, "~> 0.5"} to your dependencies.)
+         ~s(TypeDB.HTTP.Req requires the :req package. Add {:req, "~> 0.7"} to your dependencies.)
        )}
     end
   end

@@ -19,18 +19,32 @@ Verified against **TypeDB 3.12.1** on **Elixir 1.20 / OTP 29**.
 
 ```elixir
 def deps do
-  [{:typedb, "~> 0.1.0"}]
+  [
+    {:typedb, "~> 0.1.0"},
+    # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
+    {:finch, "~> 0.23"}
+  ]
 end
 ```
 
 Requires Elixir 1.18+ and OTP 25+. Developed and tested on Linux; the driver is
 pure Elixir, so it runs on anything the BEAM does.
 
-Two runtime dependencies: [Finch](https://hex.pm/packages/finch), which backs
-the default transport, and [telemetry](https://hex.pm/packages/telemetry), which
-every span goes through. `{:req, "~> 0.5"}` is optional and only needed by
-`TypeDB.HTTP.Req`. JSON is handled by Elixir's built-in `JSON` module; to route
-it through a different codec, configure one:
+[telemetry](https://hex.pm/packages/telemetry) is the only hard dependency — one
+small application, no dependencies of its own. Every transport's dependency is
+optional, so your footprint follows the transport you pick:
+
+| You select | You add | Pulls in |
+| --- | --- | --- |
+| `TypeDB.HTTP.Finch` (default) | `{:finch, "~> 0.23"}` | finch, mint, hpax, mime, nimble_options, nimble_pool |
+| `TypeDB.HTTP.Req` | `{:req, "~> 0.7"}` | req and its own dependencies |
+| `TypeDB.HTTP.Httpc` | nothing | nothing — it is OTP's own client |
+
+If you forget, `TypeDB.start_link/1` says so by name rather than failing
+mysteriously later. `{:decimal, "~> 2.4 or ~> 3.0"}` is optional too: TypeDB's
+`decimal` values decode to `Decimal.t()` when it is loaded and stay strings
+otherwise. JSON is handled by Elixir's built-in `JSON` module and needs no
+dependency; to route it through a different codec, configure one:
 
 ```elixir
 config :typedb, :json_codec, TypeDB.JSON.Jason
@@ -334,7 +348,7 @@ The default is `TypeDB.HTTP.Finch`, which starts a Finch pool per connection:
 Two alternatives ship with the driver:
 
 ```elixir
-# Reuse a Finch your app already runs through Req. Needs {:req, "~> 0.5"}.
+# Reuse a Finch your app already runs through Req. Needs {:req, "~> 0.7"}.
 http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
 
 # OTP's own client, needing nothing at runtime — see below for what that costs.

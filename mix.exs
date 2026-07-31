@@ -42,19 +42,33 @@ defmodule TypeDB.MixProject do
 
   defp deps do
     [
-      # Two runtime dependencies: `:finch`, which backs the default transport,
-      # and `:telemetry`, which every span goes through. Both are small and
-      # ubiquitous. `TypeDB.HTTP.Httpc` needs neither at runtime but they are
-      # still fetched — Mix has no way to make a dependency conditional on which
-      # module you configure.
-      #
-      # `:req` is genuinely optional and only needed by `TypeDB.HTTP.Req`.
-      # JSON comes from the built-in `JSON` module (Elixir >= 1.18), falling back
-      # to `Jason` if the host application happens to depend on it. See
-      # `TypeDB.JSON`.
-      {:finch, "~> 0.19"},
+      # `:telemetry` is the only hard runtime dependency: every span goes
+      # through it, it is one tiny application, and it has no dependencies of
+      # its own.
       {:telemetry, "~> 1.0"},
-      {:req, "~> 0.5", optional: true},
+
+      # Every HTTP adapter's dependency is optional, so the footprint follows
+      # the transport you actually select. `:finch` backs the default one and is
+      # what nearly everyone wants — add it alongside `:typedb`. Leaving it out
+      # is what makes `TypeDB.HTTP.Httpc`'s "runs on OTP alone" true rather than
+      # aspirational; `TypeDB.HTTP.Finch.init/2` says so if you forget.
+      #
+      # Floors are the versions this project actually builds and tests against
+      # (see mix.lock), not the oldest that might work. Widening one is a
+      # deliberate change made after testing the older version — see
+      # CONTRIBUTING's "Versioning" section.
+      {:finch, "~> 0.23", optional: true},
+      {:req, "~> 0.7", optional: true},
+
+      # `Decimal` is used only if the host application already has it: TypeDB's
+      # `decimal` values decode to `Decimal.t()` when it is loaded and stay
+      # strings otherwise. Declared so the version this driver expects is
+      # visible and resolvable, never fetched on its own.
+      {:decimal, "~> 2.4 or ~> 3.0", optional: true},
+
+      # JSON comes from the built-in `JSON` module (Elixir >= 1.18), falling
+      # back to `Jason` if the host application happens to depend on it, so it
+      # needs no dependency at all. See `TypeDB.JSON`.
 
       # Tooling below is never required by consumers of this library.
       {:ex_doc, "~> 0.34", only: :docs, runtime: false},
@@ -72,7 +86,6 @@ defmodule TypeDB.MixProject do
     [
       name: "typedb",
       licenses: ["Apache-2.0"],
-      maintainers: ["NoeticEcho"],
       files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
