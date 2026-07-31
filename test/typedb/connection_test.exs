@@ -2,6 +2,7 @@ defmodule TypeDB.ConnectionTest do
   use TypeDB.Case, async: true
 
   alias TypeDB.{Connection, Stub}
+  alias TypeDB.HTTP.Finch, as: FinchAdapter
 
   describe "authentication" do
     test "signs in lazily on the first request", %{conn: conn, stub: stub} do
@@ -196,6 +197,38 @@ defmodule TypeDB.ConnectionTest do
 
       assert {:ok, _} = TypeDB.Database.list(name),
              "a supervised connection must be usable again after a restart"
+
+      Supervisor.stop(supervisor)
+    end
+
+    test "the connection goes down with its transport, so a supervisor can rebuild both", %{stub: stub} do
+      # trap_exit is on so terminate/2 can clean up, which means a dead pool would
+      # otherwise be swallowed and every later request would raise out of the
+      # adapter instead of returning a TypeDB.Error.
+      name = :"transport_down_#{System.unique_integer([:positive])}"
+
+      children = [
+        {TypeDB, name: name, url: Stub.url(stub), username: "admin", password: "password"}
+      ]
+
+      {:ok, supervisor} = Supervisor.start_link(children, strategy: :one_for_one)
+      assert {:ok, _} = TypeDB.Database.list(name)
+
+      connection = Process.whereis(name)
+      transport = name |> Connection.adapter_state() |> FinchAdapter.owner()
+      assert is_pid(transport)
+
+      Process.exit(transport, :kill)
+
+      wait_until(fn ->
+        case Process.whereis(name) do
+          nil -> false
+          pid -> pid != connection
+        end
+      end)
+
+      assert {:ok, _} = TypeDB.Database.list(name),
+             "the connection must be usable again once the supervisor has rebuilt it"
 
       Supervisor.stop(supervisor)
     end

@@ -56,6 +56,9 @@ defmodule TypeDB.HTTP.Httpc do
   end
 
   @impl true
+  def owner(%__MODULE__{}), do: nil
+
+  @impl true
   def terminate(%__MODULE__{profile: profile}) do
     _ = :inets.stop(:httpc, profile)
     :ok

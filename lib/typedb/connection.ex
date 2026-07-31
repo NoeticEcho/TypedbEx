@@ -51,6 +51,8 @@ defmodule TypeDB.Connection do
 
   use GenServer
 
+  require Logger
+
   alias TypeDB.{Config, Error, JSON, Telemetry, Token, Transport}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
@@ -194,10 +196,22 @@ defmodule TypeDB.Connection do
       table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
       :ets.insert(table, [{@config_key, config}, {@adapter_key, http_state}])
 
-      state = %{config: config, table: table, http_state: http_state, issued_at: nil}
+      state = %{
+        config: config,
+        table: table,
+        http_state: http_state,
+        issued_at: nil,
+        transport: adapter_owner(config.http_adapter, http_state)
+      }
 
       {:ok, cache_static_token(state)}
     end
+  end
+
+  # The process the transport cannot work without, if it has one. Adapters that
+  # hold no process of their own answer nil.
+  defp adapter_owner(adapter, http_state) do
+    if function_exported?(adapter, :owner, 1), do: adapter.owner(http_state), else: nil
   end
 
   defp init_adapter(%Config{http_adapter: adapter, http_opts: opts, name: name}) do
@@ -234,6 +248,26 @@ defmodule TypeDB.Connection do
       true ->
         sign_in_and_cache(state)
     end
+  end
+
+  # `trap_exit` is on so that terminate/2 runs and the adapter can clean up. That
+  # makes every linked process's death arrive here instead of killing us, so the
+  # transport's death has to be acted on explicitly: without this the connection
+  # survives its own pool and answers every later request with a raw exception
+  # raised from inside the adapter, and nothing ever restarts it.
+  @impl true
+  def handle_info({:EXIT, pid, reason}, %{transport: pid} = state) when is_pid(pid) do
+    Logger.error("TypeDB connection #{inspect(state.config.name)}: transport died (#{inspect(reason)})")
+
+    {:stop, {:transport_down, reason}, state}
+  end
+
+  def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
+
+  def handle_info(message, state) do
+    Logger.debug(fn -> "TypeDB connection #{inspect(state.config.name)}: ignoring #{inspect(message)}" end)
+
+    {:noreply, state}
   end
 
   @impl true

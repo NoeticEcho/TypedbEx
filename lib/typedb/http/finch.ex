@@ -46,9 +46,9 @@ defmodule TypeDB.HTTP.Finch do
   @default_size 50
   @default_count 1
 
-  defstruct [:name, :owned?]
+  defstruct [:name, :owned?, :supervisor]
 
-  @type t :: %__MODULE__{name: atom(), owned?: boolean()}
+  @type t :: %__MODULE__{name: atom(), owned?: boolean(), supervisor: pid() | nil}
 
   @impl true
   def init(connection_name, opts) do
@@ -62,7 +62,7 @@ defmodule TypeDB.HTTP.Finch do
          )}
 
       existing = opts[:name] ->
-        {:ok, %__MODULE__{name: existing, owned?: false}}
+        {:ok, %__MODULE__{name: existing, owned?: false, supervisor: nil}}
 
       true ->
         start_pool(pool_name(connection_name), opts)
@@ -81,8 +81,8 @@ defmodule TypeDB.HTTP.Finch do
 
   defp start_pool(name, opts) do
     case Finch.start_link(name: name, pools: pools(opts)) do
-      {:ok, _pid} ->
-        {:ok, %__MODULE__{name: name, owned?: true}}
+      {:ok, pid} ->
+        {:ok, %__MODULE__{name: name, owned?: true, supervisor: pid}}
 
       {:error, reason} ->
         {:error, TypeDB.Error.new(:config, "could not start the Finch pool for TypeDB", reason: reason)}
@@ -101,6 +101,10 @@ defmodule TypeDB.HTTP.Finch do
       :error -> pool
     end
   end
+
+  @impl true
+  def owner(%__MODULE__{owned?: true, supervisor: pid}) when is_pid(pid), do: pid
+  def owner(%__MODULE__{}), do: nil
 
   @impl true
   def terminate(%__MODULE__{owned?: false}), do: :ok

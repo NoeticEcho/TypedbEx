@@ -50,6 +50,9 @@ defmodule TypeDB.HTTP.Req do
   end
 
   @impl true
+  def owner(_state), do: nil
+
+  @impl true
   def terminate(_state), do: :ok
 
   @impl true

@@ -79,5 +79,18 @@ defmodule TypeDB.HTTP do
   """
   @callback terminate(state()) :: :ok
 
-  @optional_callbacks terminate: 1
+  @doc """
+  Returns the process this adapter cannot work without, if it has one.
+
+  The connection links itself to that process and shuts itself down when it dies,
+  so that a supervisor can rebuild both together. Without this, an adapter whose
+  pool has died keeps answering requests with raw exceptions instead of
+  `TypeDB.Error`s, and nothing ever restarts it.
+
+  Adapters that hold no process of their own — `TypeDB.HTTP.Httpc`, or
+  `TypeDB.HTTP.Finch` pointed at a pool it does not own — return `nil`.
+  """
+  @callback owner(state()) :: pid() | nil
+
+  @optional_callbacks terminate: 1, owner: 1
 end
