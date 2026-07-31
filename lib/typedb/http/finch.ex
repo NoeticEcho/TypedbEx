@@ -48,7 +48,7 @@ defmodule TypeDB.HTTP.Finch do
 
   @behaviour TypeDB.HTTP
 
-  @compile {:no_warn_undefined, [Finch, Finch.Request, Finch.Response]}
+  @compile {:no_warn_undefined, [Finch, Finch.Request]}
 
   @default_size 50
   @default_count 1
@@ -161,8 +161,14 @@ defmodule TypeDB.HTTP.Finch do
       |> put_opt(:receive_timeout, Keyword.get(opts, :timeout))
       |> put_opt(:pool_timeout, pool_timeout)
 
+    # Matched as a plain map, not as `%Finch.Response{}`. `:finch` is an optional
+    # dependency, and a struct pattern is expanded at compile time — unlike the
+    # function calls above, `@compile {:no_warn_undefined, ...}` does not cover
+    # it, so the struct form makes this module fail to *compile* for anyone who
+    # left finch out to run on OTP alone. A Finch.Response is a struct, so it
+    # matches this just as well.
     case Finch.request(request, name, finch_opts) do
-      {:ok, %Finch.Response{status: status, headers: resp_headers, body: resp_body}} ->
+      {:ok, %{status: status, headers: resp_headers, body: resp_body}} ->
         {:ok, %{status: status, headers: downcase(resp_headers), body: resp_body}}
 
       {:error, reason} ->

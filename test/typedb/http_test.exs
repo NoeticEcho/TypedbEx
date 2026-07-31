@@ -143,6 +143,27 @@ defmodule TypeDB.HTTPTest do
     end
   end
 
+  describe "optional dependencies" do
+    # `:finch` and `:req` are optional, so this module must COMPILE for someone
+    # who left them out — and a struct pattern like `%Finch.Response{}` is
+    # expanded at compile time, which `@compile {:no_warn_undefined, ...}` does
+    # not cover. Caught by building a consumer project with no finch: the whole
+    # package failed to compile, which would have made "runs on OTP alone" false
+    # in a worse way than before.
+    test "no adapter pattern-matches a struct belonging to an optional dependency" do
+      offenders =
+        for file <- Path.wildcard("lib/typedb/http/*.ex"),
+            {line, index} <- Enum.with_index(File.read!(file) |> String.split("\n"), 1),
+            not String.starts_with?(String.trim(line), "#"),
+            match = Regex.run(~r/%(Finch|Req|Decimal)(\.\w+)*\{/, line),
+            do: "#{file}:#{index}: #{hd(match)}"
+
+      assert offenders == [],
+             "these expand an optional dependency's struct at compile time, so the module " <>
+               "cannot compile without it:\n" <> Enum.join(offenders, "\n")
+    end
+  end
+
   describe "connect timeout" do
     defmodule RecordingAdapter do
       @moduledoc false
