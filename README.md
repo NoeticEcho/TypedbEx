@@ -127,6 +127,25 @@ variable in the `given` stage, marking optional columns with `?`:
 given $name: string, $age: integer?;
 ```
 
+Pass plain Elixir terms — strings, numbers, booleans, `Date`, `NaiveDateTime`,
+`DateTime`, `TypeDB.DateTimeTZ`, `TypeDB.Duration`, `Decimal`, `nil` for an
+unbound optional column — or concepts from an earlier answer, which is how you
+bind a `given $p: person;` column:
+
+```elixir
+TypeDB.query(conn, "social", """
+  given $p: person;
+  match $p has name $n;
+  select $n;
+""", given_rows: [%{"p" => row["p"]}], transaction_type: :read)
+```
+
+The driver encodes these into TypeDB's tagged wire form. That matters: the HTTP
+API also accepts a bare JSON string, but TypeDB parses *that* as a TypeQL
+literal, so a value containing a quote is a parse error. Going through
+`given_rows` is exact for any input — quotes, semicolons, newlines — which is
+what makes it injection-safe. See `TypeDB.Given`.
+
 ### Transaction types
 
 | Type | Use for | Notes |

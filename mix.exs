@@ -83,6 +83,7 @@ defmodule TypeDB.MixProject do
         Querying: [
           TypeDB.Transaction,
           TypeDB.Options,
+          TypeDB.Given,
           TypeDB.Answer,
           TypeDB.Answer.Ok,
           TypeDB.Answer.ConceptRows,

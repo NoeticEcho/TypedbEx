@@ -29,6 +29,10 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.Duration` and `TypeDB.DateTimeTZ` — lossless representations of
   TypeDB's `duration` and `datetime-tz` values.
 - `TypeDB.Options` — transaction and query options.
+- `TypeDB.Given` — encodes input rows for TypeQL's `given` stage into TypeDB's
+  tagged wire form, making parameterised queries safe against TypeQL injection
+  for arbitrary input. The API's raw-JSON form is not: TypeDB parses a bare
+  string as a TypeQL literal, so a value containing a quote is a parse error.
 - `TypeDB.Error` — a single exception type carrying TypeDB's stable error codes.
 - `TypeDB.HTTP` — a transport behaviour, with a dependency-free `:httpc` adapter
   (secure TLS defaults, isolated connection pool) and an optional `Req` adapter.
