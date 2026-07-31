@@ -2,8 +2,8 @@ defmodule TypeDB.JSON do
   @moduledoc """
   JSON codec indirection.
 
-  This driver ships with **no runtime dependencies**. JSON encoding and decoding
-  is resolved, once, in this order:
+  JSON needs no dependency of its own. The codec is resolved, once, in this
+  order:
 
     1. the module configured as `config :typedb, :json_codec, MyCodec`
     2. `TypeDB.JSON.Native`, backed by the built-in `JSON` module — this is what

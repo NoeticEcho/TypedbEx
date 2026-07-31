@@ -7,8 +7,8 @@ defmodule TypeDB.HTTP do
   | Adapter | Backed by | Use when |
   | --- | --- | --- |
   | `TypeDB.HTTP.Finch` | Finch/Mint | the default; a pool per connection |
-  | `TypeDB.HTTP.Req` | Req, over Finch | your app already runs a Finch through Req |
-  | `TypeDB.HTTP.Httpc` | OTP's `:httpc` | you must run with no dependencies |
+  | `TypeDB.HTTP.Req` | Req, over Finch | your app already configures HTTP through Req |
+  | `TypeDB.HTTP.Httpc` | OTP's `:httpc` | you must run on OTP alone |
 
   Select one when starting a connection:
 

@@ -6,7 +6,7 @@
 
 An Elixir driver for [TypeDB](https://typedb.com) 3.x, built on the TypeDB HTTP API.
 
-- **Fast under load.** Finch-backed by default: ~1900 req/s at 200-way concurrency where OTP's `:httpc` manages 77. A swappable transport keeps `:httpc` available for dependency-free deployments.
+- **Fast under load.** Finch-backed by default: ~1900 req/s at 200-way concurrency where OTP's `:httpc` manages 77. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
 - **Tokens handled for you.** The driver reads the token's own lifetime and renews it *before* it expires, so ordinary traffic never spends a round trip on a `401` — with reactive renewal still there as the safety net. Verified with 200-way bursts against a server issuing one-second tokens.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
@@ -25,8 +25,10 @@ end
 
 Requires Elixir 1.18+ and OTP 25+.
 
-The only dependency is [Finch](https://hex.pm/packages/finch), which backs the
-default transport. JSON is handled by Elixir's built-in `JSON` module; to route
+Two runtime dependencies: [Finch](https://hex.pm/packages/finch), which backs
+the default transport, and [telemetry](https://hex.pm/packages/telemetry), which
+every span goes through. `{:req, "~> 0.5"}` is optional and only needed by
+`TypeDB.HTTP.Req`. JSON is handled by Elixir's built-in `JSON` module; to route
 it through a different codec, configure one:
 
 ```elixir
@@ -274,7 +276,7 @@ end
 ```
 
 `:kind` is one of `:server`, `:transport`, `:timeout`, `:unauthenticated`,
-`:decode`, `:config` or `:closed`. For `:server` errors, `:code` holds TypeDB's
+`:decode` or `:config`. For `:server` errors, `:code` holds TypeDB's
 own error code (`"TSV11"`, `"AUT3"`, …), which is stable across releases — branch
 on that, not on messages.
 
@@ -334,7 +336,7 @@ Two alternatives ship with the driver:
 # Reuse a Finch your app already runs through Req. Needs {:req, "~> 0.5"}.
 http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
 
-# No dependencies at all — see the table below for what that costs.
+# OTP's own client, needing nothing at runtime — see below for what that costs.
 http: {TypeDB.HTTP.Httpc, max_sessions: 100}
 ```
 

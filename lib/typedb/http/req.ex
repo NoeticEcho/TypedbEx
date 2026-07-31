@@ -2,9 +2,11 @@ defmodule TypeDB.HTTP.Req do
   @moduledoc """
   `TypeDB.HTTP` adapter backed by [Req](https://hex.pm/packages/req) and Finch.
 
-  Recommended for production. Finch gives real per-host connection pools, HTTP/2
-  support and a supervised pool you can size and observe, where OTP's `:httpc`
-  gives you a global profile and much less control.
+  Use this when your application already builds requests with Req and you want
+  TypeDB to share that configuration — the same Finch instance, the same
+  connect options, the same TLS setup. It is Finch underneath either way, so it
+  performs like `TypeDB.HTTP.Finch`; the reason to pick it is configuration, not
+  speed.
 
   `:req` is an *optional* dependency of this library — add it yourself:
 

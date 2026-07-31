@@ -17,8 +17,8 @@ defmodule TypeDB.HTTP.Finch do
   | 200 | 77 req/s, p50 2477ms | 1981 req/s, p50 19ms |
 
   `:httpc` does not degrade gracefully: throughput *falls* as concurrency rises.
-  `TypeDB.HTTP.Httpc` is still supported for environments that must run without
-  dependencies, and the numbers above are the price.
+  `TypeDB.HTTP.Httpc` is still supported for environments that must run on OTP
+  alone, and the numbers above are the price.
 
   ## Options
 
@@ -70,7 +70,7 @@ defmodule TypeDB.HTTP.Finch do
          TypeDB.Error.new(
            :config,
            ~s(TypeDB.HTTP.Finch requires the :finch package. Add {:finch, "~> 0.19"} to your dependencies, ) <>
-             ~s(or select http: {TypeDB.HTTP.Httpc, []} to run without dependencies.)
+             ~s(or select http: {TypeDB.HTTP.Httpc, []} to run on OTP's own HTTP client instead.)
          )}
 
       existing = opts[:name] ->

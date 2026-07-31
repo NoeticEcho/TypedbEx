@@ -40,8 +40,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.HTTP` — a transport behaviour with three adapters: `TypeDB.HTTP.Finch`
   (the default, a Finch pool per connection), `TypeDB.HTTP.Req` for applications
   already running Finch through Req, and `TypeDB.HTTP.Httpc` for deployments that
-  must carry no dependencies. All three verify TLS by default and are covered by
-  the same test suite.
+  must run on OTP alone. All three verify TLS by default and are covered by the
+  same test suite.
 - `TypeDB.Transport` — request building, retries and response decoding, split out
   of the connection process.
 - `TypeDB.Token` — reads a token's lifetime from its JWT claims so the driver can

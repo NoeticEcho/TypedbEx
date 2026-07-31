@@ -1,6 +1,11 @@
 defmodule TypeDB.HTTP.Httpc do
   @moduledoc """
-  Default `TypeDB.HTTP` adapter, built on OTP's `:httpc`.
+  `TypeDB.HTTP` adapter built on OTP's `:httpc`, for deployments that must run on
+  OTP alone.
+
+  `TypeDB.HTTP.Finch` is the default and is several times faster under
+  concurrency — see `TypeDB.HTTP` for the measurements. Choose this one when
+  reaching outside OTP is not an option, and know what it costs.
 
   Each connection gets its own `:httpc` profile, so connection pooling, keep-alive
   and socket limits are isolated from the rest of the application (and from other

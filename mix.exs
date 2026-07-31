@@ -42,12 +42,16 @@ defmodule TypeDB.MixProject do
 
   defp deps do
     [
-      # This driver has *no* required runtime dependencies. JSON comes from the
-      # built-in `JSON` module (Elixir >= 1.18), falling back to `Jason` if the
-      # host application happens to depend on it. See `TypeDB.JSON`.
+      # Two runtime dependencies: `:finch`, which backs the default transport,
+      # and `:telemetry`, which every span goes through. Both are small and
+      # ubiquitous. `TypeDB.HTTP.Httpc` needs neither at runtime but they are
+      # still fetched — Mix has no way to make a dependency conditional on which
+      # module you configure.
       #
-      # `:finch` backs the default transport. `:req` is optional and only needed
-      # by `TypeDB.HTTP.Req`. See "Choosing a transport" in the README.
+      # `:req` is genuinely optional and only needed by `TypeDB.HTTP.Req`.
+      # JSON comes from the built-in `JSON` module (Elixir >= 1.18), falling back
+      # to `Jason` if the host application happens to depend on it. See
+      # `TypeDB.JSON`.
       {:finch, "~> 0.19"},
       {:telemetry, "~> 1.0"},
       {:req, "~> 0.5", optional: true},

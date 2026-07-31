@@ -15,8 +15,6 @@ defmodule TypeDB.Error do
     * `:decode` — the response body was not valid JSON, or did not match the
       shape this driver expects.
     * `:config` — the driver was configured incorrectly. Raised at start-up.
-    * `:closed` — the transaction has already been committed, rolled back or
-      closed on the client side.
 
   ## Matching on TypeDB error codes
 
@@ -36,7 +34,6 @@ defmodule TypeDB.Error do
           | :unauthenticated
           | :decode
           | :config
-          | :closed
 
   @type t :: %__MODULE__{
           kind: kind(),

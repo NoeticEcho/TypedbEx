@@ -5,8 +5,9 @@ defmodule TypeDB.Options do
   ## Transaction options
 
     * `:transaction_timeout_millis` — how long the server keeps an idle
-      transaction alive before killing it. The driver also uses this as the
-      ceiling for how long it waits on transaction requests.
+      transaction alive before killing it. This is a server-side setting and is
+      passed straight through; how long the driver itself waits for a response
+      is `:timeout`, on the connection or on the individual call.
     * `:schema_lock_acquire_timeout_millis` — how long a `schema` transaction
       waits for the exclusive schema lock.
 
