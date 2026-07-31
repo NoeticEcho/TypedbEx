@@ -37,6 +37,17 @@ defmodule Mix.Tasks.Typedb.Check do
   undefined type or a mistyped attribute still parses cleanly and will only fail
   when TypeDB runs it. Use `TypeDB.Transaction.analyze/3` against a real database
   for schema-aware checking.
+
+  ## Requirements
+
+  A POSIX shell on `PATH`. Each file is fed to `typeql-check` on stdin, because
+  passing a schema as a command-line argument fails with `E2BIG` once it grows
+  past roughly a megabyte — and neither `System.cmd/3` nor Erlang's ports can
+  write a child's stdin and then close it. Linux, macOS and the BSDs have one;
+  on Windows, run the task from Git Bash, WSL or MSYS2.
+
+  Only this task needs a shell. The driver itself is pure Elixir and runs
+  anywhere the BEAM does.
   """
 
   use Mix.Task
@@ -98,10 +109,27 @@ defmodule Mix.Tasks.Typedb.Check do
       Mix.raise("#{file} is not a readable file.")
     end
 
-    case System.cmd("sh", ["-c", ~s(exec "$1" < "$2"), "sh", executable, file], stderr_to_stdout: true) do
+    case System.cmd(shell(), ["-c", ~s(exec "$1" < "$2"), "sh", executable, file], stderr_to_stdout: true) do
       {_output, 0} -> {:ok, file}
       {output, _status} -> {:error, file, String.trim(output)}
     end
+  end
+
+  # Linux, macOS and the BSDs always have one. Windows does not, unless the task
+  # is run from Git Bash, WSL or MSYS2 — so say that, rather than letting
+  # System.cmd/3 raise :enoent at someone who has no idea what "sh" was.
+  defp shell do
+    System.find_executable("sh") ||
+      Mix.raise("""
+      mix typedb.check needs a POSIX shell on your PATH and could not find `sh`.
+
+      Each file is fed to typeql-check on stdin, because a schema larger than
+      about a megabyte cannot be passed as a command-line argument, and reaching
+      a child's stdin from the BEAM takes a shell.
+
+      On Windows, run this task from Git Bash, WSL or MSYS2. Everything else in
+      this library is pure Elixir and needs no shell.
+      """)
   end
 
   defp report(results, warn_only?) do

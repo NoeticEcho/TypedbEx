@@ -32,7 +32,7 @@ mix compile --warnings-as-errors
 mix test
 mix credo --strict
 mix dialyzer
-mix typedb.check          # validates priv/**/*.tql, needs the typeql-check CLI
+mix typedb.check          # validates priv/**/*.tql, needs the typeql-check CLI and a POSIX shell
 ```
 
 The suite runs against whichever transport `TYPEDB_TEST_ADAPTER` names, and CI

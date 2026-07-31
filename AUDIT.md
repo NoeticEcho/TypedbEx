@@ -9,7 +9,7 @@ Duplicates reported by more than one auditor have been merged.
 
 > **All findings below are fixed.** The refactor ran as `REFACTOR_PLAN.md` sequenced it, in fifteen
 > commits from `0e5b005` to `babcbe3`. See [Status after the refactor](#status-after-the-refactor) at
-> the end for what changed where, what was found along the way, and what is left for you to decide.
+> the end for what changed where, what was found along the way, and the one call left open.
 > The findings are kept in their original wording so the fixes can be checked against them.
 
 ## Reference: what the driver must do
@@ -285,18 +285,22 @@ Every step ran the same gate before being committed: `mix format --check-formatt
 - **The `:slow` tests are opt-in.** They wait out real timeouts, so `mix test` stays quick and hermetic;
   CI runs them via `TYPEDB_SLOW_TESTS=1` in the job that already takes seconds.
 
-### For your decision
+### Settled
 
-Nothing is blocking, but three things are judgement calls you may want to overrule:
-
-1. **The `:closed` error kind is gone** (you approved this). If you would rather have it, it means
-   client-side transaction state — the driver currently holds none by design, and adding it would make
+1. **The `:closed` error kind is gone** — you approved dropping it. Keeping it would have meant
+   client-side transaction state, which the driver holds none of by design; producing it would make
    `close/1` and `commit/1` mutate a struct the caller holds by value.
-2. **`Duration.to_iso8601/1` now raises on a negative component** rather than emitting `"P-1Y-2M"`.
-   Raising from a rendering function is a strong choice; the alternative is returning
-   `{:error, reason}` and changing the signature, or normalising silently. Only reachable from a
-   hand-built struct — TypeDB never sends one.
-3. **`mix typedb.check` shells out through `sh -c`** to reach the child's stdin, which neither
-   `System.cmd/3` nor Erlang ports can do. The file path travels as a positional argument, so
-   filenames are data rather than script, but the task now needs a POSIX shell — it will not run on
-   Windows without one.
+2. **`mix typedb.check` needs a POSIX shell** — accepted: Linux is the primary target, and Git Bash
+   (or WSL, or MSYS2) covers Windows. Recorded in the task's moduledoc and in README.md, and a missing
+   `sh` is now a `Mix.raise` naming those three, rather than an `:enoent` from `System.cmd/3`. This is
+   the only part of the project that shells out; the driver itself is pure Elixir.
+
+### Still open for you
+
+One judgement call, not blocking:
+
+- **`Duration.to_iso8601/1` raises on a negative component** rather than emitting `"P-1Y-2M"`, which
+  its own `parse/1` rejects. Raising from a rendering function is a strong choice; the alternatives
+  are returning `{:error, reason}` and changing the signature, or normalising silently. Only reachable
+  from a hand-built struct — TypeDB never sends a negative duration — so nothing in practice depends
+  on it either way.

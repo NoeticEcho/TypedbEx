@@ -13,3 +13,6 @@ erl_crash.dump
 
 # `typeql-check` drops this next to the working directory when a check fails.
 /typeql-check.FAILED
+
+# ExUnit's :tmp_dir tag writes here.
+/tmp/

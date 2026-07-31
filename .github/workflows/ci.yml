@@ -152,3 +152,9 @@ jobs:
       - run: mix deps.get
 
       - run: mix typedb.check
+
+      # The task's own tests, which need the CLI installed above and are skipped
+      # everywhere it is not. They cover the shelling-out: an over-ARG_MAX
+      # schema, a filename full of shell metacharacters, and a missing shell.
+      - name: Test the mix task itself
+        run: mix test test/mix/typedb_check_test.exs

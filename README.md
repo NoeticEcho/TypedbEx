@@ -23,7 +23,8 @@ def deps do
 end
 ```
 
-Requires Elixir 1.18+ and OTP 25+.
+Requires Elixir 1.18+ and OTP 25+. Developed and tested on Linux; the driver is
+pure Elixir, so it runs on anything the BEAM does.
 
 Two runtime dependencies: [Finch](https://hex.pm/packages/finch), which backs
 the default transport, and [telemetry](https://hex.pm/packages/telemetry), which
@@ -366,6 +367,11 @@ mix typedb.check "test/**/*.tql"
 It exits non-zero on a parse error, so it drops straight into CI. It checks
 syntax only — for schema-aware validation, run
 `TypeDB.Transaction.analyze/3` against a real database.
+
+This is the one part of the project that needs a POSIX shell: each file goes to
+`typeql-check` on stdin, since a schema past about a megabyte cannot be passed
+as a command-line argument. On Windows, run it from Git Bash, WSL or MSYS2. The
+driver itself is pure Elixir and runs anywhere the BEAM does.
 
 If you use an AI coding agent, TypeDB's
 [configure-coding-agent](https://typedb.com/docs/home/configure-coding-agent/)
