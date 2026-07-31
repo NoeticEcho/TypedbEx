@@ -73,6 +73,25 @@ defmodule TypeDB.TemporalTest do
       assert reparsed.days == original.days
       assert reparsed.nanos == original.nanos
     end
+
+    # ISO-8601 has no per-component sign: %Duration{months: -14} used to render
+    # as "P-1Y-2M", which parse/1 rejects and TypeDB would too.
+    for {label, duration} <- [
+          {"months", %Duration{months: -14}},
+          {"days", %Duration{days: -1}},
+          {"nanos", %Duration{nanos: -1}}
+        ] do
+      test "refuses to render a negative #{label} rather than emitting nonsense" do
+        assert_raise ArgumentError, ~r/negative duration/, fn ->
+          Duration.to_iso8601(unquote(Macro.escape(duration)))
+        end
+      end
+    end
+
+    test "a negative duration that came off the wire is still returned verbatim" do
+      # `raw` wins, because whatever TypeDB sent is what TypeDB will accept back.
+      assert Duration.to_iso8601(%Duration{months: -14, raw: "P-1Y-2M"}) == "P-1Y-2M"
+    end
   end
 
   describe "DateTimeTZ" do

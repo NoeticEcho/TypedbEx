@@ -56,6 +56,47 @@ defmodule TypeDB.OptionsTest do
     test "does not pick up query options" do
       assert Options.transaction_payload(answer_count_limit: 5) == nil
     end
+
+    test "nil is the same as nothing set" do
+      assert Options.transaction_payload(nil) == nil
+    end
+  end
+
+  # The two used to build their payloads by different routes for the same job,
+  # and only one of them took defaults. They are one path now, so the same
+  # inputs have to behave the same way on both.
+  describe "the two payload builders agree" do
+    for {label, payload, struct, key, wire} <- [
+          {"query", :query_payload, Options.Query, :answer_count_limit, "answerCountLimit"},
+          {"transaction", :transaction_payload, Options.Transaction, :transaction_timeout_millis,
+           "transactionTimeoutMillis"}
+        ] do
+      test "#{label}: defaults fill in what the caller did not set" do
+        assert apply(Options, unquote(payload), [[], [{unquote(key), 7}]]) == %{unquote(wire) => 7}
+      end
+
+      test "#{label}: the caller's value wins over a default" do
+        assert apply(Options, unquote(payload), [[{unquote(key), 1}], [{unquote(key), 7}]]) ==
+                 %{unquote(wire) => 1}
+      end
+
+      test "#{label}: defaults apply to nil and to a struct too" do
+        defaults = [{unquote(key), 7}]
+
+        assert apply(Options, unquote(payload), [nil, defaults]) == %{unquote(wire) => 7}
+
+        assert apply(Options, unquote(payload), [struct(unquote(struct)), defaults]) ==
+                 %{unquote(wire) => 7}
+      end
+
+      test "#{label}: a struct and the equivalent keyword list produce the same payload" do
+        from_struct = apply(Options, unquote(payload), [struct(unquote(struct), [{unquote(key), 3}]), []])
+        from_list = apply(Options, unquote(payload), [[{unquote(key), 3}], []])
+
+        assert from_struct == from_list
+        assert from_struct == %{unquote(wire) => 3}
+      end
+    end
   end
 
   test "the two option sets do not overlap" do

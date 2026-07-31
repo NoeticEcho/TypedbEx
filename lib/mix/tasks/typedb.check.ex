@@ -84,8 +84,21 @@ defmodule Mix.Tasks.Typedb.Check do
     |> Enum.sort()
   end
 
+  # `typeql-check` reads its query from stdin when given no arguments, which is
+  # the only workable way to hand it a schema: passing the file's contents as an
+  # argv element fails with E2BIG somewhere past a megabyte, and a real schema
+  # gets there. Measured: a 1.4 MB schema exits 7 through argv and 0 through
+  # stdin.
+  #
+  # `sh -c` because neither System.cmd/3 nor Erlang's ports can write to a
+  # child's stdin and then close it. The path travels as a positional argument,
+  # so a filename containing spaces, quotes or `$(...)` is data, not script.
   defp check(executable, file) do
-    case System.cmd(executable, [File.read!(file)], stderr_to_stdout: true) do
+    unless File.regular?(file) do
+      Mix.raise("#{file} is not a readable file.")
+    end
+
+    case System.cmd("sh", ["-c", ~s(exec "$1" < "$2"), "sh", executable, file], stderr_to_stdout: true) do
       {_output, 0} -> {:ok, file}
       {output, _status} -> {:error, file, String.trim(output)}
     end

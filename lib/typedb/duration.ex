@@ -58,6 +58,18 @@ defmodule TypeDB.Duration do
   @spec to_iso8601(t()) :: String.t()
   def to_iso8601(%__MODULE__{raw: raw}) when is_binary(raw), do: raw
 
+  # ISO-8601 has no per-component sign, so a negative component would render as
+  # "P-1Y-2M" — which this module's own parse/1 rejects, and which TypeDB would
+  # reject too. Only reachable from a hand-built struct, since TypeDB durations
+  # are non-negative; raising says so instead of emitting something unusable.
+  def to_iso8601(%__MODULE__{months: months, days: days, nanos: nanos})
+      when months < 0 or days < 0 or nanos < 0 do
+    raise ArgumentError,
+          "cannot render a negative duration as ISO-8601: " <>
+            "months: #{months}, days: #{days}, nanos: #{nanos}. " <>
+            "TypeDB durations are non-negative."
+  end
+
   def to_iso8601(%__MODULE__{months: months, days: days, nanos: nanos}) do
     date_part =
       [{div(months, 12), "Y"}, {rem(months, 12), "M"}, {days, "D"}]

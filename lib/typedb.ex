@@ -72,7 +72,7 @@ defmodule TypeDB do
   streaming answers — are not available over HTTP and so are not here.
   """
 
-  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Transaction}
+  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Transaction, Wire}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type conn :: Connection.t()
@@ -146,10 +146,10 @@ defmodule TypeDB do
         "databaseName" => database,
         "transactionType" => Atom.to_string(transaction_type)
       }
-      |> put_unless_nil("commit", Keyword.get(opts, :commit))
-      |> put_unless_nil("queryOptions", Options.query_payload(opts, query_defaults(conn)))
-      |> put_unless_nil("transactionOptions", Options.transaction_payload(opts))
-      |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
+      |> Wire.put_unless_nil("commit", Keyword.get(opts, :commit))
+      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, query_defaults(conn)))
+      |> Wire.put_unless_nil("transactionOptions", Options.transaction_payload(opts))
+      |> Wire.put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-
            Connection.request(conn, :post, "/query",
@@ -323,9 +323,6 @@ defmodule TypeDB do
   """
   @spec delete_database!(conn(), String.t()) :: :ok
   defdelegate delete_database!(conn, name), to: Database, as: :delete!
-
-  defp put_unless_nil(map, _key, nil), do: map
-  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
 
   @doc false
   @spec query_defaults(conn()) :: keyword()

@@ -54,38 +54,45 @@ defmodule TypeDB.Options do
   @query_keys [:include_instance_types, :answer_count_limit, :include_query_structure]
 
   @doc """
-  Extracts transaction options from a keyword list, returning the wire payload or
-  `nil` when none were given.
-  """
-  @spec transaction_payload(keyword() | Transaction.t() | nil) :: map() | nil
-  def transaction_payload(nil), do: nil
-  def transaction_payload(%Transaction{} = options), do: encode(Map.from_struct(options), @transaction_keys)
+  Extracts transaction options, returning the wire payload or `nil` when none
+  were given.
 
-  def transaction_payload(opts) when is_list(opts),
-    do: opts |> Keyword.take(@transaction_keys) |> Map.new() |> encode(@transaction_keys)
+  `defaults` fills in options the caller did not set.
+  """
+  @spec transaction_payload(keyword() | Transaction.t() | nil, keyword()) :: map() | nil
+  def transaction_payload(options, defaults \\ [])
+  def transaction_payload(options, defaults), do: payload(options, defaults, @transaction_keys)
 
   @doc """
-  Extracts query options from a keyword list, returning the wire payload or `nil`
-  when none were given.
+  Extracts query options, returning the wire payload or `nil` when none were
+  given.
 
   `defaults` fills in options the caller did not set — used for the
   connection-level `:answer_count_limit`.
   """
   @spec query_payload(keyword() | Query.t() | nil, keyword()) :: map() | nil
   def query_payload(options, defaults \\ [])
+  def query_payload(options, defaults), do: payload(options, defaults, @query_keys)
 
-  def query_payload(nil, defaults), do: query_payload([], defaults)
+  # One path for both, and one conversion: a struct becomes a keyword list with
+  # its unset fields dropped, exactly as if the caller had written that list.
+  # The two used to differ — struct-to-map here, struct-to-keywords there — for
+  # no reason other than having been written at different times.
+  defp payload(nil, defaults, keys), do: payload([], defaults, keys)
 
-  def query_payload(%Query{} = options, defaults) do
-    options |> Map.from_struct() |> Enum.reject(&match?({_key, nil}, &1)) |> query_payload(defaults)
+  defp payload(%module{} = options, defaults, keys) when module in [Transaction, Query] do
+    options
+    |> Map.from_struct()
+    |> Enum.reject(&match?({_key, nil}, &1))
+    |> payload(defaults, keys)
   end
 
-  def query_payload(opts, defaults) when is_list(opts) do
+  defp payload(opts, defaults, keys) when is_list(opts) do
     defaults
-    |> Keyword.take(@query_keys)
-    |> Keyword.merge(Keyword.take(opts, @query_keys))
+    |> Keyword.take(keys)
+    |> Keyword.merge(Keyword.take(opts, keys))
     |> Map.new()
-    |> encode(@query_keys)
+    |> encode(keys)
   end
 
   @doc false

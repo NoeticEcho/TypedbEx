@@ -13,7 +13,7 @@ defmodule TypeDB.User do
 
   use TypeDB.Bang
 
-  alias TypeDB.{Connection, Error}
+  alias TypeDB.{Connection, Error, Wire}
 
   @doc """
   Lists all usernames.
@@ -43,7 +43,7 @@ defmodule TypeDB.User do
   """
   @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
   def get(conn, username) when is_binary(username) do
-    case Connection.request(conn, :get, "/users/#{encode(username)}") do
+    case Connection.request(conn, :get, "/users/#{Wire.path_segment(username)}") do
       {:ok, %{"username" => username}} -> {:ok, username}
       {:ok, other} -> {:error, Error.new(:decode, "unexpected user response", body: other)}
       {:error, error} -> {:error, error}
@@ -67,7 +67,7 @@ defmodule TypeDB.User do
   """
   @spec create(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
   def create(conn, username, password) when is_binary(username) and is_binary(password) do
-    case Connection.request(conn, :post, "/users/#{encode(username)}",
+    case Connection.request(conn, :post, "/users/#{Wire.path_segment(username)}",
            body: %{"password" => password},
            expect: :empty,
            idempotent: false
@@ -91,7 +91,7 @@ defmodule TypeDB.User do
   """
   @spec set_password(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
   def set_password(conn, username, password) when is_binary(username) and is_binary(password) do
-    case Connection.request(conn, :put, "/users/#{encode(username)}",
+    case Connection.request(conn, :put, "/users/#{Wire.path_segment(username)}",
            body: %{"password" => password},
            expect: :empty,
            idempotent: false
@@ -112,7 +112,7 @@ defmodule TypeDB.User do
   """
   @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
   def delete(conn, username) when is_binary(username) do
-    case Connection.request(conn, :delete, "/users/#{encode(username)}", expect: :empty) do
+    case Connection.request(conn, :delete, "/users/#{Wire.path_segment(username)}", expect: :empty) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
     end
@@ -123,6 +123,4 @@ defmodule TypeDB.User do
   """
   @spec delete!(Connection.t(), String.t()) :: :ok
   def delete!(conn, username), do: ok!(delete(conn, username))
-
-  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 end

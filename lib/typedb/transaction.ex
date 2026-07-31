@@ -42,7 +42,7 @@ defmodule TypeDB.Transaction do
 
   use TypeDB.Bang
 
-  alias TypeDB.{Answer, Connection, Error, Given, Options}
+  alias TypeDB.{Answer, Connection, Error, Given, Options, Wire}
 
   @type type :: :read | :write | :schema
 
@@ -73,7 +73,7 @@ defmodule TypeDB.Transaction do
       when is_binary(database) and type in [:read, :write, :schema] do
     body =
       %{"databaseName" => database, "transactionType" => Atom.to_string(type)}
-      |> put_unless_nil("transactionOptions", Options.transaction_payload(opts))
+      |> Wire.put_unless_nil("transactionOptions", Options.transaction_payload(opts))
 
     case Connection.request(conn, :post, "/transactions/open",
            body: body,
@@ -149,8 +149,8 @@ defmodule TypeDB.Transaction do
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     body =
       %{"query" => query}
-      |> put_unless_nil("queryOptions", Options.query_payload(opts, TypeDB.query_defaults(tx.conn)))
-      |> put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
+      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, TypeDB.query_defaults(tx.conn)))
+      |> Wire.put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-
            Connection.request(tx.conn, :post, "/transactions/#{tx.id}/query",
@@ -263,7 +263,4 @@ defmodule TypeDB.Transaction do
   """
   @spec close!(t()) :: :ok
   def close!(%__MODULE__{} = tx), do: ok!(close(tx))
-
-  defp put_unless_nil(map, _key, nil), do: map
-  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
 end

@@ -12,7 +12,7 @@ defmodule TypeDB.Database do
 
   use TypeDB.Bang
 
-  alias TypeDB.{Connection, Error}
+  alias TypeDB.{Connection, Error, Wire}
 
   @doc """
   Lists the names of all databases the authenticated user can see.
@@ -43,7 +43,7 @@ defmodule TypeDB.Database do
   """
   @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
   def get(conn, name) when is_binary(name) do
-    case Connection.request(conn, :get, "/databases/#{encode(name)}") do
+    case Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}") do
       {:ok, %{"name" => name}} -> {:ok, name}
       {:ok, other} -> {:error, Error.new(:decode, "unexpected database response", body: other)}
       {:error, error} -> {:error, error}
@@ -74,7 +74,10 @@ defmodule TypeDB.Database do
   """
   @spec create(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
   def create(conn, name) when is_binary(name) do
-    case Connection.request(conn, :post, "/databases/#{encode(name)}", expect: :empty, idempotent: false) do
+    case Connection.request(conn, :post, "/databases/#{Wire.path_segment(name)}",
+           expect: :empty,
+           idempotent: false
+         ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
     end
@@ -117,7 +120,7 @@ defmodule TypeDB.Database do
   """
   @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
   def delete(conn, name) when is_binary(name) do
-    case Connection.request(conn, :delete, "/databases/#{encode(name)}", expect: :empty) do
+    case Connection.request(conn, :delete, "/databases/#{Wire.path_segment(name)}", expect: :empty) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
     end
@@ -137,7 +140,7 @@ defmodule TypeDB.Database do
   """
   @spec schema(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
   def schema(conn, name) when is_binary(name) do
-    Connection.request(conn, :get, "/databases/#{encode(name)}/schema", expect: :text)
+    Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}/schema", expect: :text)
   end
 
   @doc """
@@ -145,7 +148,7 @@ defmodule TypeDB.Database do
   """
   @spec type_schema(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
   def type_schema(conn, name) when is_binary(name) do
-    Connection.request(conn, :get, "/databases/#{encode(name)}/type-schema", expect: :text)
+    Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}/type-schema", expect: :text)
   end
 
   @doc """
@@ -159,6 +162,4 @@ defmodule TypeDB.Database do
   """
   @spec type_schema!(Connection.t(), String.t()) :: String.t()
   def type_schema!(conn, name), do: unwrap!(type_schema(conn, name))
-
-  defp encode(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 end
