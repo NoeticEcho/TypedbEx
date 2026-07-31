@@ -56,8 +56,15 @@ defmodule TypeDB.Answer do
     defimpl Enumerable do
       def count(%{rows: rows}), do: {:ok, length(rows)}
       def member?(%{rows: rows}, element), do: {:ok, Enum.member?(rows, element)}
-      def slice(%{rows: rows}), do: Enumerable.List.slice(rows)
       def reduce(%{rows: rows}, acc, fun), do: Enumerable.List.reduce(rows, acc, fun)
+
+      # `Enumerable.List.slice/1` declines to slice — it answers
+      # `{:error, Enumerable.List}`, telling `Enum` to fall back to
+      # `Enumerable.List.reduce/3` *with this struct*, which has no clause for
+      # it. That is a `FunctionClauseError` out of `Enum.at/2` and
+      # `Enum.slice/2`. Returning the list directly is both correct and what a
+      # list-backed struct should do.
+      def slice(%{rows: rows}), do: {:ok, length(rows), fn _answer -> rows end}
     end
   end
 
@@ -77,8 +84,11 @@ defmodule TypeDB.Answer do
     defimpl Enumerable do
       def count(%{documents: documents}), do: {:ok, length(documents)}
       def member?(%{documents: documents}, element), do: {:ok, Enum.member?(documents, element)}
-      def slice(%{documents: documents}), do: Enumerable.List.slice(documents)
       def reduce(%{documents: documents}, acc, fun), do: Enumerable.List.reduce(documents, acc, fun)
+
+      # See `TypeDB.Answer.ConceptRows`: delegating slice/1 to `Enumerable.List`
+      # sends `Enum` back into a reduce that cannot take this struct.
+      def slice(%{documents: documents}), do: {:ok, length(documents), fn _answer -> documents end}
     end
   end
 

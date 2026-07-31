@@ -132,6 +132,43 @@ defmodule TypeDB.QueryTest do
       assert ["Alice"] = Enum.map(answer, &ConceptRow.value(&1, "name"))
     end
 
+    # Both answer types used to delegate `slice/1` to `Enumerable.List`, which
+    # declines and sends `Enum` into `Enumerable.List.reduce/3` with the struct —
+    # a FunctionClauseError out of `Enum.at/2` and `Enum.slice/2`. The whole
+    # protocol is exercised here so no part of it can quietly stop working.
+    for {label, build} <- [
+          {"ConceptRows", quote(do: fn items -> %Answer.ConceptRows{query_type: :read, rows: items} end)},
+          {"ConceptDocuments",
+           quote(do: fn items -> %Answer.ConceptDocuments{query_type: :read, documents: items} end)}
+        ] do
+      test "#{label} supports the whole Enumerable protocol" do
+        build = unquote(build)
+        answer = build.([:a, :b, :c, :d, :e])
+
+        assert Enum.count(answer) == 5
+        assert Enum.to_list(answer) == [:a, :b, :c, :d, :e]
+        assert Enum.at(answer, 2) == :c
+        assert Enum.at(answer, -1) == :e
+        assert Enum.at(answer, 99) == nil
+        assert Enum.slice(answer, 1..3) == [:b, :c, :d]
+        assert Enum.slice(answer, 1, 2) == [:b, :c]
+        assert Enum.slice(answer, 0..4//2) == [:a, :c, :e]
+        assert Enum.take(answer, 2) == [:a, :b]
+        assert Enum.drop(answer, 3) == [:d, :e]
+        assert Enum.member?(answer, :c)
+        refute Enum.member?(answer, :z)
+        refute Enum.empty?(answer)
+        assert Enum.reverse(answer) == [:e, :d, :c, :b, :a]
+
+        empty = build.([])
+        # count/1 asserted on its own so credo does not read it as a slow empty?/1
+        assert 0 = Enum.count(empty)
+        assert Enum.empty?(empty)
+        assert Enum.at(empty, 0) == nil
+        assert Enum.slice(empty, 0..3) == []
+      end
+    end
+
     @tag stub_opts: [
            databases: ["social"],
            answers: %{"bad" => %{queryType: "read", answerType: "spaceship"}}
