@@ -101,14 +101,29 @@ defmodule TypeDB.AdminTest do
     end
 
     test "set_password/3 on an unknown user", %{conn: conn} do
-      assert {:error, %Error{status: 404}} = User.set_password(conn, "ghost", "x")
+      assert {:error, %Error{status: 404, code: "USU4"}} = User.set_password(conn, "ghost", "x")
     end
 
     test "delete/2", %{conn: conn} do
       assert :ok = User.create(conn, "alice", "x")
       assert :ok = User.delete(conn, "alice")
       refute User.exists?(conn, "alice")
-      assert {:error, %Error{status: 404}} = User.delete(conn, "alice")
+      assert {:error, %Error{status: 404, code: "USD3"}} = User.delete(conn, "alice")
+    end
+
+    # Creating a database that exists succeeds; creating a user that exists does
+    # not. The asymmetry is TypeDB's, and it is exactly the kind of thing a stub
+    # is free to get wrong until someone checks — so the same assertions run
+    # against a live server in test/integration/typedb_integration_test.exs.
+    test "create/3 on an existing user is an error, unlike Database.create/2", %{conn: conn} do
+      assert :ok = User.create(conn, "alice", "x")
+
+      assert {:error, %Error{kind: :server, status: 400, code: "USC2"}} =
+               User.create(conn, "alice", "x")
+    end
+
+    test "get/2 on an unknown user", %{conn: conn} do
+      assert {:error, %Error{status: 404, code: "SRV4"}} = User.get(conn, "ghost")
     end
   end
 

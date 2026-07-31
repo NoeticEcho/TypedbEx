@@ -246,13 +246,17 @@ TypeDB.Database.schema(conn, "social")           # TypeQL source, round-trips th
 TypeDB.Database.delete(conn, "social")           # irreversible
 
 TypeDB.User.list(conn)
-TypeDB.User.create(conn, "alice", password)
+TypeDB.User.create(conn, "alice", password)      # 400 USC2 if alice already exists
 TypeDB.User.set_password(conn, "alice", new_password)
 TypeDB.User.delete(conn, "alice")
 
 TypeDB.Server.health(conn)                       # unauthenticated readiness probe
 TypeDB.Server.version(conn)
 ```
+
+Note the asymmetry, which is TypeDB's own: creating a database that already
+exists succeeds, creating a user that already exists does not. Use
+`TypeDB.User.exists?/2` first if you need the idempotent form.
 
 ## Errors
 

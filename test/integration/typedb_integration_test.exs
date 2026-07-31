@@ -574,6 +574,24 @@ defmodule TypeDB.IntegrationTest do
       assert :ok = TypeDB.User.delete(conn, username)
       refute TypeDB.User.exists?(conn, username)
     end
+
+    # The stub asserts exactly these codes in test/typedb/admin_test.exs. This is
+    # what stops the two from drifting apart.
+    test "the error codes the stub emulates are the ones the server sends", %{conn: conn} do
+      username = "driver_dupe_user_#{System.unique_integer([:positive])}"
+
+      assert {:error, %Error{status: 404, code: "SRV4"}} = TypeDB.User.get(conn, username)
+      assert {:error, %Error{status: 404, code: "USU4"}} = TypeDB.User.set_password(conn, username, "x")
+      assert {:error, %Error{status: 404, code: "USD3"}} = TypeDB.User.delete(conn, username)
+
+      assert :ok = TypeDB.User.create(conn, username, "initial-password")
+
+      # Unlike Database.create/2, which is idempotent on a live server.
+      assert {:error, %Error{kind: :server, status: 400, code: "USC2"}} =
+               TypeDB.User.create(conn, username, "initial-password")
+
+      assert :ok = TypeDB.User.delete(conn, username)
+    end
   end
 
   describe "authentication" do

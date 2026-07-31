@@ -115,24 +115,37 @@ defmodule TypeDB.Stub.Router do
     json(200, %{users: users})
   end
 
+  # Every status and code below was read off a live TypeDB 3.12.1, because each
+  # one of them is a different code and none of them is guessable. Unlike
+  # database creation, which is idempotent, creating a user that exists is an
+  # error — and each verb reports "no such user" under its own code.
+  #
+  #   GET    /v1/users/nobody      404 SRV4  "User not found."
+  #   POST   /v1/users/existing    400 USC2  "User already exists."
+  #   PUT    /v1/users/nobody      404 USU4  "User not found."
+  #   DELETE /v1/users/nobody      404 USD3  "User not found."
   defp dispatch(state, "GET", ["v1", "users", username], _body) do
     if MapSet.member?(get(state, :users), username) do
       json(200, %{username: username})
     else
-      error(404, "USR2", "User '#{username}' does not exist.")
+      error(404, "SRV4", "User not found.")
     end
   end
 
   defp dispatch(state, "POST", ["v1", "users", username], _body) do
-    put(state, :users, MapSet.put(get(state, :users), username))
-    {200, [], ""}
+    if MapSet.member?(get(state, :users), username) do
+      error(400, "USC2", "User already exists.")
+    else
+      put(state, :users, MapSet.put(get(state, :users), username))
+      {200, [], ""}
+    end
   end
 
   defp dispatch(state, "PUT", ["v1", "users", username], _body) do
     if MapSet.member?(get(state, :users), username) do
       {200, [], ""}
     else
-      error(404, "USR2", "User '#{username}' does not exist.")
+      error(404, "USU4", "User not found.")
     end
   end
 
@@ -141,7 +154,7 @@ defmodule TypeDB.Stub.Router do
       put(state, :users, MapSet.delete(get(state, :users), username))
       {200, [], ""}
     else
-      error(404, "USR2", "User '#{username}' does not exist.")
+      error(404, "USD3", "User not found.")
     end
   end
 
