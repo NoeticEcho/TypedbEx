@@ -6,11 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
+## [0.2.2] - 2026-08-01
 
-- `TypeDB.Transaction.analyze/3` returned `{:ok, :ok}` for a 200 with an empty
-  body, where its spec promises `{:ok, map()}`. It now rejects a payload that is
-  not a structure. Found by the fault matrix.
+Evidence. Every number this file publishes is now produced by a script in the
+repository, the supported TypeDB floor was measured instead of assumed, and the
+tests that found the three fixes below did not exist a release ago. No public
+API changed — `test/api_snapshot.txt` is byte for byte the one 0.2.1 shipped.
 
 ### Added
 
@@ -42,15 +43,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stays true. The README said "3.12 or newer" before this and happened to be
   right; it was not evidence.
 - Re-measured throughput, on the scripts now in `bench/`, against a local
-  TypeDB 3.12.1 in this project's container — 400 requests per run, warmed
-  pool, a one-row `match`. At 200-way concurrency Finch sustains ~1800 req/s
-  and Req ~1770, both with a p99 under 120ms; `:httpc` manages ~280 req/s at a
-  p99 of 960ms. 0.1.0 published 1900 against 77 for the same comparison; the
-  ratio is the finding and it holds, the absolute numbers are a property of
-  whatever machine you run them on.
+  TypeDB in this project's container — 400 requests per run, warm pool, a
+  one-row `match`. At 200-way concurrency Finch sustains ~1820 req/s and Req
+  ~1640, both with a p99 under 130ms; `:httpc` manages ~375 req/s at a p99 of
+  685ms. The README's table is these numbers, and now names the script that
+  produced them. 0.1.0 published 77 req/s for `:httpc` at 200-way, which did
+  not reproduce; the ratio is the finding and it holds, the absolute numbers
+  are a property of whatever machine you run them on.
 
 ### Fixed
 
+- `TypeDB.Transaction.analyze/3` returned `{:ok, :ok}` for a 200 with an empty
+  body, where its spec promises `{:ok, map()}`. It now rejects a payload that is
+  not a structure. Found by the fault matrix. (`analyze/3`'s return is the one
+  documented SemVer exemption, which is why this is a patch.)
 - `TypeDB.Duration.parse/1` ran a regular expression once per component, and
   its trailing `(.*)` copied the rest of the string each time. It cost 16µs a
   duration where every other cast costs under half a microsecond. Scanning the
@@ -285,7 +291,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/v0.1.0

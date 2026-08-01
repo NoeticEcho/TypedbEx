@@ -6,7 +6,7 @@
 
 An Elixir driver for [TypeDB](https://typedb.com), built on the TypeDB HTTP API.
 
-- **Fast under load.** Finch-backed by default: ~1900 req/s at 200-way concurrency where OTP's `:httpc` manages 77. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone.
+- **Fast under load.** Finch-backed by default: ~1800 req/s at 200-way concurrency, where OTP's `:httpc` manages 375 with a p99 six times longer. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone. The script is in `bench/`.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
 - **Tokens handled for you.** The driver reads the token's own lifetime and renews it *before* it expires, so ordinary traffic never spends a round trip on a `401` — with reactive renewal still there as the safety net. Verified with 200-way bursts against a server issuing one-second tokens.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
@@ -38,7 +38,7 @@ rather than a patch.
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.2.0"},
+    {:typedb, "~> 0.2.2"},
     # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
     {:finch, "~> 0.23"}
   ]
@@ -432,16 +432,19 @@ http: {TypeDB.HTTP.Req, finch: MyApp.Finch}
 http: {TypeDB.HTTP.Httpc, max_sessions: 100}
 ```
 
-Measured against a local TypeDB 3.12.1, 400 requests per run:
+Measured by `bench/transport.exs` against a local TypeDB, 400 requests per run
+with a warm pool:
 
-| Concurrency | `:httpc` | Finch |
-| --- | --- | --- |
-| 16 | 344 req/s, p50 45ms | 1729 req/s, p50 8ms |
-| 64 | 247 req/s, p50 263ms | 1773 req/s, p50 23ms |
-| 200 | 77 req/s, p50 2477ms | 1981 req/s, p50 19ms |
+| Concurrency | `:httpc` | Req | Finch |
+| --- | --- | --- | --- |
+| 16 | 465 req/s, p50 30ms | 1604 req/s, p50 10ms | 1900 req/s, p50 8ms |
+| 64 | 368 req/s, p50 152ms | 1553 req/s, p50 39ms | 1747 req/s, p50 35ms |
+| 200 | 375 req/s, p50 270ms | 1637 req/s, p50 110ms | 1824 req/s, p50 103ms |
 
-`:httpc` throughput *falls* as concurrency rises. Pick it deliberately, not by
-default.
+`:httpc` does not scale with concurrency: four to five times slower throughout,
+with a p99 that reaches 685ms where Finch's is 116ms. Pick it deliberately, not
+by default. Run the script yourself — the ratio is the point, the absolute
+numbers belong to whatever machine produced them.
 
 Any module implementing the `TypeDB.HTTP` behaviour works.
 

@@ -12,7 +12,8 @@ username = System.get_env("TYPEDB_BENCH_USERNAME", "admin")
 password = System.get_env("TYPEDB_BENCH_PASSWORD", "password")
 
 requests = String.to_integer(System.get_env("TYPEDB_BENCH_REQUESTS", "400"))
-concurrencies = [1, 50, 200]
+# 1 for the latency floor, then the three the README's table publishes.
+concurrencies = [1, 16, 64, 200]
 
 defmodule Bench do
   # Percentiles rather than a mean: the whole point of the comparison is that
