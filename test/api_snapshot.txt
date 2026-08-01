@@ -278,6 +278,8 @@ from_response(pos_integer(), term()) :: t()
 message/1
 new(kind(), String.t(), keyword()) :: t()
 new/2
+retryable?(t()) :: boolean()
+retryable_statuses() :: [pos_integer()]
 
 ## TypeDB.Given
 

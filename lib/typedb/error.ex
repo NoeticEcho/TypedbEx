@@ -81,6 +81,57 @@ defmodule TypeDB.Error do
     }
   end
 
+  @retryable_statuses [429, 502, 503, 504]
+
+  @doc """
+  The response statuses the driver treats as retryable by default.
+
+  `429` is a server shedding load; `502`, `503` and `504` are what a proxy, an
+  ingress or a load balancer answers while TypeDB restarts. All four say "not
+  now" rather than "no". This is the default of `:retry_on_status`.
+  """
+  @spec retryable_statuses() :: [pos_integer()]
+  def retryable_statuses, do: @retryable_statuses
+
+  @doc """
+  Whether retrying the call that produced this error could plausibly help.
+
+      case TypeDB.transaction(conn, "social", :write, &steps/1) do
+        {:error, %TypeDB.Error{} = error} ->
+          if TypeDB.Error.retryable?(error), do: retry_the_whole_thing(), else: give_up(error)
+
+        result ->
+          result
+      end
+
+  Note what this is *not* for. By the time you are holding an error the driver
+  has already retried whatever its configuration allowed, so a `true` here does
+  not mean it gave up early. This is for the layer above — retrying a whole
+  transaction, requeueing a job — where the unit of work is bigger than one HTTP
+  call and the driver could not have retried it for you.
+
+  `:server` errors are judged by `retryable_statuses/0` rather than by a
+  connection's `:retry_on_status`, because an error does not carry the
+  connection that produced it.
+
+      iex> TypeDB.Error.retryable?(TypeDB.Error.new(:transport, "connection refused"))
+      true
+
+      iex> TypeDB.Error.retryable?(TypeDB.Error.new(:server, "no such database", status: 404))
+      false
+
+      iex> TypeDB.Error.retryable?(TypeDB.Error.new(:unauthenticated, "bad password"))
+      false
+  """
+  @spec retryable?(t()) :: boolean()
+  def retryable?(%__MODULE__{kind: kind}) when kind in [:transport, :timeout], do: true
+
+  def retryable?(%__MODULE__{kind: :server, status: status}), do: status in @retryable_statuses
+
+  # :unauthenticated, :decode, :encode and :config all describe something that
+  # will be exactly as wrong on the next attempt.
+  def retryable?(%__MODULE__{}), do: false
+
   @doc """
   Builds an error from a TypeDB error response body.
 

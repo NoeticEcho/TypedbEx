@@ -251,10 +251,8 @@ defmodule TypeDB.Config do
     end
   end
 
-  @default_retry_on_status [429, 502, 503, 504]
-
   defp parse_statuses(opts, key) do
-    case Keyword.get(opts, key, @default_retry_on_status) do
+    case Keyword.get(opts, key, TypeDB.Error.retryable_statuses()) do
       statuses when is_list(statuses) ->
         if Enum.all?(statuses, &(is_integer(&1) and &1 in 100..599)) do
           {:ok, statuses}
