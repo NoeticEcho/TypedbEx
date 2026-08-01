@@ -202,6 +202,45 @@ defmodule TypeDB.ConnectionTest do
       assert length(requests(failing, "/commit")) == 1
     end
 
+    test "giving up is warned about and counted" do
+      import ExUnit.CaptureLog
+
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 2, retry_backoff: fn _ -> 1 end)
+
+      test = self()
+      handler = "exhausted-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:typedb, :retry, :exhausted],
+        fn _event, measurements, metadata, _ -> send(test, {:exhausted, measurements, metadata}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      log = capture_log(fn -> assert {:error, _} = TypeDB.Database.list(conn) end)
+
+      # Retrying and failing used to leave nothing behind but a debug line
+      # nobody had enabled.
+      assert log =~ "[warning]"
+      assert log =~ "giving up"
+      assert log =~ "after 3 attempts"
+
+      assert_received {:exhausted, %{attempts: 3}, %{route: "/databases", error: %Error{}}}
+    end
+
+    test "a call that is not retried at all is not warned about" do
+      import ExUnit.CaptureLog
+
+      failing = always_answering(400, "DBD1")
+      conn = connection_to(failing, max_retries: 2)
+
+      # One attempt, one honest error; nothing was exhausted.
+      refute capture_log(fn -> TypeDB.Database.list(conn) end) =~ "giving up"
+    end
+
     test ":log_level silences the driver without touching the global Logger" do
       import ExUnit.CaptureLog
 

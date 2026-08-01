@@ -71,6 +71,17 @@ defmodule TypeDB.Telemetry do
     * `:status` — HTTP status, on `:stop` only
     * `:error` — the `TypeDB.Error` when one was produced, on `:stop` only
 
+  ## `[:typedb, :retry, :exhausted]`
+
+  Not a span: a single event, emitted when a call stops retrying and returns
+  the failure — because `:max_retries` ran out or because `:deadline` left no
+  room for another attempt. Measurements: `:attempts`. Metadata: the operation
+  span's, plus `:error`.
+
+  This is the one to alert on. A retry that succeeds is the driver doing its
+  job; a retry that runs out is something upstream being broken for longer than
+  the configuration was willing to wait.
+
   ## `[:typedb, :sign_in, :start | :stop | :exception]`
 
   One span per sign-in. A healthy connection produces one on start-up and one
@@ -100,6 +111,7 @@ defmodule TypeDB.Telemetry do
 
   @operation [:typedb, :operation]
   @request [:typedb, :request]
+  @retry_exhausted [:typedb, :retry, :exhausted]
   @sign_in [:typedb, :sign_in]
   @transaction [:typedb, :transaction]
 
@@ -119,6 +131,10 @@ defmodule TypeDB.Telemetry do
   @spec sign_in_event() :: [atom()]
   def sign_in_event, do: @sign_in
 
+  @doc "The event emitted when a call stops retrying."
+  @spec retry_exhausted_event() :: [atom()]
+  def retry_exhausted_event, do: @retry_exhausted
+
   @doc false
   @spec span_operation(map(), (-> {term(), map()})) :: term()
   def span_operation(metadata, fun), do: :telemetry.span(@operation, metadata, fun)
@@ -130,6 +146,12 @@ defmodule TypeDB.Telemetry do
   @doc false
   @spec span_transaction(map(), (-> {term(), map()})) :: term()
   def span_transaction(metadata, fun), do: :telemetry.span(@transaction, metadata, fun)
+
+  @doc false
+  @spec retry_exhausted(map(), map()) :: :ok
+  def retry_exhausted(measurements, metadata) do
+    :telemetry.execute(@retry_exhausted, measurements, metadata)
+  end
 
   @doc false
   @spec span_sign_in(map(), (-> {term(), map()})) :: term()

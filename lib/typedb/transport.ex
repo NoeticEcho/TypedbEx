@@ -179,12 +179,26 @@ defmodule TypeDB.Transport do
     if authenticated? and renewals < request.config.max_auth_renewals do
       case Connection.renew_token(request.conn, sent_at) do
         {:ok, _token} -> send_with_renewal(request, renewals + 1)
-        {:error, renew_error} -> {:error, auth_error(error, renew_error)}
+        {:error, renew_error} -> renewal_failed(request, error, renew_error)
       end
     else
       # An unauthenticated endpoint rejected us, or the renewal budget is spent.
       {:error, error}
     end
+  end
+
+  # A connection that cannot renew its token will fail every subsequent request
+  # the same way. Worth a line even though this caller is told.
+  defp renewal_failed(%Request{} = request, error, %Error{} = renew_error) do
+    Log.log(
+      request.config,
+      :warning,
+      fn -> "TypeDB: token renewal failed: " <> Exception.message(renew_error) end,
+      typedb_connection: request.config.name,
+      typedb_error_kind: renew_error.kind
+    )
+
+    {:error, auth_error(error, renew_error)}
   end
 
   # A renewal that failed for authentication reasons explains the problem better
@@ -266,8 +280,9 @@ defmodule TypeDB.Transport do
     end)
   end
 
-  defp retry_or_give_up(_request, attempt_no, attempts, _error, give_up, _retry_after)
+  defp retry_or_give_up(%Request{} = request, attempt_no, attempts, error, give_up, _retry_after)
        when attempt_no >= attempts do
+    if attempts > 1, do: exhausted(request, attempt_no, error)
     give_up
   end
 
@@ -288,8 +303,34 @@ defmodule TypeDB.Transport do
       # time to send anything, so the retry is not started. The deadline error
       # carries the failure that prompted it: "deadline reached" alone would
       # hide whether the server was down or merely slow.
+      exhausted(request, attempt_no, error)
       {:error, deadline_error(request, error)}
     end
+  end
+
+  # Giving up after N retries used to be silent: the caller got an ordinary
+  # error, indistinguishable from a first-attempt failure, and the only trace
+  # that the driver had tried five times was a debug line nobody had enabled.
+  # Something upstream is broken by the time this fires.
+  defp exhausted(%Request{} = request, attempts, %Error{} = error) do
+    # A counter, not a span: there is nothing to time, and "how often did we
+    # give up" is the number that belongs on an alert. The operation span's
+    # :attempts says how many it took when it worked; this says when it did not.
+    Telemetry.retry_exhausted(%{attempts: attempts}, Map.put(request.telemetry, :error, error))
+
+    Log.log(
+      request.config,
+      :warning,
+      fn ->
+        "TypeDB: giving up on #{request.method} #{request.url} after #{attempts} attempts: " <>
+          Exception.message(error)
+      end,
+      typedb_connection: request.config.name,
+      typedb_method: request.method,
+      typedb_path: request.path,
+      typedb_attempt: attempts,
+      typedb_error_kind: error.kind
+    )
   end
 
   defp affordable?(%Request{deadline: :infinity}, _delay), do: true
