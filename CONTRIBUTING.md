@@ -17,16 +17,21 @@ The roadmap to 1.0.0 is ten epics; `bd ready` sorts what is actionable by
 priority, so the top of that list is the answer to "what should I do next".
 
 A fresh clone has no local database yet — `bd` says so rather than showing an
-empty list. Seed it from the committed export:
+empty list. Clone the issue history:
 
 ```shell
-bd init -p tdb
-bd import .beads/issues.jsonl
+bd bootstrap
 ```
 
-Once the issue history has been published to the git remote (`bd dolt push`,
-which needs write access), `bd bootstrap` replaces both of those and clones the
-full history instead of a snapshot.
+That pulls the full history from `refs/dolt/data` on the git remote, which is
+where beads keeps it — separate from the source branches, so it never shows up
+in a `git log`. Push your own back with `bd dolt push` when you have write
+access.
+
+`.beads/issues.jsonl` is a snapshot of the same data for readers and for tools
+that cannot speak Dolt. If `bd bootstrap` is unavailable to you, `bd init -p tdb`
+followed by `bd import .beads/issues.jsonl` gets you the issues without their
+history. Either way, don't hand-edit the export.
 
 When you pick something up:
 
@@ -38,11 +43,6 @@ bd close <id>                    # when it is done
 Name the issue id at the end of the commit message — `Add jitter to the default
 backoff (tdb-ojs.1)` — so `bd doctor` can tell landed work from work that was
 merely committed.
-
-`.beads/issues.jsonl` is a passive export kept for readers and for seeding
-fresh clones. It is not the source of truth: cross-machine sync is
-`bd dolt push` / `bd dolt pull` against `refs/dolt/data` on the git remote.
-Don't hand-edit it.
 
 ## Getting set up
 

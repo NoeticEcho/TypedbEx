@@ -1,7 +1,7 @@
 defmodule TypeDB.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
   @source_url "https://github.com/NoeticEcho/TypedbEx"
 
   def project do
@@ -86,7 +86,7 @@ defmodule TypeDB.MixProject do
     [
       name: "typedb",
       licenses: ["Apache-2.0"],
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
+      files: ~w(lib guides notebooks .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md",
@@ -101,16 +101,36 @@ defmodule TypeDB.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
+      extras: [
+        "README.md",
+        "guides/transactions.md",
+        "guides/errors-and-retries.md",
+        "guides/observability.md",
+        "guides/testing.md",
+        "notebooks/getting_started.livemd",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "LICENSE"
+      ],
+      groups_for_extras: [
+        Guides: ~r{^guides/},
+        Notebooks: ~r{^notebooks/}
+      ],
+      # Reading order, not alphabetical: connect, ask, read what came back,
+      # handle what went wrong, then the things you reach for later. Every
+      # published module belongs to exactly one group, which
+      # test/typedb/api_snapshot_test.exs asserts — a new module that nobody
+      # filed would otherwise land in an unnamed heap at the bottom.
       groups_for_modules: [
         Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
-        Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Querying: [
           TypeDB.Transaction,
+          TypeDB.Given,
           TypeDB.Options,
           TypeDB.Options.Query,
-          TypeDB.Options.Transaction,
-          TypeDB.Given,
+          TypeDB.Options.Transaction
+        ],
+        Answers: [
           TypeDB.Answer,
           TypeDB.Answer.Ok,
           TypeDB.Answer.ConceptRows,
@@ -130,6 +150,9 @@ defmodule TypeDB.MixProject do
           TypeDB.Duration,
           TypeDB.DateTimeTZ
         ],
+        Errors: [TypeDB.Error],
+        Observability: [TypeDB.Telemetry],
+        Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Extending: [
           TypeDB.HTTP,
           TypeDB.HTTP.Finch,
@@ -139,8 +162,7 @@ defmodule TypeDB.MixProject do
           TypeDB.JSON.Native,
           TypeDB.JSON.Jason
         ],
-        Observability: [TypeDB.Telemetry],
-        Errors: [TypeDB.Error]
+        "Mix tasks": [Mix.Tasks.Typedb.Check]
       ]
     ]
   end

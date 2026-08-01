@@ -1,0 +1,225 @@
+# TypeDB for Elixir
+
+```elixir
+Mix.install([
+  {:typedb, "~> 0.2"},
+  {:kino, "~> 0.14"}
+])
+```
+
+## A server to talk to
+
+This notebook needs a TypeDB 3.12 or newer on `localhost:8000`. If you have
+Docker:
+
+```
+docker run --rm -p 8000:8000 -p 1729:1729 typedb/typedb:3.12.1
+```
+
+Everything below creates its own database and drops it at the end, so it is safe
+against a scratch server — and only a scratch server.
+
+## Connecting
+
+A connection is a supervised process with a registered name. In an application
+it goes in your supervision tree; here, starting it directly is enough.
+
+```elixir
+{:ok, _pid} =
+  TypeDB.start_link(
+    name: :notebook,
+    url: "http://localhost:8000",
+    username: "admin",
+    password: "password"
+  )
+
+conn = :notebook
+TypeDB.version!(conn)
+```
+
+## A database and a schema
+
+```elixir
+database = "livebook_#{System.unique_integer([:positive])}"
+:ok = TypeDB.Database.create(conn, database)
+
+schema = """
+define
+  attribute name, value string;
+  attribute age, value integer;
+  attribute since, value datetime;
+
+  entity person,
+    owns name @key,
+    owns age,
+    plays friendship:friend;
+
+  relation friendship,
+    relates friend @card(2..2),
+    owns since;
+"""
+
+TypeDB.query!(conn, database, schema)
+```
+
+`query/4` runs each query in a transaction of its own. This one left the default
+`transaction_type: :schema`, which is right for `define` — and wrong for
+everything else, because it takes a database-wide lock. Every query below says
+what it is.
+
+## Writing
+
+```elixir
+TypeDB.query!(
+  conn,
+  database,
+  """
+  insert
+    $alice isa person, has name "Alice", has age 31;
+    $bob   isa person, has name "Bob",   has age 27;
+  """,
+  transaction_type: :write
+)
+```
+
+## Reading
+
+An answer is enumerable, and a row knows how to turn a variable into a native
+Elixir term.
+
+```elixir
+conn
+|> TypeDB.query!(database, "match $p isa person, has name $name, has age $age;",
+  transaction_type: :read
+)
+|> Enum.map(fn row ->
+  %{
+    name: TypeDB.ConceptRow.typed_value(row, "name"),
+    age: TypeDB.ConceptRow.typed_value(row, "age")
+  }
+end)
+|> Kino.DataTable.new()
+```
+
+Or straight into a struct of your own:
+
+```elixir
+defmodule Person do
+  defstruct [:name, :age]
+end
+
+conn
+|> TypeDB.query!(database, "match $p isa person, has name $name, has age $age;",
+  transaction_type: :read
+)
+|> Enum.map(&TypeDB.ConceptRow.to_struct(&1, Person))
+```
+
+`to_struct/2` raises for a variable that names no field, which is the failure you
+want — `Kernel.struct/2` on a string-keyed map silently hands back a struct full
+of `nil`s.
+
+## Parameterised queries
+
+Never interpolate user input into TypeQL. TypeDB's `given` stage takes values as
+data, and `:given_rows` encodes them in the tagged wire form, so a value
+containing a quote is a *value* rather than a parse error.
+
+```elixir
+dangerous = ~S|Robert"); delete $p isa person; #|
+
+conn
+|> TypeDB.query!(
+  database,
+  """
+  given $n: string;
+  match $p isa person, has name == $n;
+  """,
+  transaction_type: :read,
+  given_rows: [%{"n" => dangerous}]
+)
+|> Enum.count()
+```
+
+Zero rows, no error, and everybody still in the database. Try the same query
+with the name interpolated into the string and watch TypeDB reject it as a
+syntax error — which is the *good* outcome, and not one to rely on.
+
+## Several statements, one commit
+
+```elixir
+TypeDB.transaction(conn, database, :write, fn tx ->
+  TypeDB.Transaction.query!(tx, ~s|insert $p isa person, has name "Carol", has age 44;|)
+
+  TypeDB.Transaction.query!(tx, """
+    match
+      $a isa person, has name "Alice";
+      $c isa person, has name "Carol";
+    insert
+      (friend: $a, friend: $c) isa friendship, has since 2024-01-01T00:00:00;
+  """)
+end)
+```
+
+The block commits on success and abandons on failure — an `{:error, _}`, a
+raise, a throw or an exit.
+
+```elixir
+conn
+|> TypeDB.query!(
+  database,
+  """
+  match
+    $f isa friendship (friend: $a, friend: $b), has since $when;
+    $a has name $an;
+    $b has name $bn;
+  select $an, $bn, $when;
+  """,
+  transaction_type: :read
+)
+|> Enum.map(&TypeDB.ConceptRow.to_map/1)
+```
+
+## When it goes wrong
+
+```elixir
+TypeDB.query(conn, database, "match $p isa unicorn;", transaction_type: :read)
+```
+
+`{:error, %TypeDB.Error{kind: :server, code: "INF2", status: 400}}`. Branch on
+`:kind` and `:code`; the message is TypeDB's and it changes.
+
+```elixir
+{:error, error} = TypeDB.Database.get(conn, "no_such_database")
+{error.kind, error.code, error.status, TypeDB.Error.retryable?(error)}
+```
+
+`retryable?/1` answers whether retrying could help — for a job you would requeue
+or a transaction you would re-run. A missing database is not that.
+
+## Watching it work
+
+```elixir
+TypeDB.Telemetry.attach_default_logger(:info)
+
+TypeDB.query!(conn, database, "match $p isa person;", transaction_type: :read)
+
+TypeDB.Telemetry.detach_default_logger()
+```
+
+One line per operation, with the route, the duration and how many HTTP requests
+it took. `TypeDB.Telemetry` has the three levels of span and what to graph.
+
+## Tidying up
+
+```elixir
+:ok = TypeDB.Database.delete(conn, database)
+TypeDB.stop(:notebook)
+```
+
+## Where next
+
+* [Transactions](https://hexdocs.pm/typedb/transactions.html)
+* [Errors and retries](https://hexdocs.pm/typedb/errors-and-retries.html)
+* [Telemetry and logging](https://hexdocs.pm/typedb/observability.html)
+* [Testing an application](https://hexdocs.pm/typedb/testing.html)

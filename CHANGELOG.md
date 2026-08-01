@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-01
+
+Documentation only. The single change under `lib/` is six lines of moduledoc;
+`test/api_snapshot.txt` is byte for byte the one 0.2.0 shipped.
+
+These were written after 0.2.0 was tagged and were briefly listed under it in
+this file, which was wrong: a published release does not grow.
+
+### Added
+
+- Four guides, published with the docs and shipped in the package:
+  [Transactions](guides/transactions.md),
+  [Errors and retries](guides/errors-and-retries.md),
+  [Telemetry and logging](guides/observability.md), and
+  [Testing an application](guides/testing.md).
+- A Livebook notebook, with a Run in Livebook badge on the README: a database, a
+  schema, reads and writes, a parameterised query that survives a hostile value,
+  and a transaction. Its code blocks are parsed by the test suite, and the
+  version it installs is checked against this project.
+- A Limitations section in the README: answers arrive whole, a connection points
+  at one server, retries block the caller, one connection is one HTTP pool.
+
+### Changed
+
+- The documentation's module groups are ordered for reading rather than by
+  accretion, and a test now asserts every published module is filed under
+  exactly one of them.
+
 ## [0.2.0] - 2026-08-01
 
 Work towards 1.0. Retry and timeout behaviour, observability, and the shape of
@@ -199,6 +227,7 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/v0.1.0
