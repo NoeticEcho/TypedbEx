@@ -124,6 +124,38 @@ The public API is every documented module and function on
 functions marked `@doc false` are internal: they are callable, but they are not
 promises, and they change in patch releases.
 
+### What the version number covers
+
+More than the function signatures, because more than the function signatures
+ends up in someone's code:
+
+- **Signatures and struct fields** — everything in `test/api_snapshot.txt`.
+- **`TypeDB.Error`'s `:kind`s.** Callers branch on them. TypeDB's own `:code`s
+  are the *server's* to change, and the driver passes them through.
+- **Telemetry event names and metadata keys.** A renamed event silently empties
+  a dashboard, which is worse than a compile error. Removing a metadata key or
+  renaming an event is breaking; adding one is not.
+- **The connection option set and its defaults.** Removing an option, or
+  changing what one defaults to, is breaking — `:max_retries`,
+  `:transaction_type`, the default adapter, the shape of `:retry_backoff`.
+- **The `TypeDB.HTTP` and `TypeDB.JSON` behaviours.** Adding a required callback
+  breaks every adapter anyone else has written.
+- **Elixir and OTP floors, and whether a dependency is optional.**
+
+### What it does not cover
+
+- Internal modules and `@doc false` functions.
+- The exact text of a message — log lines, `Exception.message/1`, error
+  messages. Match on `:kind` and `:code`, never on prose.
+- The return of `TypeDB.Transaction.analyze/3`, which is TypeDB's own map from
+  an endpoint that is not in the published HTTP API reference. Its shape tracks
+  the server, so it can change in a patch release of the driver. This is the one
+  documented exemption, and it is stated on the function too.
+- TypeDB's own wire format, error codes, and behaviour. When the server changes
+  what it returns, the driver reports the change rather than absorbing it.
+- Which HTTP requests a given call makes. Retry policy, token renewal and
+  connection reuse are all free to change; only the observable result is not.
+
 Breaking, for this project, includes all of:
 
 - removing or renaming a public function, module, struct field, or `:kind` of
