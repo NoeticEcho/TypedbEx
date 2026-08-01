@@ -238,19 +238,87 @@ on every version would report Elixir upgrades as API breaks.
 
 ## Releasing
 
-1. Bump `@version` in `mix.exs` per the rules above.
-2. Add the matching `## [X.Y.Z]` section to `CHANGELOG.md` and its link at the
-   bottom. The release workflow refuses to publish a tag the CHANGELOG does not
-   document.
-3. Update the version in the README's installation snippet.
-4. `mix hex.build` and read the file list.
-5. Tag `vX.Y.Z` and push it.
+A tag starting `v` publishes to hex.pm. That is the whole trigger, so the tag is
+the point of no return and everything below happens before it.
 
-The release workflow then re-runs the gate — format, `--warnings-as-errors`,
-credo, dialyzer, and the suite through all three adapters — checks the tag
-against `mix.exs` and the CHANGELOG, publishes to hex.pm with the `HEX_API_KEY`
-secret, and creates the GitHub Release. Documentation is built by `ex_doc` and
-published to hexdocs.pm as part of `mix hex.publish`.
+### Decide the number
+
+Read the diff since the last tag against "What the version number covers" above.
+`git diff v0.2.1..HEAD -- test/api_snapshot.txt` is the fastest single question:
+a non-empty diff means the public surface moved, and moving it in `0.x` is a
+minor. Nothing there does not mean nothing happened — a changed default or a
+renamed telemetry event is breaking and the snapshot cannot see either.
+
+### Prepare
+
+1. `bd ready` — close what landed, and check nothing in flight was meant to be
+   in this release.
+2. Bump `@version` in `mix.exs`.
+3. Add the `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` **and its link at
+   the bottom of the file**. The workflow greps for the heading and refuses a
+   tag without one; nothing checks the link, so it is the line that gets
+   forgotten.
+4. Update the version in the README's installation snippet, and in
+   `notebooks/getting_started.livemd`'s `Mix.install/2` if the new version no
+   longer satisfies what it pins. The notebook test asserts that it does, so a
+   requirement the release outgrew fails the suite rather than shipping.
+5. Write the release's own paragraph. A CHANGELOG entry that is a list of commit
+   subjects is a list of commit subjects; say what changed for someone who
+   already uses the driver, and if anything can be noticed by working code, say
+   so under an "Upgrading" heading as 0.2.0 does.
+
+### The gate
+
+Everything CI runs, run locally, because the release workflow deliberately does
+*not* run the integration or TypeQL jobs — an outage in `repo.typedb.com` should
+not block a release, but it should not hide a regression either:
+
+```shell
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix credo --strict
+mix dialyzer
+for adapter in finch req httpc; do TYPEDB_TEST_ADAPTER=$adapter mix test; done
+mix test --cover
+docker compose up -d
+TYPEDB_INTEGRATION_URL=http://localhost:8000 TYPEDB_SLOW_TESTS=1 \
+  mix test --include integration
+mix typedb.check
+```
+
+Then read what will actually be uploaded — this is the step that catches a new
+directory nobody added to `:files`:
+
+```shell
+mix hex.build
+mix docs          # then read doc/index.html: the guides render, the groups are right
+```
+
+### Tag
+
+```shell
+git push origin main
+git tag -a vX.Y.Z -m "vX.Y.Z — one line on what this release is"
+git push origin vX.Y.Z
+```
+
+The workflow then re-checks the tag against `mix.exs` and the CHANGELOG, re-runs
+format, `--warnings-as-errors`, credo, dialyzer and the three-adapter suite,
+publishes to hex.pm with the `HEX_API_KEY` secret, and creates the GitHub
+Release from the tag's message. Documentation is built by `ex_doc` and published
+to hexdocs.pm as part of `mix hex.publish`.
+
+### Afterwards
+
+1. Watch the run. If it fails *before* `mix hex.publish`, fix, delete the tag
+   locally and remotely, and tag again — nothing was published.
+2. If it fails *after*, the version exists on hex.pm and the number is spent.
+   `mix hex.publish --revert X.Y.Z` works for one hour and not after; past that,
+   release a patch.
+3. Check https://hexdocs.pm/typedb/X.Y.Z — hexdocs builds separately from the
+   package and can fail on its own.
+4. Install it somewhere that is not this repository. The optional-dependency job
+   exists because a package can compile here and not there.
 
 To publish by hand instead, run the gate yourself first, then:
 
