@@ -122,7 +122,7 @@ defmodule TypeDB do
   streaming answers — are not available over HTTP and so are not here.
   """
 
-  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Transaction, Wire}
+  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Telemetry, Transaction, Wire}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type conn :: Connection.t()
@@ -281,23 +281,30 @@ defmodule TypeDB do
           result | {:error, Error.t()}
         when result: term()
   def transaction(conn, database, type, fun, opts \\ []) when is_function(fun, 1) do
-    case Transaction.open(conn, database, type, opts) do
-      {:ok, tx} -> run_transaction(tx, fun)
-      {:error, error} -> {:error, error}
-    end
+    metadata = %{connection: conn, database: database, type: type}
+
+    # The one span that covers more than a single request: open, the block's
+    # queries, and the commit or rollback that ends it. Nothing else can measure
+    # how long a unit of work held a transaction open.
+    Telemetry.span_transaction(metadata, fn ->
+      case Transaction.open(conn, database, type, opts) do
+        {:ok, tx} -> run_transaction(tx, fun, metadata)
+        {:error, error} -> {{:error, error}, Map.put(metadata, :error, error)}
+      end
+    end)
   end
 
-  defp run_transaction(tx, fun) do
+  defp run_transaction(tx, fun, metadata) do
     result = fun.(tx)
 
     case result do
       {:error, _reason} ->
         _ = Transaction.rollback(tx)
         _ = Transaction.close(tx)
-        result
+        {result, Map.put(metadata, :outcome, :rollback)}
 
       _ ->
-        finish(tx, result)
+        finish(tx, result, metadata)
     end
   catch
     kind, reason ->
@@ -307,15 +314,22 @@ defmodule TypeDB do
       :erlang.raise(kind, reason, stacktrace)
   end
 
-  defp finish(%Transaction{type: :read} = tx, result) do
+  defp finish(%Transaction{type: :read} = tx, result, metadata) do
     _ = Transaction.close(tx)
-    result
+    {result, Map.put(metadata, :outcome, :close)}
   end
 
-  defp finish(tx, result) do
+  defp finish(tx, result, metadata) do
+    case commit_outcome(tx) do
+      {:ok, outcome} -> {result, Map.put(metadata, :outcome, outcome)}
+      {:error, error} -> {{:error, error}, Map.merge(metadata, %{outcome: :commit_failed, error: error})}
+    end
+  end
+
+  defp commit_outcome(tx) do
     case Transaction.commit(tx) do
       :ok ->
-        result
+        {:ok, :commit}
 
       # A commit the server rejected has already finished the transaction. A
       # commit that never reached the server has not: without this the

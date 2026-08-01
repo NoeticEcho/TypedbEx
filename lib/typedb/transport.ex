@@ -17,7 +17,7 @@ defmodule TypeDB.Transport do
     @moduledoc false
 
     @enforce_keys [:conn, :config, :method, :path, :opts]
-    defstruct [:conn, :config, :method, :path, :opts, :url, :body, :token, :deadline]
+    defstruct [:conn, :config, :method, :path, :opts, :url, :body, :token, :deadline, :attempts]
   end
 
   @doc """
@@ -28,11 +28,51 @@ defmodule TypeDB.Transport do
   def request(conn, method, path, opts) do
     config = Connection.config(conn)
 
-    %Request{conn: conn, config: config, method: method, path: path, opts: opts}
-    |> put_deadline()
-    |> put_url()
-    |> put_body()
-    |> send_with_renewal(0)
+    request =
+      %Request{
+        conn: conn,
+        config: config,
+        method: method,
+        path: path,
+        opts: opts,
+        # A mutable counter because the number of attempts is only known once
+        # they are over, and it has to survive both the retry loop and the
+        # renew-and-retry loop to reach the span's :stop metadata.
+        attempts: :counters.new(1, [])
+      }
+      |> put_deadline()
+      |> put_url()
+      |> put_body()
+
+    metadata = %{
+      connection: conn,
+      method: method,
+      path: path,
+      route: route(path)
+    }
+
+    Telemetry.span_operation(metadata, fn ->
+      result = send_with_renewal(request, 0)
+
+      {result,
+       metadata
+       |> Map.put(:attempts, :counters.get(request.attempts, 1))
+       |> Map.merge(operation_outcome(result))}
+    end)
+  end
+
+  # A low-cardinality template for the high-cardinality `:path`, so that metrics
+  # can be grouped without a regex in every dashboard. The API surface is closed
+  # and complete, so anything unmatched is already a fixed path.
+  defp route(path) do
+    case String.split(path, "/", trim: true) do
+      ["databases", _name] -> "/databases/:name"
+      ["databases", _name, sub] -> "/databases/:name/" <> sub
+      ["users", _username] -> "/users/:username"
+      ["transactions", "open"] -> "/transactions/open"
+      ["transactions", _id, action] -> "/transactions/:id/" <> action
+      _ -> path
+    end
   end
 
   # Stamped before anything else, so that acquiring a token — which can block on
@@ -254,6 +294,8 @@ defmodule TypeDB.Transport do
   end
 
   defp adapter_request(%Request{} = request, attempt_no) do
+    :counters.add(request.attempts, 1, 1)
+
     metadata = %{
       connection: request.conn,
       method: request.method,
@@ -269,6 +311,11 @@ defmodule TypeDB.Transport do
 
   defp outcome({:ok, %{status: status}}), do: %{status: status}
   defp outcome({:error, %Error{} = error}), do: %{error: error}
+
+  # The operation's result is already decoded, so there is no status to report —
+  # only whether the whole call, retries and renewals included, succeeded.
+  defp operation_outcome({:error, %Error{} = error}), do: %{error: error}
+  defp operation_outcome(_ok), do: %{}
 
   # `timeout: nil` reaches here whenever a caller forwards an absent option.
   #

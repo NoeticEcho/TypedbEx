@@ -14,7 +14,13 @@ defmodule TypeDB.TelemetryTest do
         [:typedb, :request, :stop],
         [:typedb, :request, :exception],
         [:typedb, :sign_in, :start],
-        [:typedb, :sign_in, :stop]
+        [:typedb, :sign_in, :stop],
+        [:typedb, :operation, :start],
+        [:typedb, :operation, :stop],
+        [:typedb, :operation, :exception],
+        [:typedb, :transaction, :start],
+        [:typedb, :transaction, :stop],
+        [:typedb, :transaction, :exception]
       ],
       fn event, measurements, metadata, _config ->
         if metadata[:connection] == context.conn do
@@ -141,10 +147,15 @@ defmodule TypeDB.TelemetryTest do
 
     :telemetry.attach_many(
       handler,
-      [[:typedb, :request, :start], [:typedb, :request, :stop]],
-      fn event, _measurements, metadata, _config ->
+      [
+        [:typedb, :request, :start],
+        [:typedb, :request, :stop],
+        [:typedb, :operation, :start],
+        [:typedb, :operation, :stop]
+      ],
+      fn [_, level, phase], _measurements, metadata, _config ->
         if metadata[:connection] == name and metadata[:path] == "/databases" do
-          send(test, {:span, List.last(event), metadata})
+          send(test, {level, phase, metadata})
         end
       end,
       nil
@@ -167,16 +178,103 @@ defmodule TypeDB.TelemetryTest do
 
     # Three attempts: two that failed in transport, then the one that reached
     # the server. Each is its own span, and the number counts up.
-    assert_receive {:span, :start, %{attempt: 1}}
-    assert_receive {:span, :stop, %{attempt: 1, error: %Error{kind: :transport}}}
-    assert_receive {:span, :start, %{attempt: 2}}
-    assert_receive {:span, :stop, %{attempt: 2, error: %Error{kind: :transport}}}
-    assert_receive {:span, :start, %{attempt: 3}}
-    assert_receive {:span, :stop, %{attempt: 3, status: 200} = final}
+    assert_receive {:request, :start, %{attempt: 1}}
+    assert_receive {:request, :stop, %{attempt: 1, error: %Error{kind: :transport}}}
+    assert_receive {:request, :start, %{attempt: 2}}
+    assert_receive {:request, :stop, %{attempt: 2, error: %Error{kind: :transport}}}
+    assert_receive {:request, :start, %{attempt: 3}}
+    assert_receive {:request, :stop, %{attempt: 3, status: 200} = final}
     refute Map.has_key?(final, :error)
 
-    refute_receive {:span, :start, %{attempt: 4}}, 100
+    refute_receive {:request, :start, %{attempt: 4}}, 100
+
+    # And exactly one operation span around all three, which is the difference
+    # between "how many HTTP requests" and "how many calls the caller made".
+    assert_receive {:operation, :start, _}
+    assert_receive {:operation, :stop, %{attempts: 3} = operation}
+    refute Map.has_key?(operation, :error)
+    refute_receive {:operation, :start, _}, 100
 
     TypeDB.stop(pid)
+  end
+
+  describe "operation spans" do
+    @tag stub_opts: [databases: ["social"]]
+    test "a successful call emits one span whatever the path did", %{conn: conn} do
+      assert {:ok, _} = TypeDB.Database.get(conn, "social")
+
+      assert_receive {:telemetry, [:typedb, :operation, :start], %{system_time: _}, start_metadata}
+      assert start_metadata.method == :get
+      assert start_metadata.path == "/databases/social"
+      # The template, not the name: a metric tagged by :path grows without bound.
+      assert start_metadata.route == "/databases/:name"
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], %{duration: _}, stop_metadata}
+      assert stop_metadata.attempts == 1
+      refute Map.has_key?(stop_metadata, :error)
+    end
+
+    @tag stub_opts: [databases: ["social"]]
+    test "a transaction id does not leak into the route", %{conn: conn} do
+      {:ok, tx} = TypeDB.Transaction.open(conn, "social", :read)
+      assert {:ok, _} = TypeDB.Transaction.query(tx, "match $p isa person;")
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], _,
+                      %{route: "/transactions/:id/query", path: path}}
+
+      assert path =~ tx.id
+    end
+
+    test "a failed call carries the error", %{conn: conn} do
+      assert {:error, _} = TypeDB.Database.get(conn, "nope")
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], _, %{error: %Error{status: 404}}}
+    end
+  end
+
+  describe "transaction spans" do
+    @describetag stub_opts: [databases: ["social"]]
+
+    test "a committed block reports :commit", %{conn: conn} do
+      assert :ok = TypeDB.transaction(conn, "social", :write, fn _tx -> :ok end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :start], _, %{database: "social", type: :write}}
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], %{duration: _}, %{outcome: :commit}}
+    end
+
+    test "a block that returns an error reports :rollback", %{conn: conn} do
+      assert {:error, :nope} = TypeDB.transaction(conn, "social", :write, fn _ -> {:error, :nope} end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], _, %{outcome: :rollback}}
+    end
+
+    test "a read block reports :close", %{conn: conn} do
+      assert :ok = TypeDB.transaction(conn, "social", :read, fn _tx -> :ok end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], _, %{outcome: :close}}
+    end
+
+    test "a block that raises produces an exception event", %{conn: conn} do
+      assert_raise RuntimeError, fn ->
+        TypeDB.transaction(conn, "social", :write, fn _tx -> raise "boom" end)
+      end
+
+      assert_receive {:telemetry, [:typedb, :transaction, :exception], _, %{kind: :error}}
+    end
+
+    @tag stub_opts: [databases: ["social"], fail_commit: true]
+    test "a rejected commit reports :commit_failed", %{conn: conn} do
+      assert {:error, %Error{}} = TypeDB.transaction(conn, "social", :write, fn _ -> :ok end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], _,
+                      %{outcome: :commit_failed, error: %Error{}}}
+    end
+
+    test "opening the transaction failing still closes the span", %{conn: conn} do
+      assert {:error, %Error{}} = TypeDB.transaction(conn, "nope", :write, fn _ -> :ok end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], _, %{error: %Error{}}}
+    end
   end
 end
