@@ -86,7 +86,7 @@ defmodule TypeDB.MixProject do
     [
       name: "typedb",
       licenses: ["Apache-2.0"],
-      files: ~w(lib guides .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
+      files: ~w(lib guides notebooks .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md",
@@ -107,12 +107,14 @@ defmodule TypeDB.MixProject do
         "guides/errors-and-retries.md",
         "guides/observability.md",
         "guides/testing.md",
+        "notebooks/getting_started.livemd",
         "CHANGELOG.md",
         "CONTRIBUTING.md",
         "LICENSE"
       ],
       groups_for_extras: [
-        Guides: ~r{^guides/}
+        Guides: ~r{^guides/},
+        Notebooks: ~r{^notebooks/}
       ],
       # Reading order, not alphabetical: connect, ask, read what came back,
       # handle what went wrong, then the things you reach for later. Every

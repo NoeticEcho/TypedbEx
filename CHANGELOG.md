@@ -68,6 +68,10 @@ Everything else is additive.
   variable that names no field. `Kernel.struct/2` silently returns the struct's
   defaults there, which the `to_map/1` docs previously warned about at length
   instead of solving.
+- A Livebook notebook, with a Run in Livebook badge on the README: a database, a
+  schema, reads and writes, a parameterised query that survives a hostile value,
+  and a transaction. Its code blocks are parsed by the test suite, and the
+  version it installs is checked against this project.
 - Four guides, published with the docs and shipped in the package:
   [Transactions](guides/transactions.md),
   [Errors and retries](guides/errors-and-retries.md),

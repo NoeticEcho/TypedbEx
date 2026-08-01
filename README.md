@@ -465,7 +465,14 @@ guide pairs `typeql-check` with the
 
 ## Guides
 
-Four, for the things a reference page cannot teach:
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2FNoeticEcho%2FTypedbEx%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+
+The notebook is the fastest way to find out whether this driver fits: a
+database, a schema, reads and writes, a parameterised query that survives a
+hostile value, and a transaction — against a TypeDB you start with one `docker
+run`.
+
+Then four guides, for the things a reference page cannot teach:
 
 - **[Transactions](guides/transactions.md)** — the three types, why the default
   is the expensive one, what a commit promises and what it does not.
