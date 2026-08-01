@@ -1,5 +1,45 @@
 # Contributing
 
+## Finding something to work on
+
+Issues live in the repository, not in a tracker you need an account for. This
+project uses [beads](https://github.com/gastownhall/beads) (`bd`), a
+dependency-aware issue graph stored in a Dolt database under `.beads/`.
+
+```shell
+brew install beads          # or: npm install -g @beads/bd
+bd ready                    # every issue whose blockers are all closed
+bd show tdb-ojs.1           # one issue, with its dependencies and history
+bd list --status open
+```
+
+The roadmap to 1.0.0 is ten epics; `bd ready` sorts what is actionable by
+priority, so the top of that list is the answer to "what should I do next".
+
+If `bd ready` comes back empty on a fresh clone, the local database has not been
+seeded yet:
+
+```shell
+bd bootstrap                     # clones the issue history from the git remote
+bd init -p tdb --from-jsonl      # or seed from .beads/issues.jsonl, the committed export
+```
+
+When you pick something up:
+
+```shell
+bd update <id> --claim           # sets assignee and in_progress
+bd close <id>                    # when it is done
+```
+
+Name the issue id at the end of the commit message — `Add jitter to the default
+backoff (tdb-ojs.1)` — so `bd doctor` can tell landed work from work that was
+merely committed.
+
+`.beads/issues.jsonl` is a passive export kept for readers and for seeding
+fresh clones. It is not the source of truth: cross-machine sync is
+`bd dolt push` / `bd dolt pull` against `refs/dolt/data` on the git remote.
+Don't hand-edit it.
+
 ## Getting set up
 
 ```shell

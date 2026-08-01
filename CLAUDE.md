@@ -60,18 +60,58 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
+```bash
+mix deps.get
+mix test                              # 349 unit tests, hermetic, no server needed
+mix format --check-formatted
+mix credo --strict
+mix dialyzer
+```
+
+The full gate — what CI runs and what must pass before a commit — additionally
+runs the suite once per HTTP adapter, because the three are interchangeable by
+design and only the matrix proves it:
 
 ```bash
-# Example:
-# npm install
-# npm test
+for a in finch req httpc; do TYPEDB_HTTP_ADAPTER=$a mix test || break; done
 ```
+
+Two suites are opt-in: `TYPEDB_INTEGRATION=1` needs a live TypeDB 3.x on
+`http://127.0.0.1:8000`, and `TYPEDB_SLOW_TESTS=1` waits out real timeouts.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+An HTTP driver for TypeDB 3.x, one module per area of the API.
+
+`TypeDB` is the facade. `TypeDB.Connection` is a `GenServer` that owns nothing
+but the token and the adapter state: the connection's config lives in a
+read-concurrent ETS table, so **requests run in the caller's process** and the
+connection is never a throughput bottleneck. `TypeDB.Transport` builds requests,
+retries them, contains adapter faults and decodes responses.
+`TypeDB.HTTP` is a behaviour with three adapters — Finch (default), Req, httpc.
+
+Answers decode into `TypeDB.Answer.{Ok, ConceptRows, ConceptDocuments}` and
+concepts into `TypeDB.Concept` structs. `TypeDB.Given` encodes input rows for
+TypeQL's `given` stage in the tagged wire form, which is what makes
+parameterised queries injection-safe.
+
+`AUDIT.md` records the state of the code at 0.1.0 and why several things are the
+way they are; read it before proposing to change one of them.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Every failing operation returns `{:error, %TypeDB.Error{}}` and has a `!`
+  twin that raises. `test/typedb/api_convention_test.exs` enforces the pairing
+  mechanically, including the one recorded exemption.
+- The `!` variants are macros in `TypeDB.Bang`, not a shared function — a shared
+  `unwrap!/1` widens every caller's success type to their union and Dialyzer
+  reports `missing_range` on all of them.
+- Optional dependencies must never be named in a compile-time expansion (struct
+  patterns above all). `@compile {:no_warn_undefined, …}` does not cover those,
+  and the package then fails to compile for anyone who left the dependency out.
+- The test stub is not the server. It has been wrong about error codes more than
+  once; anything it asserts about TypeDB's behaviour is unproven until the
+  integration suite has run it against a live server.
+- Public API changes are SemVer events. The driver is past 1.0's predecessor and
+  the surface is meant to be frozen at 1.0 — see the `Freeze the public API`
+  epic in `bd ready`.

@@ -65,4 +65,9 @@
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
 
-sync.remote: "git+http://local_proxy@127.0.0.1:41729/git/NoeticEcho/TypedbEx"
+# sync.remote: "git+http://local_proxy@127.0.0.1:41729/git/NoeticEcho/TypedbEx"
+export:
+    auto: true
+    git-add: true
+sync:
+    remote: "git+https://github.com/NoeticEcho/TypedbEx.git"
