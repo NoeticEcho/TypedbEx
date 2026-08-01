@@ -13,7 +13,7 @@ the public surface — the three things 1.0 makes irreversible.
 
 ### Upgrading from 0.1.0
 
-Three changes can be noticed by working code, and each is deliberate:
+Four changes can be noticed by working code, and each is deliberate:
 
 1. Backoff delays are now random within their bound. A test that asserted an
    exact wait should assert the bound, or pass a function to `:retry_backoff`.
@@ -24,6 +24,10 @@ Three changes can be noticed by working code, and each is deliberate:
 3. `TypeDB.Given` and `TypeDB.Duration.to_iso8601/1` raise `%TypeDB.Error{}`
    with kind `:encode` where they raised `:config`. Code matching on
    `kind: :config` to catch an unencodable value must match `:encode`.
+4. Five documented error codes were wrong and are corrected below. Code
+   matching on `TSV2`, `TSV3`, `TSV11` or `SRV5` should re-read that entry —
+   the driver was reporting what its test stub had invented, not what TypeDB
+   answers.
 
 Everything else is additive.
 
