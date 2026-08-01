@@ -158,6 +158,45 @@ jobs:
             TYPEDB_TEST_ADAPTER=$adapter mix test --include integration
           done
 
+  optional_deps:
+    name: Optional dependencies (${{ matrix.name }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: none
+            with_optional: ""
+          - name: all
+            with_optional: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      # `finch`, `req`, `decimal` and `jason` are optional dependencies of this
+      # package, and optional dependencies are not fetched for consumers — so a
+      # throwaway app that depends on the driver is the only place they can
+      # genuinely be absent. The one bug that reached hex was exactly this: a
+      # `%Finch.Response{}` struct pattern that made the package fail to compile
+      # for anyone without finch, invisible to a matrix varying only Elixir and
+      # OTP. `@compile {:no_warn_undefined, ...}` does not cover a struct
+      # pattern, because that is expanded at compile time.
+      - name: Compile and run a consumer application
+        working-directory: test/support/consumer
+        env:
+          TYPEDB_PATH: ${{ github.workspace }}
+          WITH_OPTIONAL: ${{ matrix.with_optional }}
+        run: |
+          mix deps.get
+          mix compile --warnings-as-errors
+          mix run smoke.exs
+
   typeql:
     name: TypeQL syntax
     runs-on: ubuntu-latest

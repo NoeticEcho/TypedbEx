@@ -209,9 +209,10 @@ defmodule TypeDB.Concept do
     * `double` → `float`
     * `string` → `String.t()`
     * `decimal` → `Decimal.t()` when the optional `Decimal` library is loaded,
-      otherwise the original string. TypeDB renders decimals with TypeQL's
-      literal suffix (`"12.345dec"`); the suffix is stripped before conversion
-      but kept in the raw value
+      otherwise a string. TypeDB renders decimals with TypeQL's literal suffix
+      (`"12.345dec"`), which is stripped either way — the value differs in type
+      when `Decimal` is absent, not in content. The suffix survives in
+      `TypeDB.Concept.value/1`, which is the raw wire value
     * `date` → `Date.t()`
     * `datetime` → `NaiveDateTime.t()`
     * `datetime-tz` → `TypeDB.DateTimeTZ.t()`
@@ -237,7 +238,13 @@ defmodule TypeDB.Concept do
 
   def cast(value, "decimal") when is_binary(value) do
     # TypeDB renders decimals with TypeQL's literal suffix, e.g. "12.345dec".
-    if Code.ensure_loaded?(Decimal), do: to_decimal(String.trim_trailing(value, "dec")), else: value
+    # Stripped either way: without `Decimal` the fallback used to hand back the
+    # suffix too, so the same attribute was "12.345" as a Decimal and "12.345dec"
+    # as a string, and anything the caller did with the string — Float.parse/1,
+    # a comparison, writing it back — broke on a dependency being absent.
+    trimmed = String.trim_trailing(value, "dec")
+
+    if Code.ensure_loaded?(Decimal), do: to_decimal(trimmed), else: trimmed
   end
 
   def cast(value, "date") when is_binary(value) do

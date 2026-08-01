@@ -92,6 +92,11 @@ Everything else is additive.
   the new kind **`:encode`** rather than `:config`. `:config` means the driver
   was configured wrongly at start-up; these mean an Elixir term has no TypeDB
   wire value. `Error.kind()` gains `:encode`.
+- A `decimal` attribute is now stripped of TypeQL's `dec` suffix whether or not
+  the optional `Decimal` library is loaded. Without it the fallback used to hand
+  back `"12.345dec"` where the `Decimal` path gave `12.345`, so the value
+  differed in content, not just in type, depending on which dependencies
+  happened to be installed. Found by the new optional-dependency CI job.
 - **The supported TypeDB range is now stated as 3.12 or newer**, where the
   README said "3.x". Measured against 3.5.0, the driver does not work at all
   there: `given` rows are rejected, `/v1/servers` does not exist, several error

@@ -25,3 +25,9 @@ erl_crash.dump
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# The consumer application CI builds to prove the driver compiles and runs with
+# its optional dependencies absent. Its build is per-run, never committed.
+/test/support/consumer/_build/
+/test/support/consumer/deps/
+/test/support/consumer/mix.lock

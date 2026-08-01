@@ -285,4 +285,19 @@ defmodule TypeDB.ConceptTest do
       assert %Person{} == TypeDB.ConceptRow.to_struct(row(%{}), Person)
     end
   end
+
+  describe "decimal casting" do
+    test "the TypeQL literal suffix is stripped" do
+      # `Decimal` is present here, so this covers only half of it. The other
+      # half — that the string fallback is stripped too — is asserted by the
+      # consumer project in the "Optional dependencies" CI job, which is the
+      # only place the dependency can actually be absent.
+      assert Decimal.equal?(TypeDB.Concept.cast("12.345dec", "decimal"), Decimal.new("12.345"))
+      assert Decimal.equal?(TypeDB.Concept.cast("12.345", "decimal"), Decimal.new("12.345"))
+    end
+
+    test "something that is not a decimal at all comes back unchanged" do
+      assert TypeDB.Concept.cast("not a number", "decimal") == "not a number"
+    end
+  end
 end
