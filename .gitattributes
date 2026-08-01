@@ -2,6 +2,7 @@
 # Windows checkout with autocrlf would rewrite them to CRLF. Pin them to LF so
 # the comparison is about content.
 *.txt text eol=lf
+*.livemd text eol=lf
 
 # Everything else: normalise in the repository, let git decide on checkout.
 * text=auto

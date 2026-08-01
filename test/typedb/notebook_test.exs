@@ -10,10 +10,7 @@ defmodule TypeDB.NotebookTest do
   @notebook Path.expand("../../notebooks/getting_started.livemd", __DIR__)
 
   test "every elixir block in the notebook parses" do
-    blocks =
-      ~r/^```elixir\n(.*?)^```$/ms
-      |> Regex.scan(File.read!(@notebook), capture: :all_but_first)
-      |> Enum.map(&hd/1)
+    blocks = elixir_blocks()
 
     # Guards the extractor as well as the notebook: a regex that silently
     # matched nothing would make this test pass forever.
@@ -23,6 +20,18 @@ defmodule TypeDB.NotebookTest do
       assert {:ok, _quoted} = Code.string_to_quoted(code),
              "block #{index} of #{Path.relative_to_cwd(@notebook)} does not parse:\n\n#{code}"
     end
+  end
+
+  # A Windows checkout rewrites the notebook to CRLF unless git is told
+  # otherwise, and then `^```elixir\n` matches nothing at all. `.gitattributes`
+  # pins it, and normalising here as well means the test does not depend on the
+  # checkout having been done with it.
+  defp elixir_blocks do
+    source = @notebook |> File.read!() |> String.replace("\r\n", "\n")
+
+    ~r/^```elixir\n(.*?)^```$/ms
+    |> Regex.scan(source, capture: :all_but_first)
+    |> Enum.map(&hd/1)
   end
 
   test "the notebook installs the version this project is" do
