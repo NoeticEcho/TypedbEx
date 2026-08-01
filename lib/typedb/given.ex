@@ -82,7 +82,7 @@ defmodule TypeDB.Given do
 
   def encode_rows(other) do
     raise Error.new(
-            :config,
+            :encode,
             "invalid :given_rows #{inspect(other)}, expected a list of maps of variable name to value"
           )
   end
@@ -97,7 +97,7 @@ defmodule TypeDB.Given do
 
   def encode_row(other) do
     raise Error.new(
-            :config,
+            :encode,
             "invalid given row #{inspect(other)}, expected a map of variable name to value"
           )
   end
@@ -144,7 +144,7 @@ defmodule TypeDB.Given do
 
   def encode(other) do
     raise Error.new(
-            :config,
+            :encode,
             "cannot encode #{inspect(other)} as a TypeDB value. " <>
               "Supported: string, integer, float, boolean, Date, NaiveDateTime, DateTime, " <>
               "TypeDB.DateTimeTZ, TypeDB.Duration, Decimal, TypeDB concepts, and nil."

@@ -14,6 +14,12 @@ defmodule TypeDB.Error do
       could not be renewed.
     * `:decode` — the response body was not valid JSON, or did not match the
       shape this driver expects.
+    * `:encode` — the mirror of `:decode`: an Elixir term could not be turned
+      into a TypeDB wire value. A `given_rows` entry of a type TypeDB has no
+      equivalent for, or a `TypeDB.Duration` with a negative component, which
+      TypeQL's grammar cannot express. Raised rather than returned, because it
+      happens while the request is still being built and there is nothing to
+      fail.
     * `:config` — the driver was configured incorrectly. Raised at start-up.
 
   ## Matching on TypeDB error codes
@@ -33,6 +39,7 @@ defmodule TypeDB.Error do
           | :timeout
           | :unauthenticated
           | :decode
+          | :encode
           | :config
 
   @type t :: %__MODULE__{

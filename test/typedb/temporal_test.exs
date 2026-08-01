@@ -84,10 +84,15 @@ defmodule TypeDB.TemporalTest do
       test "refuses to render a negative #{label} rather than emitting nonsense" do
         # TypeDB.Error, not ArgumentError: this is on the wire path via
         # TypeDB.Given.encode/1, so it surfaces out of TypeDB.query/4, and
-        # everything that comes out of there is a TypeDB.Error.
-        assert_raise TypeDB.Error, ~r/negative duration/, fn ->
-          Duration.to_iso8601(unquote(Macro.escape(duration)))
-        end
+        # everything that comes out of there is a TypeDB.Error. The kind is
+        # :encode — an Elixir term that has no TypeDB wire value — and is part
+        # of the frozen surface, so it is asserted rather than assumed.
+        error =
+          assert_raise TypeDB.Error, ~r/negative duration/, fn ->
+            Duration.to_iso8601(unquote(Macro.escape(duration)))
+          end
+
+        assert error.kind == :encode
       end
     end
 

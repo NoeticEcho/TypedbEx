@@ -196,8 +196,9 @@ defmodule TypeDB do
 
     * `ArgumentError` for an invalid `:transaction_type` — that is a literal in
       your source, not data.
-    * `TypeDB.Error` with kind `:config` for a `:given_rows` value the driver
-      cannot encode, including a negative `TypeDB.Duration`.
+    * `TypeDB.Error` with kind `:encode` for a `:given_rows` value the driver
+      cannot turn into a TypeDB wire value, including a negative
+      `TypeDB.Duration`.
 
   ## Examples
 

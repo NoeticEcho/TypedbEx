@@ -58,8 +58,12 @@ defmodule TypeDB.Duration do
   `:days` or `:nanos` and the components win, because otherwise a
   read-modify-write would silently send the *original* value back.
 
-  Raises `TypeDB.Error` for a negative component. TypeDB has no negative
-  durations: TypeQL's grammar rejects `P-1Y`, `-P1Y` and every other form, and
+  Raises `TypeDB.Error` with kind `:encode` for a negative component — a
+  deliberate, frozen choice, not an oversight. Rendering functions in Elixir
+  raise on a value they cannot render (`Date.to_iso8601/1` does), returning
+  `{:ok, string}` here would make every caller handle a case no driver-produced
+  duration can be in, and normalising silently would send a value nobody asked
+  for. TypeDB has no negative durations: TypeQL's grammar rejects `P-1Y`, `-P1Y` and every other form, and
   `P-1Y-2M` is misread as a *type label*, so the server answers "Type label
   'P-1Y-2M' not found". Failing here says what is actually wrong. Note this is a
   deliberate divergence from Elixir's own `Duration`, which does render
@@ -87,7 +91,7 @@ defmodule TypeDB.Duration do
   defp render(%__MODULE__{months: months, days: days, nanos: nanos})
        when months < 0 or days < 0 or nanos < 0 do
     raise TypeDB.Error.new(
-            :config,
+            :encode,
             "cannot render a negative duration as ISO-8601 " <>
               "(months: #{months}, days: #{days}, nanos: #{nanos}). " <>
               "TypeDB has no negative durations — TypeQL's grammar rejects every form of one."

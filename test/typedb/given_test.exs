@@ -133,7 +133,8 @@ defmodule TypeDB.GivenTest do
     end
 
     test "rejects a non-list" do
-      assert_raise Error, ~r/invalid :given_rows/, fn -> Given.encode_rows(%{"n" => "Alice"}) end
+      error = assert_raise Error, ~r/invalid :given_rows/, fn -> Given.encode_rows(%{"n" => "Alice"}) end
+      assert error.kind == :encode
     end
 
     test "rejects a row that is not a map" do
@@ -141,7 +142,8 @@ defmodule TypeDB.GivenTest do
     end
 
     test "rejects a term it cannot represent" do
-      assert_raise Error, ~r/cannot encode/, fn -> Given.encode_rows([%{"n" => {:tuple, :value}}]) end
+      error = assert_raise Error, ~r/cannot encode/, fn -> Given.encode_rows([%{"n" => {:tuple, :value}}]) end
+      assert error.kind == :encode
     end
   end
 end
