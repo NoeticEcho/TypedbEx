@@ -91,9 +91,9 @@ defmodule TypeDB.TelemetryTest do
         connect_timeout: 500
       )
 
-    assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(name)
+    error = assert_unreachable(TypeDB.Database.list(name))
     assert_receive {:stop, metadata}
-    assert %Error{kind: :transport} = metadata.error
+    assert metadata.error == error
     refute Map.has_key?(metadata, :status)
 
     :telemetry.detach(handler)

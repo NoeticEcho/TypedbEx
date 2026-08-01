@@ -32,7 +32,7 @@ defmodule TypeDB.AdminTest do
       {:ok, pid} =
         TypeDB.start_link(name: name, url: "http://127.0.0.1:1", token: "t", max_retries: 0)
 
-      assert {:error, %Error{kind: :transport}} = Database.create_if_not_exists(name, "social")
+      assert_unreachable(Database.create_if_not_exists(name, "social"))
 
       TypeDB.stop(pid)
     end

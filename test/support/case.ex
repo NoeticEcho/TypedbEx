@@ -24,6 +24,30 @@ defmodule TypeDB.Case do
   end
 
   @doc """
+  Asserts that a call failed because the server could not be reached.
+
+  The kind is `:transport` where connecting to a closed port is refused
+  outright, which is Linux and macOS, and `:timeout` on Windows, which lets the
+  attempt run out instead. Both are the driver classifying an unreachable
+  server; a test that pins one of them is pinning the operating system, which
+  the Windows CI job found out the hard way.
+
+  Only for a *genuinely* unreachable address. An adapter that returns or raises
+  a transport error on purpose is deterministic, and those tests should keep
+  asserting exactly what they arranged.
+  """
+  defmacro assert_unreachable(call) do
+    quote do
+      assert {:error, %TypeDB.Error{kind: kind} = error} = unquote(call)
+
+      assert kind in [:transport, :timeout],
+             "expected an unreachable-server error, got #{inspect(kind)}"
+
+      error
+    end
+  end
+
+  @doc """
   The HTTP adapter the suite runs against.
 
   Defaults to the driver's own default; set `TYPEDB_TEST_ADAPTER` to `finch`,

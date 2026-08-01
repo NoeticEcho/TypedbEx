@@ -1,6 +1,8 @@
 defmodule TypeDB.HTTPTest do
   use ExUnit.Case, async: true
 
+  import TypeDB.Case, only: [assert_unreachable: 1]
+
   alias TypeDB.HTTP.Finch, as: FinchAdapter
   alias TypeDB.HTTP.{Httpc, Req}
 
@@ -136,8 +138,7 @@ defmodule TypeDB.HTTPTest do
       {:ok, port} = :inet.port(socket)
       :gen_tcp.close(socket)
 
-      assert {:error, %TypeDB.Error{kind: :transport}} =
-               FinchAdapter.request(state, :get, "http://127.0.0.1:#{port}/v1/x", [], nil, [])
+      assert_unreachable(FinchAdapter.request(state, :get, "http://127.0.0.1:#{port}/v1/x", [], nil, []))
 
       FinchAdapter.terminate(state)
     end
@@ -397,8 +398,7 @@ defmodule TypeDB.HTTPTest do
       {:ok, port} = :inet.port(socket)
       :gen_tcp.close(socket)
 
-      assert {:error, %TypeDB.Error{kind: :transport}} =
-               Req.request(state, :get, "http://127.0.0.1:#{port}/v1/databases", [], nil, [])
+      assert_unreachable(Req.request(state, :get, "http://127.0.0.1:#{port}/v1/databases", [], nil, []))
     end
   end
 
