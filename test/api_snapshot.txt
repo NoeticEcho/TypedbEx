@@ -1,0 +1,495 @@
+## Mix.Tasks.Typedb.Check
+
+run/1
+
+## TypeDB
+
+@type conn() :: TypeDB.Connection.t()
+child_spec/1
+create_database!(conn(), String.t()) :: :ok
+create_database(conn(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+databases!(conn()) :: [String.t()]
+databases(conn()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+delete_database!(conn(), String.t()) :: :ok
+delete_database(conn(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+health!(conn()) :: :ok
+health(conn()) :: :ok | {:error, TypeDB.Error.t()}
+query!(conn(), String.t(), String.t(), keyword()) :: TypeDB.Answer.t()
+query!/3
+query(conn(), String.t(), String.t(), keyword()) ::
+  {:ok, TypeDB.Answer.t()} | {:error, TypeDB.Error.t()}
+query/3
+query_defaults(conn()) :: keyword()
+start_link(keyword()) :: GenServer.on_start()
+stop(conn() | pid(), term(), timeout()) :: :ok
+stop/1
+stop/2
+transaction(
+  conn(),
+  String.t(),
+  TypeDB.Transaction.type(),
+  (TypeDB.Transaction.t() -> result),
+  keyword()
+) :: result | {:error, TypeDB.Error.t()}
+when result: term()
+transaction/4
+version!(conn()) :: TypeDB.Server.version()
+version(conn()) :: {:ok, TypeDB.Server.version()} | {:error, TypeDB.Error.t()}
+
+## TypeDB.Answer
+
+@type query_type() :: :read | :write | :schema
+@type t() :: TypeDB.Answer.Ok.t() | TypeDB.Answer.ConceptRows.t() | TypeDB.Answer.ConceptDocuments.t()
+decode(term()) :: {:ok, t()} | {:error, TypeDB.Error.t()}
+documents(t()) :: [term()]
+query_type(t()) :: query_type()
+rows(t()) :: [TypeDB.ConceptRow.t()]
+warning(t()) :: String.t() | nil
+
+## TypeDB.Answer.ConceptDocuments
+
+struct [:documents, :query_type, :warning]
+@type t() :: %TypeDB.Answer.ConceptDocuments{
+  documents: [term()],
+  query_type: TypeDB.Answer.query_type(),
+  warning: String.t() | nil
+}
+
+## TypeDB.Answer.ConceptRows
+
+struct [:query_structure, :query_type, :rows, :warning]
+@type t() :: %TypeDB.Answer.ConceptRows{
+  query_structure: map() | nil,
+  query_type: TypeDB.Answer.query_type(),
+  rows: [TypeDB.ConceptRow.t()],
+  warning: String.t() | nil
+}
+
+## TypeDB.Answer.Ok
+
+struct [:query_type, :warning]
+@type t() :: %TypeDB.Answer.Ok{query_type: TypeDB.Answer.query_type(), warning: String.t() | nil}
+
+## TypeDB.Concept
+
+@type entry() :: t() | nil | [t()]
+@type instance() ::
+  TypeDB.Concept.Entity.t() | TypeDB.Concept.Relation.t() | TypeDB.Concept.Attribute.t()
+@type t() :: instance() | type() | TypeDB.Concept.Value.t()
+@type type() ::
+  TypeDB.Concept.EntityType.t()
+  | TypeDB.Concept.RelationType.t()
+  | TypeDB.Concept.AttributeType.t()
+  | TypeDB.Concept.RoleType.t()
+cast(term(), String.t()) :: term()
+decode(term()) :: entry()
+iid(t()) :: String.t() | nil
+label(t()) :: String.t() | nil
+typed_value(t()) :: term()
+value(t()) :: term()
+
+## TypeDB.Concept.Attribute
+
+struct [:iid, :type, :value, :value_type]
+@type t() :: %TypeDB.Concept.Attribute{
+  iid: String.t(),
+  type: TypeDB.Concept.AttributeType.t() | nil,
+  value: term(),
+  value_type: String.t()
+}
+
+## TypeDB.Concept.AttributeType
+
+struct [:label, :value_type]
+@type t() :: %TypeDB.Concept.AttributeType{label: String.t(), value_type: String.t() | nil}
+
+## TypeDB.Concept.Entity
+
+struct [:iid, :type]
+@type t() :: %TypeDB.Concept.Entity{iid: String.t(), type: TypeDB.Concept.EntityType.t() | nil}
+
+## TypeDB.Concept.EntityType
+
+struct [:label]
+@type t() :: %TypeDB.Concept.EntityType{label: String.t()}
+
+## TypeDB.Concept.Relation
+
+struct [:iid, :type]
+@type t() :: %TypeDB.Concept.Relation{iid: String.t(), type: TypeDB.Concept.RelationType.t() | nil}
+
+## TypeDB.Concept.RelationType
+
+struct [:label]
+@type t() :: %TypeDB.Concept.RelationType{label: String.t()}
+
+## TypeDB.Concept.RoleType
+
+struct [:label]
+@type t() :: %TypeDB.Concept.RoleType{label: String.t()}
+
+## TypeDB.Concept.Value
+
+struct [:value, :value_type]
+@type t() :: %TypeDB.Concept.Value{value: term(), value_type: String.t()}
+
+## TypeDB.ConceptRow
+
+struct [:data, :involved_blocks]
+@type t() :: %TypeDB.ConceptRow{
+  data: %{optional(String.t()) => TypeDB.Concept.entry()},
+  involved_blocks: [non_neg_integer()] | nil
+}
+decode(term()) :: t()
+fetch(t(), String.t()) :: {:ok, TypeDB.Concept.entry()} | :error
+get(t(), String.t(), term()) :: TypeDB.Concept.entry() | term()
+get/2
+get_and_update/3
+pop/2
+to_map(t()) :: %{optional(String.t()) => term()}
+to_struct(t(), module()) :: struct()
+typed_value(t(), String.t()) :: term()
+value(t(), String.t()) :: term()
+variables(t()) :: [String.t()]
+
+## TypeDB.Config
+
+struct [:answer_count_limit, :base_url, :connect_timeout, :deadline, :http_adapter, :http_opts, :log_level, :max_auth_renewals, :max_retries, :name, :password, :retry_backoff, :retry_max_delay, :retry_on_status, :static_token, :timeout, :username]
+@type t() :: %TypeDB.Config{
+  answer_count_limit: pos_integer() | nil,
+  base_url: String.t(),
+  connect_timeout: timeout(),
+  deadline: timeout(),
+  http_adapter: module(),
+  http_opts: keyword(),
+  log_level: atom(),
+  max_auth_renewals: non_neg_integer(),
+  max_retries: non_neg_integer(),
+  name: atom(),
+  password: String.t() | nil,
+  retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer()),
+  retry_max_delay: timeout(),
+  retry_on_status: [pos_integer()],
+  static_token: String.t() | nil,
+  timeout: timeout(),
+  username: String.t() | nil
+}
+api_version() :: String.t()
+backoff(t(), pos_integer()) :: non_neg_integer()
+known_options() :: [atom()]
+new!(keyword()) :: t()
+new(keyword()) :: {:ok, t()} | {:error, TypeDB.Error.t()}
+raw_url(t(), String.t()) :: String.t()
+url(t(), String.t()) :: String.t()
+
+## TypeDB.Connection
+
+@type request_opts() :: keyword()
+@type t() :: atom()
+adapter_state(t()) :: term()
+child_spec(keyword()) :: Supervisor.child_spec()
+code_change/3
+config(t()) :: TypeDB.Config.t()
+handle_call/3
+handle_cast/2
+handle_info/2
+init/1
+renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+request(t(), TypeDB.HTTP.method(), String.t(), request_opts()) ::
+  {:ok, term()} | {:error, TypeDB.Error.t()}
+request/3
+start_link(keyword()) :: GenServer.on_start()
+stop(t() | pid(), term(), timeout()) :: :ok
+stop/1
+stop/2
+terminate/2
+token(t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+
+## TypeDB.Database
+
+create!(TypeDB.Connection.t(), String.t()) :: :ok
+create(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+create_if_not_exists!(TypeDB.Connection.t(), String.t()) :: :ok
+create_if_not_exists(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+delete!(TypeDB.Connection.t(), String.t()) :: :ok
+delete(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+exists?(TypeDB.Connection.t(), String.t()) :: boolean()
+get!(TypeDB.Connection.t(), String.t()) :: String.t()
+get(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+list!(TypeDB.Connection.t()) :: [String.t()]
+list(TypeDB.Connection.t()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+schema!(TypeDB.Connection.t(), String.t()) :: String.t()
+schema(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+type_schema!(TypeDB.Connection.t(), String.t()) :: String.t()
+type_schema(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+
+## TypeDB.DateTimeTZ
+
+struct [:naive, :raw, :time_zone, :utc_offset]
+@type t() :: %TypeDB.DateTimeTZ{
+  naive: NaiveDateTime.t(),
+  raw: String.t(),
+  time_zone: String.t() | nil,
+  utc_offset: integer() | nil
+}
+from_iso8601(String.t()) :: {:ok, t()} | :error
+new(NaiveDateTime.t(), String.t() | integer()) :: t()
+parse(String.t()) :: t() | String.t()
+to_datetime(
+  t(),
+  keyword()
+) ::
+  {:ok, DateTime.t()}
+  | {:ambiguous, DateTime.t(), DateTime.t()}
+  | {:gap, DateTime.t(), DateTime.t()}
+  | {:error, term()}
+to_datetime/1
+to_iso8601(t()) :: String.t()
+
+## TypeDB.Duration
+
+struct [:days, :months, :nanos, :raw]
+@type t() :: %TypeDB.Duration{
+  days: integer(),
+  months: integer(),
+  nanos: integer(),
+  raw: String.t() | nil
+}
+from_iso8601(String.t()) :: {:ok, t()} | :error
+parse(String.t()) :: t() | String.t()
+time_in_nanoseconds(t()) :: integer()
+to_iso8601(t()) :: String.t()
+
+## TypeDB.Error
+
+struct [:__exception__, :body, :code, :kind, :message, :reason, :status]
+@type kind() :: :server | :transport | :timeout | :unauthenticated | :decode | :encode | :config
+@type t() :: %TypeDB.Error{
+  __exception__: term(),
+  body: term(),
+  code: String.t() | nil,
+  kind: kind(),
+  message: String.t(),
+  reason: term(),
+  status: pos_integer() | nil
+}
+exception/1
+from_response(pos_integer(), term()) :: t()
+message/1
+new(kind(), String.t(), keyword()) :: t()
+new/2
+
+## TypeDB.Given
+
+@type row() :: %{optional(String.t() | atom()) => term()}
+encode(term()) :: map() | nil
+encode_row(row()) :: map()
+encode_rows([row()] | nil) :: [map()] | nil
+
+## TypeDB.HTTP
+
+@type headers() :: [{String.t(), String.t()}]
+@type method() :: :get | :post | :put | :delete
+@type request_opts() :: [timeout: timeout(), connect_timeout: timeout()]
+@type response() :: %{status: pos_integer(), headers: headers(), body: binary()}
+@type state() :: term()
+@callback init(name :: atom(), opts :: keyword()) :: {:ok, state()} | {:error, term()}
+@callback owner(state()) :: pid() | nil
+@callback request(
+  state(),
+  method(),
+  url :: String.t(),
+  headers(),
+  body :: iodata() | nil,
+  request_opts()
+) :: {:ok, response()} | {:error, TypeDB.Error.t()}
+@callback terminate(state()) :: :ok
+
+## TypeDB.HTTP.Finch
+
+struct [:name, :owned?, :pool_timeout, :supervisor]
+@type t() :: %TypeDB.HTTP.Finch{
+  name: atom(),
+  owned?: boolean(),
+  pool_timeout: timeout() | nil,
+  supervisor: pid() | nil
+}
+init/2
+owner/1
+pools(keyword()) :: map()
+request/6
+terminate/1
+
+## TypeDB.HTTP.Httpc
+
+struct [:profile, :ssl_opts]
+@type t() :: %TypeDB.HTTP.Httpc{profile: atom(), ssl_opts: keyword()}
+init/2
+owner/1
+request/6
+ssl_opts(keyword()) :: keyword()
+terminate/1
+
+## TypeDB.HTTP.Req
+
+struct [:req]
+@type t() :: %TypeDB.HTTP.Req{req: term()}
+init/2
+owner/1
+request/6
+request_options(
+  t(),
+  TypeDB.HTTP.method(),
+  String.t(),
+  TypeDB.HTTP.headers(),
+  iodata() | nil,
+  keyword()
+) :: keyword()
+terminate/1
+
+## TypeDB.JSON
+
+@callback decode(binary()) :: {:ok, term()} | {:error, term()}
+@callback encode_to_iodata!(term()) :: iodata()
+codec() :: module()
+decode(binary()) :: {:ok, term()} | {:error, term()}
+encode!(term()) :: binary()
+encode_to_iodata!(term()) :: iodata()
+reset() :: :ok
+
+## TypeDB.JSON.Jason
+
+decode/1
+encode_to_iodata!/1
+
+## TypeDB.JSON.Native
+
+decode/1
+encode_to_iodata!/1
+
+## TypeDB.Options
+
+query_keys() :: [atom()]
+query_payload(
+  keyword() | TypeDB.Options.Query.t() | nil,
+  keyword()
+) :: map() | nil
+query_payload/1
+transaction_keys() :: [atom()]
+transaction_payload(
+  keyword() | TypeDB.Options.Transaction.t() | nil,
+  keyword()
+) :: map() | nil
+transaction_payload/1
+
+## TypeDB.Options.Query
+
+struct [:answer_count_limit, :include_instance_types, :include_query_structure]
+@type t() :: %TypeDB.Options.Query{
+  answer_count_limit: pos_integer() | nil,
+  include_instance_types: boolean() | nil,
+  include_query_structure: boolean() | nil
+}
+
+## TypeDB.Options.Transaction
+
+struct [:schema_lock_acquire_timeout_millis, :transaction_timeout_millis]
+@type t() :: %TypeDB.Options.Transaction{
+  schema_lock_acquire_timeout_millis: pos_integer() | nil,
+  transaction_timeout_millis: pos_integer() | nil
+}
+
+## TypeDB.Server
+
+@type version() :: %{distribution: String.t(), version: String.t()}
+health!(TypeDB.Connection.t()) :: :ok
+health(TypeDB.Connection.t()) :: :ok | {:error, TypeDB.Error.t()}
+servers!(TypeDB.Connection.t()) :: [map()]
+servers(TypeDB.Connection.t()) :: {:ok, [map()]} | {:error, TypeDB.Error.t()}
+version!(TypeDB.Connection.t()) :: version()
+version(TypeDB.Connection.t()) :: {:ok, version()} | {:error, TypeDB.Error.t()}
+
+## TypeDB.Telemetry
+
+attach_default_logger(Logger.level() | keyword()) :: :ok | {:error, :already_exists}
+attach_default_logger/0
+detach_default_logger() :: :ok | {:error, :not_found}
+handle_event([atom()], map(), map(), map()) :: :ok
+operation_event() :: [atom()]
+request_event() :: [atom()]
+retry_exhausted(map(), map()) :: :ok
+retry_exhausted_event() :: [atom()]
+sign_in_event() :: [atom()]
+span_operation(map(), (-> {term(), map()})) :: term()
+span_request(map(), (-> {term(), map()})) :: term()
+span_sign_in(map(), (-> {term(), map()})) :: term()
+span_transaction(map(), (-> {term(), map()})) :: term()
+transaction_event() :: [atom()]
+
+## TypeDB.Transaction
+
+struct [:conn, :database, :id, :type]
+@type t() :: %TypeDB.Transaction{
+  conn: TypeDB.Connection.t(),
+  database: String.t(),
+  id: String.t(),
+  type: type()
+}
+@type type() :: :read | :write | :schema
+analyze!(t(), String.t(), keyword()) :: map()
+analyze!/2
+analyze(t(), String.t(), keyword()) :: {:ok, map()} | {:error, TypeDB.Error.t()}
+analyze/2
+close!(
+  t(),
+  keyword()
+) :: :ok
+close!/1
+close(
+  t(),
+  keyword()
+) :: :ok | {:error, TypeDB.Error.t()}
+close/1
+commit!(
+  t(),
+  keyword()
+) :: :ok
+commit!/1
+commit(
+  t(),
+  keyword()
+) :: :ok | {:error, TypeDB.Error.t()}
+commit/1
+open!(TypeDB.Connection.t(), String.t(), type(), keyword()) :: t()
+open!/3
+open(TypeDB.Connection.t(), String.t(), type(), keyword()) ::
+  {:ok, t()} | {:error, TypeDB.Error.t()}
+open/3
+query!(t(), String.t(), keyword()) :: TypeDB.Answer.t()
+query!/2
+query(t(), String.t(), keyword()) :: {:ok, TypeDB.Answer.t()} | {:error, TypeDB.Error.t()}
+query/2
+rollback!(
+  t(),
+  keyword()
+) :: :ok
+rollback!/1
+rollback(
+  t(),
+  keyword()
+) :: :ok | {:error, TypeDB.Error.t()}
+rollback/1
+
+## TypeDB.User
+
+create!(TypeDB.Connection.t(), String.t(), String.t()) :: :ok
+create(TypeDB.Connection.t(), String.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+delete!(TypeDB.Connection.t(), String.t()) :: :ok
+delete(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+exists?(TypeDB.Connection.t(), String.t()) :: boolean()
+get!(TypeDB.Connection.t(), String.t()) :: String.t()
+get(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+list!(TypeDB.Connection.t()) :: [String.t()]
+list(TypeDB.Connection.t()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+set_password!(TypeDB.Connection.t(), String.t(), String.t()) :: :ok
+set_password(TypeDB.Connection.t(), String.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}

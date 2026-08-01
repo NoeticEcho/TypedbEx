@@ -131,7 +131,7 @@ bd prime                # Refresh Beads context
 
 ```bash
 mix deps.get
-mix test                              # 349 unit tests, hermetic, no server needed
+mix test                              # hermetic unit suite, no server needed
 mix format --check-formatted
 mix credo --strict
 mix dialyzer
@@ -142,7 +142,7 @@ runs the suite once per HTTP adapter, because the three are interchangeable by
 design and only the matrix proves it:
 
 ```bash
-for a in finch req httpc; do TYPEDB_HTTP_ADAPTER=$a mix test || break; done
+for a in finch req httpc; do TYPEDB_TEST_ADAPTER=$a mix test || break; done
 ```
 
 Two suites are opt-in: `TYPEDB_INTEGRATION=1` needs a live TypeDB 3.x on

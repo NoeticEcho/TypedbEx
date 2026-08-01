@@ -138,6 +138,23 @@ Breaking, for this project, includes all of:
 Widening an upstream constraint (`~> 0.23` to `~> 0.23 or ~> 1.0`) is a patch,
 and is done *after* testing against the new version, never in anticipation.
 
+### The API snapshot
+
+`test/api_snapshot.txt` records the whole published surface — every module,
+struct field, type, callback and spec — and `test/typedb/api_snapshot_test.exs`
+fails when the code and the file disagree. Attention does not scale; this does.
+
+A failure is a question, not a verdict. Read the diff, decide what it means for
+the version number, then:
+
+```shell
+TYPEDB_UPDATE_API_SNAPSHOT=1 mix test test/typedb/api_snapshot_test.exs
+```
+
+and commit the regenerated file alongside the change that caused it. A pull
+request that changes the snapshot without saying why in its description will be
+asked why.
+
 ## Releasing
 
 1. Bump `@version` in `mix.exs` per the rules above.
