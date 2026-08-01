@@ -78,7 +78,7 @@ defmodule TypeDB.MixProject do
   end
 
   defp description do
-    "A TypeDB 3.x driver for Elixir, built on the TypeDB HTTP API. " <>
+    "A driver for TypeDB 3.12+ in Elixir, built on the TypeDB HTTP API. " <>
       "Databases, users, transactions, TypeQL queries and typed concept answers."
   end
 

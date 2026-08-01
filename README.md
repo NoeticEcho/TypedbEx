@@ -4,16 +4,25 @@
 [![Documentation](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/typedb)
 [![License](https://img.shields.io/hexpm/l/typedb.svg)](LICENSE)
 
-An Elixir driver for [TypeDB](https://typedb.com) 3.x, built on the TypeDB HTTP API.
+An Elixir driver for [TypeDB](https://typedb.com), built on the TypeDB HTTP API.
 
 - **Fast under load.** Finch-backed by default: ~1900 req/s at 200-way concurrency where OTP's `:httpc` manages 77. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
 - **Tokens handled for you.** The driver reads the token's own lifetime and renews it *before* it expires, so ordinary traffic never spends a round trip on a `401` — with reactive renewal still there as the safety net. Verified with 200-way bursts against a server issuing one-second tokens.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
 - **Errors you can branch on.** Every failure is a `TypeDB.Error` carrying TypeDB's stable error code.
-- **Observable.** `:telemetry` spans for every request and sign-in, ready for `telemetry_metrics`.
+- **Observable.** `:telemetry` spans for every operation, transaction, request and sign-in, ready for `telemetry_metrics`.
 
-Verified against **TypeDB 3.12.1** on **Elixir 1.20 / OTP 29**.
+## Requirements
+
+**TypeDB 3.12 or newer**, Elixir 1.18+ / OTP 25+.
+
+Every release runs the full suite against TypeDB 3.12.1 and against `latest`,
+through all three HTTP adapters. Older 3.x is not supported, and not merely
+untested: measured against 3.5.0, `given` rows are rejected outright, several
+error codes differ, `/v1/servers` does not exist, and inserting then matching
+fails. The exact release where the driver starts working has not been
+established — if you need one older than 3.12, open an issue and it can be.
 
 ## Installation
 

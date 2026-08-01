@@ -92,6 +92,12 @@ Everything else is additive.
   the new kind **`:encode`** rather than `:config`. `:config` means the driver
   was configured wrongly at start-up; these mean an Elixir term has no TypeDB
   wire value. `Error.kind()` gains `:encode`.
+- **The supported TypeDB range is now stated as 3.12 or newer**, where the
+  README said "3.x". Measured against 3.5.0, the driver does not work at all
+  there: `given` rows are rejected, `/v1/servers` does not exist, several error
+  codes differ and insert-then-match fails. CI runs the integration suite
+  against `3.12.1` and `latest`. The exact floor between 3.5 and 3.12 is not
+  established (tdb-vtg.6).
 - TypeDB.Transport and TypeDB.Token are internal and no longer published in
   the documentation. They were never meant to be called directly.
 - **Five error codes were wrong.** Verified against a live TypeDB 3.12.1 and

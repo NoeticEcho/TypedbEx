@@ -100,7 +100,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        typedb: ["3.12.1"]
+        # The version the driver is developed against, and the newest published.
+        # `latest` is here so that a TypeDB release breaks this build before it
+        # breaks somebody's application; it is expected to be green, and a
+        # failure on it is a real signal rather than noise.
+        #
+        # Older 3.x is NOT supported and is deliberately absent. Measured
+        # against 3.5.0: `given` rows are rejected with HSR2, `/v1/servers`
+        # answers 404, several error codes differ, and insert-then-match fails
+        # outright. See the `Requirements` section of README.md.
+        typedb: ["3.12.1", "latest"]
 
     services:
       typedb:

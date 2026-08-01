@@ -1,6 +1,8 @@
 defmodule TypeDB do
   @moduledoc """
-  A TypeDB 3.x driver for Elixir, built on the TypeDB HTTP API.
+  A driver for TypeDB 3.12 and newer, built on the TypeDB HTTP API.
+
+  Older 3.x is not supported; see the README for what breaks and why.
 
   ## Getting started
 
