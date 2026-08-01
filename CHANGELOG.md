@@ -6,8 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `TypeDB.Transaction.analyze/3` returned `{:ok, :ok}` for a 200 with an empty
+  body, where its spec promises `{:ok, map()}`. It now rejects a payload that is
+  not a structure. Found by the fault matrix.
+
 ### Added
 
+- A fault-injection matrix: thirteen ways an adapter or a server can misbehave,
+  against every public call that reaches one, asserting that each produces a
+  `%TypeDB.Error{}` and leaves the connection alive.
 - Property-based round-trip tests over the wire boundary — `TypeDB.Duration`,
   `TypeDB.DateTimeTZ`, `TypeDB.Given` and `TypeDB.Concept` — where every
   subtle bug in this driver has actually been. `stream_data` is a test-only

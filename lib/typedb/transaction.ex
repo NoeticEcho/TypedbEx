@@ -224,14 +224,28 @@ defmodule TypeDB.Transaction do
   """
   @spec analyze(t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def analyze(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
-    Connection.request(tx.conn, :post, "/transactions/#{tx.id}/analyze",
-      body: %{"query" => query},
-      # Analysis does not execute the query.
-      idempotent: true,
-      metadata: tx_metadata(tx),
-      timeout: opts[:timeout],
-      deadline: opts[:deadline]
-    )
+    case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/analyze",
+           body: %{"query" => query},
+           # Analysis does not execute the query.
+           idempotent: true,
+           metadata: tx_metadata(tx),
+           timeout: opts[:timeout],
+           deadline: opts[:deadline]
+         ) do
+      {:ok, structure} when is_map(structure) ->
+        {:ok, structure}
+
+      # A 200 with an empty body decodes to `:ok`, which is not a map and not
+      # what this function's spec promises. Every other JSON endpoint pattern-
+      # matches the shape it expects; this one passed anything through, and
+      # returned `{:ok, :ok}` to a caller told to expect a map.
+      {:ok, other} ->
+        {:error,
+         Error.new(:decode, "the analyze endpoint returned #{inspect(other)}, not a structure", body: other)}
+
+      {:error, error} ->
+        {:error, error}
+    end
   end
 
   @doc """
