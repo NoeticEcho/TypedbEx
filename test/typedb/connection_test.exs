@@ -202,6 +202,20 @@ defmodule TypeDB.ConnectionTest do
       assert length(requests(failing, "/commit")) == 1
     end
 
+    test ":log_level silences the driver without touching the global Logger" do
+      import ExUnit.CaptureLog
+
+      failing = always_answering(503, "SRV9")
+
+      noisy = connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end)
+      assert capture_log(fn -> TypeDB.Database.list(noisy) end) =~ "retrying in"
+
+      quiet =
+        connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end, log_level: :none)
+
+      assert capture_log(fn -> TypeDB.Database.list(quiet) end) == ""
+    end
+
     test "a numeric retry-after is honoured, bounded by :retry_max_delay" do
       failing = always_answering(429, "SRV9", [{"retry-after", "600"}])
 

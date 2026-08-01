@@ -9,9 +9,7 @@ defmodule TypeDB.Transport do
   Reach for `TypeDB.Connection.request/4` rather than calling this directly.
   """
 
-  require Logger
-
-  alias TypeDB.{Config, Connection, Error, JSON, Telemetry}
+  alias TypeDB.{Config, Connection, Error, JSON, Log, Telemetry}
 
   defmodule Request do
     @moduledoc false
@@ -300,7 +298,9 @@ defmodule TypeDB.Transport do
   defp wait_and_retry(%Request{} = request, attempt_no, attempts, error, delay) do
     # Metadata as well as message text, so a log backend can filter and group on
     # these rather than parse the sentence. See "Logging" in `TypeDB`.
-    Logger.debug(
+    Log.log(
+      request.config,
+      :debug,
       fn ->
         "TypeDB: #{error.kind} on #{request.method} #{request.url} " <>
           "(attempt #{attempt_no}/#{attempts}), retrying in #{delay}ms"

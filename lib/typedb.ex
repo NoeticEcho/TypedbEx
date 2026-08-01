@@ -92,14 +92,30 @@ defmodule TypeDB do
 
   ## Logging
 
-  The driver logs sparingly: a `debug` line per transport retry, a `debug` line
-  for an unexpected message to a connection, an `error` when a connection's
-  transport dies, and a `warning` when no OS trust store can be found. Nothing
-  is logged on the happy path — use `TypeDB.Telemetry` for that.
+  The driver logs sparingly, and nothing at all on the happy path — use
+  `TypeDB.Telemetry` for that. This is everything it can say:
 
-  Every line carries `:typedb_connection` in its Logger metadata, and retries
-  additionally carry `:typedb_method`, `:typedb_path`, `:typedb_attempt` and
-  `:typedb_error_kind`. Configure your backend to keep them:
+  | level | when |
+  | --- | --- |
+  | `debug` | a request is about to be retried |
+  | `debug` | a connection process received a message it does not understand |
+  | `warning` | retries were exhausted and the call is giving up |
+  | `warning` | a token renewal failed |
+  | `error` | a connection's transport died and the connection is stopping |
+
+  `TypeDB.HTTP.Httpc` additionally warns once at start-up when it can find no
+  OS trust store, carrying `:typedb_adapter` rather than `:typedb_connection`:
+  it happens while the adapter is being built, before there is a connection to
+  name or a `:log_level` to consult.
+
+  Set `:log_level` on the connection to raise the floor, or `:none` to silence
+  it — see `TypeDB.Config`. It applies per connection, so one noisy connection
+  can be quietened without filtering the whole application's Logger by module.
+
+  Every line carries `:typedb_connection` in its Logger metadata, and the
+  retry and give-up lines additionally carry `:typedb_method`, `:typedb_path`,
+  `:typedb_attempt` and `:typedb_error_kind`. Configure your backend to keep
+  them:
 
       config :logger, :default_formatter,
         metadata: [:typedb_connection, :typedb_error_kind]

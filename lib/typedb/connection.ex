@@ -51,9 +51,7 @@ defmodule TypeDB.Connection do
 
   use GenServer
 
-  require Logger
-
-  alias TypeDB.{Config, Error, JSON, Telemetry, Token, Transport}
+  alias TypeDB.{Config, Error, JSON, Log, Telemetry, Token, Transport}
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type t :: atom()
@@ -327,7 +325,10 @@ defmodule TypeDB.Connection do
   # raised from inside the adapter, and nothing ever restarts it.
   @impl true
   def handle_info({:EXIT, pid, reason}, %{transport: pid} = state) when is_pid(pid) do
-    Logger.error("TypeDB connection #{inspect(state.config.name)}: transport died (#{inspect(reason)})",
+    Log.log(
+      state.config,
+      :error,
+      "TypeDB connection #{inspect(state.config.name)}: transport died (#{inspect(reason)})",
       typedb_connection: state.config.name
     )
 
@@ -337,7 +338,9 @@ defmodule TypeDB.Connection do
   def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
 
   def handle_info(message, state) do
-    Logger.debug(
+    Log.log(
+      state.config,
+      :debug,
       fn -> "TypeDB connection #{inspect(state.config.name)}: ignoring #{inspect(message)}" end,
       typedb_connection: state.config.name
     )

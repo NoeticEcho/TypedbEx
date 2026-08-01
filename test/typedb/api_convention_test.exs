@@ -136,6 +136,42 @@ defmodule TypeDB.APIConventionTest do
     end
   end
 
+  describe "Logger metadata" do
+    # Credo's MissedMetadataKeyInLoggerConfig check used to guard this, but it
+    # can only see literal `Logger.<level>` calls; every driver log line now
+    # goes through `TypeDB.Log.log/4`, where the level is a runtime argument.
+    # This is the replacement guard, and it checks the stronger property: that
+    # the keys the code emits are exactly the keys the docs promise.
+    test "the metadata keys the driver emits are the ones TypeDB documents" do
+      emitted =
+        "lib/**/*.ex"
+        |> Path.wildcard()
+        |> Enum.flat_map(fn file -> Regex.scan(~r/\b(typedb_[a-z_]+):/, File.read!(file)) end)
+        |> Enum.map(fn [_match, key] -> key end)
+        |> MapSet.new()
+
+      documented =
+        ~r/`:(typedb_[a-z_]+)`/
+        |> Regex.scan(logging_section())
+        |> Enum.map(fn [_match, key] -> key end)
+        |> MapSet.new()
+
+      assert MapSet.difference(emitted, documented) == MapSet.new(),
+             "these metadata keys are emitted but not documented in the Logging section of TypeDB"
+
+      assert MapSet.difference(documented, emitted) == MapSet.new(),
+             "these metadata keys are documented but no longer emitted"
+    end
+
+    defp logging_section do
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(TypeDB)
+
+      [_before, logging] = String.split(moduledoc, "## Logging", parts: 2)
+      [section | _rest] = String.split(logging, "\n  ## ", parts: 2)
+      section
+    end
+  end
+
   # A spec whose return type mentions the atom :error — which, in this codebase,
   # means `{:error, TypeDB.Error.t()}`. Remote types such as `GenServer.on_start/0`
   # are opaque here and are therefore not treated as fallible, which is what we

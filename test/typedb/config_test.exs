@@ -184,6 +184,7 @@ defmodule TypeDB.ConfigTest do
             :retry_max_delay -> {:retry_max_delay, 1_000}
             :deadline -> {:deadline, 30_000}
             :retry_on_status -> {:retry_on_status, [503]}
+            :log_level -> {:log_level, :warning}
           end
         end
 
@@ -223,6 +224,7 @@ defmodule TypeDB.ConfigTest do
       assert config.retry_max_delay == 5_000
       assert config.deadline == :infinity
       assert config.retry_on_status == [429, 502, 503, 504]
+      assert config.log_level == :debug
     end
   end
 
@@ -303,6 +305,14 @@ defmodule TypeDB.ConfigTest do
       # `attempt` is bounded only by :max_retries, which the user sets.
       config = Config.new!(token: "t", retry_backoff: {:exponential, 100})
       assert Config.backoff(config, 100_000) in 0..5_000
+    end
+
+    test "rejects a bad :log_level" do
+      assert {:error, %Error{kind: :config, message: message}} =
+               Config.new(token: "t", log_level: :loud)
+
+      assert message =~ ":log_level"
+      assert {:ok, _} = Config.new(token: "t", log_level: :none)
     end
 
     test "rejects a bad :retry_on_status" do

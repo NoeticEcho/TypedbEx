@@ -56,6 +56,13 @@ defmodule TypeDB.Config do
       is honoured when it carries a number of seconds, still bounded by
       `:retry_max_delay`. The same idempotence rule applies as to any other
       retry, so a write is never re-sent.
+    * `:log_level` — the quietest level this connection will log at, one of
+      `:debug`, `:info`, `:warning`, `:error` or `:none`. Defaults to `:debug`,
+      which logs everything the driver has to say; `:none` silences it.
+      A library that cannot be turned down gets turned off, and filtering the
+      global Logger by module is a blunt instrument when an application has
+      several connections. See the "Logging" section of `TypeDB` for every line
+      the driver can emit.
     * `:deadline` — a wall-clock budget in ms for a whole call, across every
       retry and every wait between them. Defaults to `:infinity`.
 
@@ -98,7 +105,8 @@ defmodule TypeDB.Config do
           retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer()),
           retry_max_delay: timeout(),
           retry_on_status: [pos_integer()],
-          deadline: timeout()
+          deadline: timeout(),
+          log_level: atom()
         }
 
   # Credentials must not reach logs, crash reports or LiveDashboard through an
@@ -127,7 +135,8 @@ defmodule TypeDB.Config do
     :retry_backoff,
     :retry_max_delay,
     :retry_on_status,
-    :deadline
+    :deadline,
+    :log_level
   ]
 
   @doc "The HTTP API version this driver speaks."
@@ -154,7 +163,8 @@ defmodule TypeDB.Config do
          {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit),
          {:ok, retry_max_delay} <- parse_timeout(opts, :retry_max_delay, @default_retry_max_delay),
          {:ok, retry_on_status} <- parse_statuses(opts, :retry_on_status),
-         {:ok, deadline} <- parse_timeout(opts, :deadline, :infinity) do
+         {:ok, deadline} <- parse_timeout(opts, :deadline, :infinity),
+         {:ok, log_level} <- parse_log_level(opts) do
       {:ok,
        %__MODULE__{
          base_url: base_url,
@@ -172,7 +182,8 @@ defmodule TypeDB.Config do
          retry_backoff: backoff,
          retry_max_delay: retry_max_delay,
          retry_on_status: retry_on_status,
-         deadline: deadline
+         deadline: deadline,
+         log_level: log_level
        }}
     end
   end
@@ -192,7 +203,8 @@ defmodule TypeDB.Config do
     :retry_backoff,
     :retry_max_delay,
     :retry_on_status,
-    :deadline
+    :deadline,
+    :log_level
   ]
 
   @doc """
@@ -252,6 +264,20 @@ defmodule TypeDB.Config do
 
       other ->
         {:error, numeric_error(key, other, "a list of HTTP status codes")}
+    end
+  end
+
+  defp parse_log_level(opts) do
+    case Keyword.get(opts, :log_level, :debug) do
+      level when is_atom(level) ->
+        if level in TypeDB.Log.levels() do
+          {:ok, level}
+        else
+          {:error, numeric_error(:log_level, level, "one of #{inspect(TypeDB.Log.levels())}")}
+        end
+
+      other ->
+        {:error, numeric_error(:log_level, other, "one of #{inspect(TypeDB.Log.levels())}")}
     end
   end
 
