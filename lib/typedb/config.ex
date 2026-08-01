@@ -43,6 +43,14 @@ defmodule TypeDB.Config do
       growth is otherwise unbounded, and the sleep happens in the calling
       process — with `max_retries: 10` and the default base, the last wait would
       be over fifty seconds.
+    * `:retry_on_status` — response statuses to treat as retryable, in addition
+      to transport failures and timeouts. Defaults to `[429, 502, 503, 504]`;
+      `[]` opts out. These are what a proxy, an ingress or a load balancer
+      answers while TypeDB restarts, and what the server answers when it is
+      shedding load — the failures retrying exists for. A `retry-after` header
+      is honoured when it carries a number of seconds, still bounded by
+      `:retry_max_delay`. The same idempotence rule applies as to any other
+      retry, so a write is never re-sent.
     * `:deadline` — a wall-clock budget in ms for a whole call, across every
       retry and every wait between them. Defaults to `:infinity`.
 
@@ -84,6 +92,7 @@ defmodule TypeDB.Config do
           answer_count_limit: pos_integer() | nil,
           retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer()),
           retry_max_delay: timeout(),
+          retry_on_status: [pos_integer()],
           deadline: timeout()
         }
 
@@ -112,6 +121,7 @@ defmodule TypeDB.Config do
     :answer_count_limit,
     :retry_backoff,
     :retry_max_delay,
+    :retry_on_status,
     :deadline
   ]
 
@@ -138,6 +148,7 @@ defmodule TypeDB.Config do
          {:ok, max_auth_renewals} <- parse_count(opts, :max_auth_renewals, 2),
          {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit),
          {:ok, retry_max_delay} <- parse_timeout(opts, :retry_max_delay, @default_retry_max_delay),
+         {:ok, retry_on_status} <- parse_statuses(opts, :retry_on_status),
          {:ok, deadline} <- parse_timeout(opts, :deadline, :infinity) do
       {:ok,
        %__MODULE__{
@@ -155,6 +166,7 @@ defmodule TypeDB.Config do
          answer_count_limit: answer_count_limit,
          retry_backoff: backoff,
          retry_max_delay: retry_max_delay,
+         retry_on_status: retry_on_status,
          deadline: deadline
        }}
     end
@@ -174,6 +186,7 @@ defmodule TypeDB.Config do
     :answer_count_limit,
     :retry_backoff,
     :retry_max_delay,
+    :retry_on_status,
     :deadline
   ]
 
@@ -218,6 +231,22 @@ defmodule TypeDB.Config do
     case Keyword.get(opts, key, default) do
       value when is_integer(value) and value >= 0 -> {:ok, value}
       other -> {:error, numeric_error(key, other, "a non-negative integer")}
+    end
+  end
+
+  @default_retry_on_status [429, 502, 503, 504]
+
+  defp parse_statuses(opts, key) do
+    case Keyword.get(opts, key, @default_retry_on_status) do
+      statuses when is_list(statuses) ->
+        if Enum.all?(statuses, &(is_integer(&1) and &1 in 100..599)) do
+          {:ok, statuses}
+        else
+          {:error, numeric_error(key, statuses, "a list of HTTP status codes")}
+        end
+
+      other ->
+        {:error, numeric_error(key, other, "a list of HTTP status codes")}
     end
   end
 

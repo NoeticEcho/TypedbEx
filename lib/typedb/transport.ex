@@ -159,19 +159,66 @@ defmodule TypeDB.Transport do
   defp attempt(%Request{} = request, attempt_no, attempts) do
     case adapter_request(request, attempt_no) do
       {:error, %Error{kind: kind} = error} when kind in [:transport, :timeout] ->
-        retry_or_give_up(request, attempt_no, attempts, error)
+        retry_or_give_up(request, attempt_no, attempts, error, {:error, error}, nil)
+
+      {:ok, %{status: status, headers: headers}} = response ->
+        if status in request.config.retry_on_status do
+          # Giving up returns the response rather than the error built here, so
+          # that `decode/2` still produces the server's own code and body.
+          retry_or_give_up(
+            request,
+            attempt_no,
+            attempts,
+            error_from_response(response),
+            response,
+            retry_after(headers)
+          )
+        else
+          response
+        end
 
       result ->
         result
     end
   end
 
-  defp retry_or_give_up(_request, attempt_no, attempts, error) when attempt_no >= attempts do
-    {:error, error}
+  defp error_from_response({:ok, response}), do: error_from(response)
+
+  # `retry-after` is either a number of seconds or an HTTP-date. Only the
+  # numeric form is honoured: the date form requires trusting the peer's clock
+  # against ours, and TypeDB and the proxies in front of it send seconds.
+  defp retry_after(headers) do
+    with value when is_binary(value) <- header(headers, "retry-after"),
+         {seconds, ""} <- Integer.parse(String.trim(value)),
+         true <- seconds >= 0 do
+      :timer.seconds(seconds)
+    else
+      _ -> nil
+    end
   end
 
-  defp retry_or_give_up(%Request{} = request, attempt_no, attempts, error) do
-    delay = Config.backoff(request.config, attempt_no)
+  # HTTP/1.1 header names are case-insensitive and the three adapters do not
+  # agree on the case they hand back.
+  defp header(headers, name) do
+    Enum.find_value(headers, fn {key, value} ->
+      if String.downcase(key) == name, do: value
+    end)
+  end
+
+  defp retry_or_give_up(_request, attempt_no, attempts, _error, give_up, _retry_after)
+       when attempt_no >= attempts do
+    give_up
+  end
+
+  defp retry_or_give_up(%Request{} = request, attempt_no, attempts, error, _give_up, retry_after) do
+    # A server that says when to come back knows better than our own curve, but
+    # it does not get to hold the caller's process for as long as it likes.
+    delay =
+      case {retry_after, request.config.retry_max_delay} do
+        {nil, _max} -> Config.backoff(request.config, attempt_no)
+        {after_ms, :infinity} -> after_ms
+        {after_ms, max} -> min(after_ms, max)
+      end
 
     if affordable?(request, delay) do
       wait_and_retry(request, attempt_no, attempts, error, delay)

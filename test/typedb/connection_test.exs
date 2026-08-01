@@ -112,22 +112,86 @@ defmodule TypeDB.ConnectionTest do
       TypeDB.stop(pid)
     end
 
-    test "a server error is not a transport failure and is not retried", %{stub: stub} do
+    # 503 is what an ingress or a load balancer answers while TypeDB restarts,
+    # which is the case retrying exists for; 400 is TypeDB saying no, which
+    # retrying cannot improve.
+    defp always_answering(status, code, headers \\ []) do
       handler = fn _method, _path, _headers, _body ->
-        {503, [], ~s({"code":"SRV9","message":"unavailable"})}
+        {status, headers, ~s({"code":"#{code}","message":"nope"})}
       end
 
       {:ok, failing} = Stub.start_link(handler: handler)
+      on_exit(fn -> stop_quietly(fn -> Stub.stop(failing) end) end)
+      failing
+    end
 
+    # start_link/1 links to the test process, so by the time on_exit runs the
+    # process may already be on its way down; stopping it then exits :shutdown.
+    defp stop_quietly(fun) do
+      fun.()
+    catch
+      :exit, _ -> :ok
+    end
+
+    defp connection_to(stub, opts) do
       name = :"retry_conn_#{System.unique_integer([:positive])}"
-      {:ok, pid} = TypeDB.start_link(name: name, url: Stub.url(failing), token: "t")
+      {:ok, pid} = TypeDB.start_link([name: name, url: Stub.url(stub), token: "t"] ++ opts)
+      on_exit(fn -> stop_quietly(fn -> TypeDB.stop(pid) end) end)
+      name
+    end
 
-      assert {:error, %Error{kind: :server, status: 503, code: "SRV9"}} = TypeDB.Database.list(name)
+    test "a status in :retry_on_status is retried, and the server's own error still surfaces" do
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end)
+
+      assert {:error, %Error{kind: :server, status: 503, code: "SRV9"}} = TypeDB.Database.list(conn)
+      assert length(requests(failing, "/databases")) == 2
+    end
+
+    test "a status outside :retry_on_status is not retried" do
+      failing = always_answering(400, "DBD1")
+      conn = connection_to(failing, max_retries: 3)
+
+      assert {:error, %Error{kind: :server, status: 400}} = TypeDB.Database.list(conn)
       assert length(requests(failing, "/databases")) == 1
+    end
 
-      TypeDB.stop(pid)
-      Stub.stop(failing)
-      Stub.stop(stub)
+    test "retry_on_status: [] opts out entirely" do
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 3, retry_on_status: [])
+
+      assert {:error, %Error{status: 503}} = TypeDB.Database.list(conn)
+      assert length(requests(failing, "/databases")) == 1
+    end
+
+    test "a retryable status on a non-idempotent request is not retried" do
+      # The same rule as any other retry: a 502 can mean the request reached the
+      # server and the answer was lost, so a write is never re-sent.
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 3, retry_backoff: fn _ -> 1 end)
+
+      assert {:error, %Error{status: 503}} = TypeDB.query(conn, "social", "insert $p isa person;")
+      assert length(requests(failing, "/query")) == 1
+    end
+
+    test "a numeric retry-after is honoured, bounded by :retry_max_delay" do
+      failing = always_answering(429, "SRV9", [{"retry-after", "600"}])
+
+      conn =
+        connection_to(failing,
+          max_retries: 1,
+          retry_max_delay: 60,
+          retry_backoff: fn _ -> 1 end
+        )
+
+      started = System.monotonic_time(:millisecond)
+      assert {:error, %Error{status: 429}} = TypeDB.Database.list(conn)
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      # 600s asked for, 60ms allowed, and more than the 1ms the curve wanted.
+      assert elapsed >= 60
+      assert elapsed < 5_000
+      assert length(requests(failing, "/databases")) == 2
     end
 
     # Fails the first N requests at transport level, then delegates to the real
