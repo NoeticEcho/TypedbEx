@@ -158,6 +158,40 @@ jobs:
             TYPEDB_TEST_ADAPTER=$adapter mix test --include integration
           done
 
+  windows:
+    name: Windows (compile and unit tests)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      # `mix typedb.check` needs a POSIX shell, by decision — Git Bash, WSL or
+      # MSYS2 cover it, and the task says so. The driver itself is pure Elixir
+      # and should be proven to work here rather than assumed to: the unit suite
+      # is hermetic, driving the whole driver against an in-process HTTP server.
+      # The typeql-check tests skip themselves when the CLI is absent, which it
+      # is here.
+      #
+      # No formatting or lint check: those run once, on Linux.
+      - run: mix compile --warnings-as-errors
+
+      - run: mix test
+
+      - name: Test every HTTP adapter
+        shell: bash
+        run: |
+          for adapter in finch req httpc; do
+            echo "--- $adapter ---"
+            TYPEDB_TEST_ADAPTER=$adapter mix test
+          done
+
   optional_deps:
     name: Optional dependencies (${{ matrix.name }})
     runs-on: ubuntu-latest

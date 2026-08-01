@@ -15,7 +15,10 @@ An Elixir driver for [TypeDB](https://typedb.com), built on the TypeDB HTTP API.
 
 ## Requirements
 
-**TypeDB 3.12 or newer**, Elixir 1.18+ / OTP 25+.
+**TypeDB 3.12 or newer**, Elixir 1.18+ / OTP 25+. Linux, macOS and Windows —
+CI compiles and runs the unit suite through all three HTTP adapters on Windows
+as well as Linux. The one exception is the `mix typedb.check` task, which
+shells out and therefore wants Git Bash, WSL or MSYS2 there.
 
 Every release runs the full suite against TypeDB 3.12.1 and against `latest`,
 through all three HTTP adapters. Older 3.x is not supported, and not merely

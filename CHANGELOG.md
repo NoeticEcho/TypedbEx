@@ -92,6 +92,9 @@ Everything else is additive.
   the new kind **`:encode`** rather than `:config`. `:config` means the driver
   was configured wrongly at start-up; these mean an Elixir term has no TypeDB
   wire value. `Error.kind()` gains `:encode`.
+- CI now compiles and runs the unit suite on Windows through all three HTTP
+  adapters, so the claim that the driver is pure Elixir is proven rather than
+  assumed. `mix typedb.check` still wants a POSIX shell there.
 - A `decimal` attribute is now stripped of TypeQL's `dec` suffix whether or not
   the optional `Decimal` library is loaded. Without it the fallback used to hand
   back `"12.345dec"` where the `Decimal` path gave `12.345`, so the value
