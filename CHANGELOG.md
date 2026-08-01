@@ -41,6 +41,12 @@ the public surface — the three things 1.0 makes irreversible.
   variable that names no field. `Kernel.struct/2` silently returns the struct's
   defaults there, which the `to_map/1` docs previously warned about at length
   instead of solving.
+- An API snapshot test. `test/api_snapshot.txt` records the whole published
+  surface and the suite fails when the code and the file disagree, so a SemVer
+  decision is forced at the moment the API changes rather than at release.
+- A versioning policy in CONTRIBUTING: what the version number covers —
+  telemetry event names and metadata keys, error kinds, the option set and its
+  defaults, the transport behaviour — and what it does not.
 
 ### Changed
 
