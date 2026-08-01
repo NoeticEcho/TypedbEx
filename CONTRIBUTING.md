@@ -82,6 +82,7 @@ mix compile --warnings-as-errors
 mix test
 mix credo --strict
 mix dialyzer
+mix test --cover     # the floor is in mix.exs; CI enforces it
 mix typedb.check          # validates priv/**/*.tql, needs the typeql-check CLI and a POSIX shell
 ```
 

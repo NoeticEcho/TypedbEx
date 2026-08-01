@@ -73,6 +73,13 @@ jobs:
       # MIX_ENV: dev on both, overriding the workflow-level `test` — credo and
       # dialyxir are `only: [:dev]` deps, so under `test` the tasks do not exist
       # and the step fails with "The task could not be found".
+      # After the adapter loop, so a coverage failure is reported as a coverage
+      # failure rather than as "the suite is red". The floor is in mix.exs; see
+      # its `test_coverage` for what is excluded and why.
+      - name: Coverage floor
+        if: matrix.lint
+        run: mix test --cover
+
       - name: Lint
         if: matrix.lint
         env:

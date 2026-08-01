@@ -23,7 +23,24 @@ defmodule TypeDB.MixProject do
         list_unused_filters: true,
         flags: [:error_handling, :extra_return, :missing_return, :unmatched_returns]
       ],
-      test_coverage: [summary: [threshold: 0]]
+      test_coverage: [
+        # The floor is the number the suite actually reaches, so it can only be
+        # raised deliberately. Modules that run only under another adapter or
+        # another JSON codec drag a single run down — CI covers those by running
+        # the matrix, not by pretending one run covers everything.
+        summary: [threshold: 85],
+        ignore_modules: [
+          # Test support: measuring the coverage of the thing doing the
+          # measuring says nothing about the library.
+          TypeDB.Case,
+          TypeDB.FaultAdapter,
+          ~r/^TypeDB\.Stub/,
+          # `TypeDB.Bang` is macros. Everything it generates is attributed to
+          # the module that expanded it, so cover reports 0% for code that runs
+          # in nearly every test in the suite.
+          TypeDB.Bang
+        ]
+      ]
     ]
   end
 
