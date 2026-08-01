@@ -32,6 +32,11 @@ defmodule TypeDB.Telemetry do
       safe to use as a metric tag
     * `:path` — the concrete path, which contains database, user and transaction
       names and is therefore high-cardinality
+    * `:database` — present whenever the call names one, whether in the path or
+      in the request body
+    * `:transaction_type` — `:read`, `:write` or `:schema`, on transaction and
+      query calls
+    * `:transaction_id` — on calls against an open transaction
     * `:attempts` — how many HTTP requests it took, on `:stop` only. `1` on the
       happy path; more means the driver retried or renewed a token
     * `:error` — the `TypeDB.Error`, on `:stop` only, when the call failed
@@ -62,6 +67,7 @@ defmodule TypeDB.Telemetry do
     * `:path` — the API path, e.g. `"/transactions/open"`. Database and user
       names are *not* stripped, so treat it as potentially high-cardinality
     * `:attempt` — 1-based attempt number within this request
+    * `:route`, `:database`, `:transaction_type`, `:transaction_id` — as above
     * `:status` — HTTP status, on `:stop` only
     * `:error` — the `TypeDB.Error` when one was produced, on `:stop` only
 

@@ -56,6 +56,10 @@ defmodule TypeDB.Transaction do
   @enforce_keys [:conn, :id, :database, :type]
   defstruct [:conn, :id, :database, :type]
 
+  # The transaction's own path carries its id, but not the database it belongs
+  # to or what kind it is — both of which are what you want to group metrics by.
+  defp tx_metadata(%__MODULE__{} = tx), do: %{database: tx.database, transaction_type: tx.type}
+
   @doc """
   Opens a transaction on `database`.
 
@@ -82,6 +86,7 @@ defmodule TypeDB.Transaction do
            # TypeDB's own transaction timeout; for :write and :schema it costs
            # the locks, so those stay one-shot.
            idempotent: type == :read,
+           metadata: %{database: database, transaction_type: type},
            timeout: opts[:timeout],
            deadline: opts[:deadline]
          ) do
@@ -173,6 +178,7 @@ defmodule TypeDB.Transaction do
              # A read query changes nothing, so re-sending it after a dropped
              # packet is free. In a write or schema transaction it is not.
              idempotent: tx.type == :read,
+             metadata: tx_metadata(tx),
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
@@ -202,6 +208,7 @@ defmodule TypeDB.Transaction do
       body: %{"query" => query},
       # Analysis does not execute the query.
       idempotent: true,
+      metadata: tx_metadata(tx),
       timeout: opts[:timeout],
       deadline: opts[:deadline]
     )
@@ -234,6 +241,7 @@ defmodule TypeDB.Transaction do
   def commit(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/commit",
            idempotent: false,
+           metadata: tx_metadata(tx),
            expect: :empty,
            timeout: opts[:timeout],
            deadline: opts[:deadline]
@@ -262,6 +270,7 @@ defmodule TypeDB.Transaction do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/rollback",
            # Rolling back twice reaches the same state as rolling back once.
            idempotent: true,
+           metadata: tx_metadata(tx),
            expect: :empty,
            timeout: opts[:timeout],
            deadline: opts[:deadline]
@@ -291,6 +300,7 @@ defmodule TypeDB.Transaction do
            # Idempotent by design, and a 404 from a second close is treated as
            # success below.
            idempotent: true,
+           metadata: tx_metadata(tx),
            expect: :empty,
            timeout: opts[:timeout],
            deadline: opts[:deadline]

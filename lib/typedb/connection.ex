@@ -208,6 +208,8 @@ defmodule TypeDB.Connection do
     * `:timeout` — overrides the connection timeout for this request
     * `:deadline` — overrides the connection's wall-clock budget for the whole
       call, retries included
+    * `:metadata` — a map merged into the telemetry metadata of this call, for
+      what the path cannot say: the database of a `/query` is in its body
   """
   @type request_opts :: keyword()
 

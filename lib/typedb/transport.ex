@@ -17,7 +17,19 @@ defmodule TypeDB.Transport do
     @moduledoc false
 
     @enforce_keys [:conn, :config, :method, :path, :opts]
-    defstruct [:conn, :config, :method, :path, :opts, :url, :body, :token, :deadline, :attempts]
+    defstruct [
+      :conn,
+      :config,
+      :method,
+      :path,
+      :opts,
+      :url,
+      :body,
+      :token,
+      :deadline,
+      :attempts,
+      :telemetry
+    ]
   end
 
   @doc """
@@ -38,18 +50,14 @@ defmodule TypeDB.Transport do
         # A mutable counter because the number of attempts is only known once
         # they are over, and it has to survive both the retry loop and the
         # renew-and-retry loop to reach the span's :stop metadata.
-        attempts: :counters.new(1, [])
+        attempts: :counters.new(1, []),
+        telemetry: telemetry_metadata(conn, method, path, opts)
       }
       |> put_deadline()
       |> put_url()
       |> put_body()
 
-    metadata = %{
-      connection: conn,
-      method: method,
-      path: path,
-      route: route(path)
-    }
+    metadata = request.telemetry
 
     Telemetry.span_operation(metadata, fn ->
       result = send_with_renewal(request, 0)
@@ -61,19 +69,34 @@ defmodule TypeDB.Transport do
     end)
   end
 
+  defp telemetry_metadata(conn, method, path, opts) do
+    {route, from_path} = route(path)
+
+    %{connection: conn, method: method, path: path, route: route}
+    |> Map.merge(from_path)
+    # What the path cannot say: the database of a /query or a transaction is in
+    # the request body, so the call sites that know it pass it in.
+    |> Map.merge(Keyword.get(opts, :metadata, %{}))
+  end
+
   # A low-cardinality template for the high-cardinality `:path`, so that metrics
-  # can be grouped without a regex in every dashboard. The API surface is closed
-  # and complete, so anything unmatched is already a fixed path.
+  # can be grouped without a regex in every dashboard, plus whatever the path
+  # itself identifies. The API surface is closed and complete, so anything
+  # unmatched is already a fixed path.
   defp route(path) do
     case String.split(path, "/", trim: true) do
-      ["databases", _name] -> "/databases/:name"
-      ["databases", _name, sub] -> "/databases/:name/" <> sub
-      ["users", _username] -> "/users/:username"
-      ["transactions", "open"] -> "/transactions/open"
-      ["transactions", _id, action] -> "/transactions/:id/" <> action
-      _ -> path
+      ["databases", name] -> {"/databases/:name", %{database: unescape(name)}}
+      ["databases", name, sub] -> {"/databases/:name/" <> sub, %{database: unescape(name)}}
+      ["users", _username] -> {"/users/:username", %{}}
+      ["transactions", "open"] -> {"/transactions/open", %{}}
+      ["transactions", id, action] -> {"/transactions/:id/" <> action, %{transaction_id: id}}
+      _ -> {path, %{}}
     end
   end
+
+  # The path segment is percent-encoded; metadata wants the name as the caller
+  # wrote it.
+  defp unescape(segment), do: URI.decode(segment)
 
   # Stamped before anything else, so that acquiring a token — which can block on
   # a sign-in — is spent out of the caller's budget rather than on top of it.
@@ -296,12 +319,7 @@ defmodule TypeDB.Transport do
   defp adapter_request(%Request{} = request, attempt_no) do
     :counters.add(request.attempts, 1, 1)
 
-    metadata = %{
-      connection: request.conn,
-      method: request.method,
-      path: request.path,
-      attempt: attempt_no
-    }
+    metadata = Map.put(request.telemetry, :attempt, attempt_no)
 
     Telemetry.span_request(metadata, fn ->
       result = do_adapter_request(request)

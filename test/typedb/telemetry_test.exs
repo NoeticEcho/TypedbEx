@@ -225,6 +225,44 @@ defmodule TypeDB.TelemetryTest do
       assert path =~ tx.id
     end
 
+    @tag stub_opts: [databases: ["social"]]
+    test "the database is in the metadata even when the path does not name it", %{conn: conn} do
+      # /v1/query carries the database in its body, so grouping metrics by
+      # database used to mean not grouping them at all.
+      assert {:ok, _} =
+               TypeDB.query(conn, "social", "match $p isa person;", transaction_type: :read)
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], _, metadata}
+      assert metadata.route == "/query"
+      assert metadata.database == "social"
+      assert metadata.transaction_type == :read
+    end
+
+    test "a percent-encoded database name is reported as it was written", %{conn: conn} do
+      # Whether the server knows this database is beside the point; the span
+      # fires either way, and it must not report the escaped form.
+      _ = TypeDB.Database.get(conn, "my db")
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], _, %{database: "my db", path: path}}
+      assert path =~ "%20"
+    end
+
+    @tag stub_opts: [databases: ["social"]]
+    test "transaction calls carry the id, the database and the type", %{conn: conn} do
+      {:ok, tx} = TypeDB.Transaction.open(conn, "social", :write)
+      assert :ok = TypeDB.Transaction.commit(tx)
+
+      assert_receive {:telemetry, [:typedb, :operation, :stop], _,
+                      %{
+                        route: "/transactions/:id/commit",
+                        database: "social",
+                        transaction_type: :write,
+                        transaction_id: id
+                      }}
+
+      assert id == tx.id
+    end
+
     test "a failed call carries the error", %{conn: conn} do
       assert {:error, _} = TypeDB.Database.get(conn, "nope")
 

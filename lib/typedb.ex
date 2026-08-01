@@ -225,6 +225,7 @@ defmodule TypeDB do
              # A read runs in a transaction the server opens and closes for it,
              # so a re-send after a dropped packet changes nothing.
              idempotent: transaction_type == :read,
+             metadata: %{database: database, transaction_type: transaction_type},
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
