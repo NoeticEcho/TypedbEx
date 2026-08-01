@@ -102,21 +102,77 @@ defmodule TypeDB.ConceptRow do
   That matters if you are reaching for `Kernel.struct/2`, which ignores keys
   that are not atoms naming a field: handed a string-keyed map it returns the
   struct's defaults and reports nothing, so the conversion silently produces a
-  struct full of `nil`s. Convert the keys first:
-
-      row
-      |> TypeDB.ConceptRow.to_map()
-      |> Map.new(fn {variable, value} -> {String.to_existing_atom(variable), value} end)
-      |> then(&struct(Person, &1))
-
-  `String.to_existing_atom/1` rather than `String.to_atom/1` so a query variable
-  cannot grow the atom table; the struct's own fields already exist as atoms
-  wherever `Person` is loaded. It raises `ArgumentError` for a variable that
-  does not name one, which is the failure you want over a silent `nil`.
+  struct full of `nil`s. Use `to_struct/2` instead.
   """
   @spec to_map(t()) :: %{optional(String.t()) => term()}
   def to_map(%__MODULE__{data: data}) do
     Map.new(data, fn {variable, entry} -> {variable, unwrap(entry)} end)
+  end
+
+  @doc """
+  Builds a struct out of the row, matching variable names to field names.
+
+  `Kernel.struct/2` cannot do this: handed a string-keyed map it ignores every
+  key and hands back the struct's defaults, so a mistyped variable produces a
+  struct full of `nil`s and no complaint. This raises instead, naming the
+  variable and listing the fields that do exist.
+
+      defmodule Person do
+        defstruct [:name, :age]
+      end
+
+      TypeDB.query!(conn, "social", "match $p isa person, has name $name, has age $age;")
+      |> Enum.map(&TypeDB.ConceptRow.to_struct(&1, Person))
+      #=> [%Person{name: "Alice", age: 31}]
+
+  Values are unwrapped as `to_map/1` unwraps them. A field the query did not
+  select keeps the struct's own default, since selecting a subset of the fields
+  is an ordinary thing to want; a *variable* with no matching field is a
+  mistake, and is reported as one.
+
+  ## Examples
+
+      iex> row = %TypeDB.ConceptRow{data: %{"scheme" => nil, "host" => nil}}
+      iex> TypeDB.ConceptRow.to_struct(row, URI)
+      %URI{scheme: nil, host: nil}
+
+      iex> row = %TypeDB.ConceptRow{data: %{"hsot" => nil}}
+      iex> TypeDB.ConceptRow.to_struct(row, URI)
+      ** (ArgumentError) query variable "hsot" does not name a field of URI. Its fields are: :authority, :fragment, :host, :path, :port, :query, :scheme, :userinfo
+  """
+  @spec to_struct(t(), module()) :: struct()
+  def to_struct(%__MODULE__{} = row, module) when is_atom(module) do
+    fields = struct_fields(module)
+
+    row
+    |> to_map()
+    |> Map.new(fn {variable, value} ->
+      case Map.fetch(fields, variable) do
+        {:ok, field} ->
+          {field, value}
+
+        :error ->
+          raise ArgumentError,
+                "query variable #{inspect(variable)} does not name a field of " <>
+                  "#{inspect(module)}. Its fields are: " <>
+                  Enum.map_join(Enum.sort(Map.values(fields)), ", ", &inspect/1)
+      end
+    end)
+    |> then(&struct(module, &1))
+  end
+
+  # Keyed by string so that a variable name never has to become an atom: even
+  # `String.to_existing_atom/1` would raise for a variable that happens to name
+  # an atom somewhere else in the system, which is a confusing way to be told
+  # that a struct has no such field.
+  defp struct_fields(module) do
+    module.__struct__()
+    |> Map.from_struct()
+    |> Map.keys()
+    |> Map.new(&{Atom.to_string(&1), &1})
+  rescue
+    UndefinedFunctionError ->
+      reraise ArgumentError, [message: "#{inspect(module)} is not a struct"], __STACKTRACE__
   end
 
   defp unwrap(nil), do: nil

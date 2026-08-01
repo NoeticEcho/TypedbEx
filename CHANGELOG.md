@@ -37,6 +37,10 @@ the public surface — the three things 1.0 makes irreversible.
   line per operation, transaction, sign-in and give-up, off unless asked for.
 - `:database`, `:transaction_type` and `:transaction_id` in telemetry metadata,
   including for `/v1/query`, which carries its database in the request body.
+- `TypeDB.ConceptRow.to_struct/2` — builds a struct from a row, raising on a
+  variable that names no field. `Kernel.struct/2` silently returns the struct's
+  defaults there, which the `to_map/1` docs previously warned about at length
+  instead of solving.
 
 ### Changed
 

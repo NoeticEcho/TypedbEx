@@ -4,6 +4,7 @@ defmodule TypeDB.ConceptTest do
   alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration, Error}
 
   doctest TypeDB.Concept
+  doctest TypeDB.ConceptRow
 
   describe "decode/1 instances" do
     test "entity with a type" do
@@ -235,5 +236,53 @@ defmodule TypeDB.ConceptTest do
 
   defp cast(value, value_type) do
     Concept.typed_value(%Concept.Value{value: value, value_type: value_type})
+  end
+
+  describe "to_struct/2" do
+    defmodule Person do
+      @moduledoc false
+      defstruct [:name, :age, :nickname]
+    end
+
+    defp row(data), do: %TypeDB.ConceptRow{data: data}
+
+    defp attribute(value, type), do: %TypeDB.Concept.Value{value: value, value_type: type}
+
+    test "maps variable names onto fields and unwraps the values" do
+      assert %Person{name: "Alice", age: 31, nickname: nil} =
+               row(%{"name" => attribute("Alice", "string"), "age" => attribute(31, "integer")})
+               |> TypeDB.ConceptRow.to_struct(Person)
+    end
+
+    test "a field the query did not select keeps its default" do
+      # Selecting a subset is ordinary; the caller wrote the query.
+      assert %Person{name: "Alice", age: nil} =
+               row(%{"name" => attribute("Alice", "string")})
+               |> TypeDB.ConceptRow.to_struct(Person)
+    end
+
+    test "a variable with no matching field is reported, not silently dropped" do
+      # Kernel.struct/2 answers %Person{name: nil, age: nil, nickname: nil} here
+      # and says nothing, which is the whole reason this function exists.
+      error =
+        assert_raise ArgumentError, fn ->
+          row(%{"nmae" => attribute("Alice", "string")})
+          |> TypeDB.ConceptRow.to_struct(Person)
+        end
+
+      assert error.message =~ ~s(variable "nmae")
+      assert error.message =~ ":name"
+      assert error.message =~ ":nickname"
+    end
+
+    test "a module that is not a struct says so" do
+      assert_raise ArgumentError, ~r/is not a struct/, fn ->
+        TypeDB.ConceptRow.to_struct(row(%{}), Enum)
+      end
+    end
+
+    test "an empty row yields the struct's defaults" do
+      assert %Person{} == TypeDB.ConceptRow.to_struct(row(%{}), Person)
+    end
   end
 end
