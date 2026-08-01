@@ -196,11 +196,20 @@ defmodule TypeDB.Transaction do
   Asks TypeDB to analyse a query without running it.
 
   Returns the decoded pipeline structure: the query's stages, variables, and
-  inferred types. The shape is defined by TypeDB and is passed through
-  unchanged, because it is a diagnostic surface rather than a stable API.
+  inferred types. Useful for query tooling and for checking that a query
+  type-checks against the current schema before shipping it.
 
-  Useful for query tooling and for checking that a query type-checks against the
-  current schema before shipping it.
+  > #### Not covered by this driver's versioning {: .warning}
+  >
+  > The map is TypeDB's, passed through verbatim with string keys, and it is
+  > the one return value in this driver that SemVer does not cover. It is a
+  > diagnostic surface: the endpoint is not in TypeDB's published HTTP API
+  > reference, and its shape tracks the server rather than this package, so a
+  > TypeDB upgrade can change it inside a patch release of the driver.
+  >
+  > Modelling it as a struct would be a promise the driver cannot keep — every
+  > server change would either break the struct or be silently dropped by it.
+  > Match defensively, and do not build anything load-bearing on the shape.
   """
   @spec analyze(t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def analyze(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
