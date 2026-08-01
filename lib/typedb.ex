@@ -138,6 +138,12 @@ defmodule TypeDB do
   users, servers, version and health, explicit transactions, one-shot queries,
   and query analysis. TypeDB's gRPC-only features — database import/export and
   streaming answers — are not available over HTTP and so are not here.
+
+  What that costs you in practice, and the four other things worth knowing
+  before they surprise you in production, are in the
+  [Limitations](readme.html#limitations) section of the README: answers arrive
+  whole, a connection points at one server, retries block the caller, and one
+  connection means one HTTP pool.
   """
 
   alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Telemetry, Transaction, Wire}

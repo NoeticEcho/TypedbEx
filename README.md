@@ -463,12 +463,49 @@ If you use an AI coding agent, TypeDB's
 guide pairs `typeql-check` with the
 [`typedb-skills`](https://github.com/typedb/typedb-skills) TypeQL skill file.
 
-## What is not covered
+## Limitations
 
-The HTTP API does not expose database import/export or streaming answers; those
-are gRPC-only in TypeDB 3.x. Everything else in HTTP API v1 is here: sign-in and
-token renewal, databases, users, servers, version and health, transactions,
-one-shot queries, and query analysis.
+None of these are bugs. All of them are surprises if you meet them for the
+first time in production.
+
+**Answers arrive whole.** The HTTP API does not stream, so a `match` that
+selects a million rows materialises a million rows on the server, ships them,
+and decodes them into one term in your process. There is no cursor to page
+through and none can be built on this API. Set `:answer_count_limit` — per
+connection, per query, or both — and treat an unbounded `match` the way you
+would treat `SELECT *` without a `LIMIT`.
+
+**A connection points at one server.** `TypeDB.Server.servers/1` will tell you
+what the cluster looks like, and nothing in the driver acts on it: there is no
+failover, no read-replica routing and no reconnection to a different node. Put
+a load balancer in front of a cluster, or supervise one connection per node and
+choose between them yourself.
+
+**Retries block the caller.** Requests run in the calling process, which is what
+makes the driver concurrent — but it also means a retry and its backoff are
+spent in *your* process, not in a queue behind a connection. See "How long a
+call can take" in the `TypeDB` docs for the arithmetic, and set `:deadline` if a
+call must not outlive a budget.
+
+**One HTTP pool per connection.** `TypeDB.HTTP.Finch` starts a pool the
+connection owns. Several connections to the same server are several pools; they
+do not share sockets. That is usually what you want and occasionally is not.
+
+**`mix typedb.check` needs a POSIX shell.** It is the only part of the project
+that shells out, and on Windows it wants Git Bash, WSL or MSYS2. The driver
+itself is pure Elixir and CI proves it on Windows.
+
+**TypeDB 3.12 or newer.** Older 3.x does not work — see [Requirements](#requirements).
+
+**`Transaction.analyze/3` returns TypeDB's own map**, from an endpoint that is
+not in the published HTTP API reference. It is the one return value this
+driver's SemVer does not cover.
+
+**Database import and export are not here**, and neither is anything else the
+HTTP API does not expose — those are gRPC-only in TypeDB 3.x. Everything the
+API *does* expose is covered: sign-in and token renewal, databases, users,
+servers, version and health, transactions, one-shot queries, and query
+analysis.
 
 ## Development
 
