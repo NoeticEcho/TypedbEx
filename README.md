@@ -501,6 +501,14 @@ failover, no read-replica routing and no reconnection to a different node. Put
 a load balancer in front of a cluster, or supervise one connection per node and
 choose between them yourself.
 
+This is a decision rather than an omission, and it is the one limitation here
+that could plausibly change. Failover is only worth shipping if it is tested
+against a real multi-node cluster, and every claim this driver makes is checked
+against a live server — that is why the supported TypeDB range is what has been
+measured rather than what ought to work. TypeDB CE is single-node, so there is
+nothing here to test it against. Accepting `:urls` later is additive and needs
+no `1.0` slot held open for it.
+
 **Retries block the caller.** Requests run in the calling process, which is what
 makes the driver concurrent — but it also means a retry and its backoff are
 spent in *your* process, not in a queue behind a connection. See "How long a
