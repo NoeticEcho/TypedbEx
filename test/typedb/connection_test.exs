@@ -148,18 +148,26 @@ defmodule TypeDB.ConnectionTest do
       # Only /databases is counted and failed; sign-in has to keep working or
       # nothing gets as far as the retry path being tested.
       def request({inner, state, counter, failures, test}, method, url, headers, body, opts) do
-        if String.ends_with?(url, "/databases") do
-          attempt = :counters.get(counter, 1) + 1
-          :counters.add(counter, 1, 1)
-          send(test, {:attempt, attempt, System.monotonic_time(:millisecond)})
+        cond do
+          String.ends_with?(url, "/databases") ->
+            attempt = :counters.get(counter, 1) + 1
+            :counters.add(counter, 1, 1)
+            send(test, {:attempt, attempt, System.monotonic_time(:millisecond), opts[:timeout]})
 
-          if attempt <= failures do
-            {:error, TypeDB.Error.new(:transport, "flaky adapter failing attempt #{attempt}")}
-          else
+            if attempt <= failures do
+              {:error, TypeDB.Error.new(:transport, "flaky adapter failing attempt #{attempt}")}
+            else
+              inner.request(state, method, url, headers, body, opts)
+            end
+
+          # Never failed, only observed: /query is the endpoint whose public
+          # functions take their own :timeout and :deadline.
+          String.ends_with?(url, "/query") ->
+            send(test, {:query, opts[:timeout]})
             inner.request(state, method, url, headers, body, opts)
-          end
-        else
-          inner.request(state, method, url, headers, body, opts)
+
+          true ->
+            inner.request(state, method, url, headers, body, opts)
         end
       end
 
@@ -203,9 +211,9 @@ defmodule TypeDB.ConnectionTest do
 
       assert {:ok, _} = TypeDB.Database.list(conn)
 
-      assert_received {:attempt, 1, _}
-      assert_received {:attempt, 2, _}
-      refute_received {:attempt, 3, _}
+      assert_received {:attempt, 1, _, _}
+      assert_received {:attempt, 2, _, _}
+      refute_received {:attempt, 3, _, _}
       # The retry reached the server; the failed attempt never did.
       assert length(requests(stub, "/databases")) == 1
     end
@@ -216,10 +224,10 @@ defmodule TypeDB.ConnectionTest do
       assert {:error, %Error{kind: :transport, message: message}} = TypeDB.Database.list(conn)
       assert message =~ "attempt 3"
 
-      assert_received {:attempt, 1, _}
-      assert_received {:attempt, 2, _}
-      assert_received {:attempt, 3, _}
-      refute_received {:attempt, 4, _}
+      assert_received {:attempt, 1, _, _}
+      assert_received {:attempt, 2, _, _}
+      assert_received {:attempt, 3, _, _}
+      refute_received {:attempt, 4, _, _}
       assert requests(stub, "/databases") == []
     end
 
@@ -228,8 +236,8 @@ defmodule TypeDB.ConnectionTest do
 
       assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
 
-      assert_received {:attempt, 1, _}
-      refute_received {:attempt, 2, _}
+      assert_received {:attempt, 1, _, _}
+      refute_received {:attempt, 2, _, _}
     end
 
     test ":retry_backoff bounds how long the driver waits between attempts", %{stub: stub} do
@@ -237,9 +245,9 @@ defmodule TypeDB.ConnectionTest do
 
       assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
 
-      assert_received {:attempt, 1, first}
-      assert_received {:attempt, 2, second}
-      assert_received {:attempt, 3, third}
+      assert_received {:attempt, 1, first, _}
+      assert_received {:attempt, 2, second, _}
+      assert_received {:attempt, 3, third, _}
 
       # {:exponential, 100} draws from 0..100 and then from 0..200, so only the
       # ceiling is assertable — a jittered draw of zero is a legitimate outcome,
@@ -256,9 +264,60 @@ defmodule TypeDB.ConnectionTest do
 
       assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
 
-      assert_received {:attempt, 1, first}
-      assert_received {:attempt, 2, second}
+      assert_received {:attempt, 1, first, _}
+      assert_received {:attempt, 2, second, _}
       assert second - first >= 50
+    end
+
+    test ":deadline bounds the whole call rather than each attempt", %{stub: stub} do
+      # Without it, this configuration would sleep 20 * 40ms between attempts
+      # alone, and :timeout would have said nothing about it: :timeout is the
+      # budget for one attempt and every retry gets it again.
+      conn =
+        flaky_connection(stub, 1_000,
+          max_retries: 20,
+          retry_backoff: fn _ -> 40 end,
+          deadline: 250
+        )
+
+      started = System.monotonic_time(:millisecond)
+      assert {:error, %Error{kind: :timeout, message: message}} = TypeDB.Database.list(conn)
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      assert message =~ ":deadline of 250ms"
+      # The transport failure that prompted giving up is not thrown away.
+      assert message =~ "flaky adapter failing"
+      assert elapsed < 250 + 500
+    end
+
+    test ":deadline leaves an attempt no more time than it has left", %{stub: stub} do
+      conn = flaky_connection(stub, 0, timeout: 60_000, deadline: 300)
+
+      assert {:ok, _} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, _, timeout}
+      assert timeout <= 300
+    end
+
+    test "without a :deadline an attempt gets its full timeout", %{stub: stub} do
+      conn = flaky_connection(stub, 0, timeout: 60_000)
+
+      assert {:ok, _} = TypeDB.Database.list(conn)
+
+      assert_received {:attempt, 1, _, 60_000}
+    end
+
+    @tag stub_opts: [databases: ["social"]]
+    test "a per-call :deadline overrides the connection's", %{stub: stub} do
+      conn = flaky_connection(stub, 0, timeout: 60_000, deadline: 50_000)
+
+      assert {:ok, _} = TypeDB.query(conn, "social", "match $p isa person;")
+      assert_received {:query, connection_wide}
+      assert connection_wide > 200
+
+      assert {:ok, _} = TypeDB.query(conn, "social", "match $p isa person;", deadline: 200)
+      assert_received {:query, per_call}
+      assert per_call <= 200
     end
   end
 

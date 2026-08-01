@@ -182,6 +182,7 @@ defmodule TypeDB.ConfigTest do
             :answer_count_limit -> {:answer_count_limit, 10}
             :retry_backoff -> {:retry_backoff, {:exponential, 10}}
             :retry_max_delay -> {:retry_max_delay, 1_000}
+            :deadline -> {:deadline, 30_000}
           end
         end
 
@@ -219,6 +220,7 @@ defmodule TypeDB.ConfigTest do
       assert config.connect_timeout == 10_000
       assert config.max_retries == 1
       assert config.retry_max_delay == 5_000
+      assert config.deadline == :infinity
     end
   end
 

@@ -17,7 +17,7 @@ defmodule TypeDB.Transport do
     @moduledoc false
 
     @enforce_keys [:conn, :config, :method, :path, :opts]
-    defstruct [:conn, :config, :method, :path, :opts, :url, :body, :token]
+    defstruct [:conn, :config, :method, :path, :opts, :url, :body, :token, :deadline]
   end
 
   @doc """
@@ -29,9 +29,42 @@ defmodule TypeDB.Transport do
     config = Connection.config(conn)
 
     %Request{conn: conn, config: config, method: method, path: path, opts: opts}
+    |> put_deadline()
     |> put_url()
     |> put_body()
     |> send_with_renewal(0)
+  end
+
+  # Stamped before anything else, so that acquiring a token — which can block on
+  # a sign-in — is spent out of the caller's budget rather than on top of it.
+  defp put_deadline(%Request{config: config, opts: opts} = request) do
+    deadline =
+      case opts[:deadline] || config.deadline do
+        :infinity -> :infinity
+        budget -> System.monotonic_time(:millisecond) + budget
+      end
+
+    %{request | deadline: deadline}
+  end
+
+  defp remaining(%Request{deadline: :infinity}), do: :infinity
+  defp remaining(%Request{deadline: deadline}), do: deadline - System.monotonic_time(:millisecond)
+
+  defp within_deadline(%Request{deadline: :infinity}), do: :ok
+
+  defp within_deadline(%Request{} = request) do
+    if remaining(request) > 0, do: :ok, else: {:error, deadline_error(request, nil)}
+  end
+
+  defp deadline_error(%Request{config: config, opts: opts} = request, last_error) do
+    budget = opts[:deadline] || config.deadline
+    detail = if last_error, do: " The last failure was: #{Exception.message(last_error)}", else: ""
+
+    Error.new(
+      :timeout,
+      "the :deadline of #{budget}ms for #{request.method} #{request.url} was reached.#{detail}",
+      reason: last_error
+    )
   end
 
   defp put_url(%Request{config: config, path: path, opts: opts} = request) do
@@ -57,7 +90,8 @@ defmodule TypeDB.Transport do
   # ----------------------------------------------------------------------------
 
   defp send_with_renewal(%Request{} = request, renewals) do
-    with {:ok, token} <- acquire_token(request) do
+    with {:ok, token} <- acquire_token(request),
+         :ok <- within_deadline(request) do
       # Stamped once the token is in hand: acquiring it can block on a sign-in,
       # and an earlier timestamp would make the connection believe the token it
       # just minted is newer than this failure.
@@ -139,6 +173,21 @@ defmodule TypeDB.Transport do
   defp retry_or_give_up(%Request{} = request, attempt_no, attempts, error) do
     delay = Config.backoff(request.config, attempt_no)
 
+    if affordable?(request, delay) do
+      wait_and_retry(request, attempt_no, attempts, error, delay)
+    else
+      # Sleeping the backoff would consume the rest of the budget and leave no
+      # time to send anything, so the retry is not started. The deadline error
+      # carries the failure that prompted it: "deadline reached" alone would
+      # hide whether the server was down or merely slow.
+      {:error, deadline_error(request, error)}
+    end
+  end
+
+  defp affordable?(%Request{deadline: :infinity}, _delay), do: true
+  defp affordable?(%Request{} = request, delay), do: remaining(request) > delay
+
+  defp wait_and_retry(%Request{} = request, attempt_no, attempts, error, delay) do
     # Metadata as well as message text, so a log backend can filter and group on
     # these rather than parse the sentence. See "Logging" in `TypeDB`.
     Logger.debug(
@@ -174,10 +223,26 @@ defmodule TypeDB.Transport do
   defp outcome({:ok, %{status: status}}), do: %{status: status}
   defp outcome({:error, %Error{} = error}), do: %{error: error}
 
+  # `timeout: nil` reaches here whenever a caller forwards an absent option.
+  #
+  # An attempt gets whichever is smaller, its own timeout or what is left of the
+  # deadline, which is what stops N retries from costing N times the timeout.
+  # The floor of 1ms covers the sliver between the affordability check and this
+  # line: a sleep can overrun, and `timeout: 0` means something different to
+  # every adapter.
+  defp attempt_timeout(%Request{config: config, opts: opts} = request) do
+    timeout = opts[:timeout] || config.timeout
+
+    case {timeout, remaining(request)} do
+      {timeout, :infinity} -> timeout
+      {:infinity, remaining} -> max(1, remaining)
+      {timeout, remaining} -> max(1, min(timeout, remaining))
+    end
+  end
+
   defp do_adapter_request(%Request{config: config} = request) do
     http_opts = [
-      # `timeout: nil` reaches here whenever a caller forwards an absent option.
-      timeout: request.opts[:timeout] || config.timeout,
+      timeout: attempt_timeout(request),
       connect_timeout: config.connect_timeout
     ]
 

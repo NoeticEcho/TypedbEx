@@ -43,6 +43,15 @@ defmodule TypeDB.Config do
       growth is otherwise unbounded, and the sleep happens in the calling
       process — with `max_retries: 10` and the default base, the last wait would
       be over fifty seconds.
+    * `:deadline` — a wall-clock budget in ms for a whole call, across every
+      retry and every wait between them. Defaults to `:infinity`.
+
+      `:timeout` bounds one attempt; this bounds the operation. Without it a
+      caller who asks for `timeout: 5_000` can still block for
+      `5_000 * (max_retries + 1)` plus the backoffs, because each retry gets the
+      full timeout again. Each attempt is given whichever is smaller, its own
+      timeout or the budget that is left, and a retry that could not finish
+      inside the budget is not started.
 
   ## Reading configuration from the environment
 
@@ -74,7 +83,8 @@ defmodule TypeDB.Config do
           max_auth_renewals: non_neg_integer(),
           answer_count_limit: pos_integer() | nil,
           retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer()),
-          retry_max_delay: timeout()
+          retry_max_delay: timeout(),
+          deadline: timeout()
         }
 
   # Credentials must not reach logs, crash reports or LiveDashboard through an
@@ -101,7 +111,8 @@ defmodule TypeDB.Config do
     :max_auth_renewals,
     :answer_count_limit,
     :retry_backoff,
-    :retry_max_delay
+    :retry_max_delay,
+    :deadline
   ]
 
   @doc "The HTTP API version this driver speaks."
@@ -126,7 +137,8 @@ defmodule TypeDB.Config do
          {:ok, max_retries} <- parse_count(opts, :max_retries, 1),
          {:ok, max_auth_renewals} <- parse_count(opts, :max_auth_renewals, 2),
          {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit),
-         {:ok, retry_max_delay} <- parse_timeout(opts, :retry_max_delay, @default_retry_max_delay) do
+         {:ok, retry_max_delay} <- parse_timeout(opts, :retry_max_delay, @default_retry_max_delay),
+         {:ok, deadline} <- parse_timeout(opts, :deadline, :infinity) do
       {:ok,
        %__MODULE__{
          base_url: base_url,
@@ -142,7 +154,8 @@ defmodule TypeDB.Config do
          max_auth_renewals: max_auth_renewals,
          answer_count_limit: answer_count_limit,
          retry_backoff: backoff,
-         retry_max_delay: retry_max_delay
+         retry_max_delay: retry_max_delay,
+         deadline: deadline
        }}
     end
   end
@@ -160,7 +173,8 @@ defmodule TypeDB.Config do
     :max_auth_renewals,
     :answer_count_limit,
     :retry_backoff,
-    :retry_max_delay
+    :retry_max_delay,
+    :deadline
   ]
 
   @doc """

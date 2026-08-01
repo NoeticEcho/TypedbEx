@@ -61,8 +61,8 @@ defmodule TypeDB.Transaction do
 
   ## Options
 
-  Transaction options (see `TypeDB.Options`) plus `:timeout` for the HTTP request
-  itself.
+  Transaction options (see `TypeDB.Options`) plus `:timeout` and `:deadline` for
+  the HTTP request itself.
 
       TypeDB.Transaction.open(conn, "social", :schema,
         schema_lock_acquire_timeout_millis: 30_000
@@ -78,7 +78,8 @@ defmodule TypeDB.Transaction do
     case Connection.request(conn, :post, "/transactions/open",
            body: body,
            idempotent: false,
-           timeout: opts[:timeout]
+           timeout: opts[:timeout],
+           deadline: opts[:deadline]
          ) do
       {:ok, %{"transactionId" => id}} when is_binary(id) ->
         {:ok, %__MODULE__{conn: conn, id: id, database: database, type: type}}
@@ -109,7 +110,10 @@ defmodule TypeDB.Transaction do
   Query options (see `TypeDB.Options`) plus:
 
     * `:timeout` — overrides the connection timeout for this request. Long
-      analytical reads usually want this.
+      analytical reads usually want this. It bounds one attempt; `:deadline`
+      bounds the call.
+    * `:deadline` — overrides the connection's `:deadline`: a wall-clock budget
+      in ms for this call including any retries.
     * `:given_rows` — input rows for the query's `given` stage. See
       "Parameterised queries" below.
 
@@ -163,7 +167,8 @@ defmodule TypeDB.Transaction do
            Connection.request(tx.conn, :post, "/transactions/#{tx.id}/query",
              body: body,
              idempotent: false,
-             timeout: opts[:timeout]
+             timeout: opts[:timeout],
+             deadline: opts[:deadline]
            ) do
       Answer.decode(payload)
     end
@@ -190,7 +195,8 @@ defmodule TypeDB.Transaction do
     Connection.request(tx.conn, :post, "/transactions/#{tx.id}/analyze",
       body: %{"query" => query},
       idempotent: false,
-      timeout: opts[:timeout]
+      timeout: opts[:timeout],
+      deadline: opts[:deadline]
     )
   end
 
@@ -214,13 +220,16 @@ defmodule TypeDB.Transaction do
       is usually the most expensive request a transaction makes, since it is
       where the server does the work, so it is the one most likely to want more
       time than an ordinary query.
+    * `:deadline` — overrides the connection's `:deadline`: a wall-clock budget
+      in ms for this call including any retries.
   """
   @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
   def commit(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/commit",
            idempotent: false,
            expect: :empty,
-           timeout: opts[:timeout]
+           timeout: opts[:timeout],
+           deadline: opts[:deadline]
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -239,14 +248,15 @@ defmodule TypeDB.Transaction do
   The transaction returns to the state it had when opened, so you can retry
   inside the same transaction rather than reopening one.
 
-  Takes the same `:timeout` option as `commit/2`.
+  Takes the same `:timeout` and `:deadline` options as `commit/2`.
   """
   @spec rollback(t(), keyword()) :: :ok | {:error, Error.t()}
   def rollback(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/rollback",
            idempotent: false,
            expect: :empty,
-           timeout: opts[:timeout]
+           timeout: opts[:timeout],
+           deadline: opts[:deadline]
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -265,14 +275,15 @@ defmodule TypeDB.Transaction do
   Closing is idempotent and never fails on an already-closed transaction — it is
   safe to call in an `after` block.
 
-  Takes the same `:timeout` option as `commit/2`.
+  Takes the same `:timeout` and `:deadline` options as `commit/2`.
   """
   @spec close(t(), keyword()) :: :ok | {:error, Error.t()}
   def close(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/close",
            idempotent: false,
            expect: :empty,
-           timeout: opts[:timeout]
+           timeout: opts[:timeout],
+           deadline: opts[:deadline]
          ) do
       {:ok, _} -> :ok
       # The server treats closing an unknown transaction as a no-op; a 404 here

@@ -142,7 +142,8 @@ defmodule TypeDB do
     * `:given_rows` — input rows for the query's `given` stage; see
       `TypeDB.Transaction.query/3` for how to parameterise a query safely.
     * plus all query and transaction options from `TypeDB.Options`, and
-      `:timeout`.
+      `:timeout` and `:deadline` — the first bounds one attempt, the second the
+      whole call including retries. See `TypeDB.Config`.
 
   ## Raises
 
@@ -195,7 +196,8 @@ defmodule TypeDB do
            Connection.request(conn, :post, "/query",
              body: body,
              idempotent: false,
-             timeout: opts[:timeout]
+             timeout: opts[:timeout],
+             deadline: opts[:deadline]
            ) do
       Answer.decode(payload)
     end
@@ -225,7 +227,8 @@ defmodule TypeDB do
 
   ## Options
 
-  Transaction options from `TypeDB.Options`, plus `:timeout`.
+  Transaction options from `TypeDB.Options`, plus `:timeout` and `:deadline`,
+  which are forwarded to the request that opens the transaction.
 
   ## Examples
 
