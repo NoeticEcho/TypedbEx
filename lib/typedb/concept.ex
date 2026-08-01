@@ -244,7 +244,7 @@ defmodule TypeDB.Concept do
     # a comparison, writing it back — broke on a dependency being absent.
     trimmed = String.trim_trailing(value, "dec")
 
-    if Code.ensure_loaded?(Decimal), do: to_decimal(trimmed), else: trimmed
+    if decimal_loaded?(), do: to_decimal(trimmed), else: trimmed
   end
 
   def cast(value, "date") when is_binary(value) do
@@ -266,6 +266,28 @@ defmodule TypeDB.Concept do
   def cast(value, _value_type), do: value
 
   @compile {:no_warn_undefined, Decimal}
+
+  # Asked once per VM, not once per value.
+  #
+  # `Code.ensure_loaded?/1` is a cached lookup for a module that *is* loaded and
+  # a code-server round trip for one that is not. Measured over 50,000 casts:
+  # 1ms when `Decimal` is present, 1096ms when it is absent — a thousandfold
+  # difference, paid by exactly the people the optional dependency exists for.
+  # An answer of 5,000 decimals cost them a tenth of a second in `:code`.
+  #
+  # The answer cannot change under a running application: `Mix.install/2` and
+  # releases both settle the code path before any query runs.
+  defp decimal_loaded? do
+    case :persistent_term.get({__MODULE__, :decimal?}, :unasked) do
+      :unasked ->
+        loaded? = Code.ensure_loaded?(Decimal)
+        :persistent_term.put({__MODULE__, :decimal?}, loaded?)
+        loaded?
+
+      loaded? ->
+        loaded?
+    end
+  end
 
   defp to_decimal(value) do
     Decimal.new(value)

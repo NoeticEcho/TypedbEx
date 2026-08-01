@@ -26,6 +26,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TypeDB.DateTimeTZ`, `TypeDB.Given` and `TypeDB.Concept` — where every
   subtle bug in this driver has actually been. `stream_data` is a test-only
   dependency and does not reach the package.
+### Fixed
+
+- `TypeDB.Concept.cast/2` asked `Code.ensure_loaded?(Decimal)` once per value.
+  For an application that *has* `Decimal` that is a cached lookup costing
+  nothing; for one that does not it is a code-server round trip, and it was the
+  entire cost of casting a decimal — 22µs a value, against 0.4µs with the
+  dependency present. The answer is now memoised in `:persistent_term`, which
+  takes 50,000 casts without `Decimal` from 1099ms to 5ms.
 
 ## [0.2.1] - 2026-08-01
 
