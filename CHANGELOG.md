@@ -18,7 +18,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   100 concurrent writes checked for exactly-once landing, and 25 concurrent
   transactions. The numbers the CHANGELOG has published since 0.1.0 were
   produced by hand; these run on every push.
-- A coverage floor, enforced by CI at the number the suite actually reaches.
+- A coverage floor, enforced by CI.
 - A fault-injection matrix: thirteen ways an adapter or a server can misbehave,
   against every public call that reaches one, asserting that each produces a
   `%TypeDB.Error{}` and leaves the connection alive.

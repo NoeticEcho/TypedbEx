@@ -24,11 +24,18 @@ defmodule TypeDB.MixProject do
         flags: [:error_handling, :extra_return, :missing_return, :unmatched_returns]
       ],
       test_coverage: [
-        # The floor is the number the suite actually reaches, so it can only be
-        # raised deliberately. Modules that run only under another adapter or
-        # another JSON codec drag a single run down — CI covers those by running
-        # the matrix, not by pretending one run covers everything.
-        summary: [threshold: 85],
+        # The floor is the number CI reaches, with a couple of points of
+        # headroom, so that it catches a regression rather than the weather.
+        #
+        # CI is the authority: it measures about two points lower than a
+        # development container does, with identical per-module figures, and the
+        # cause of that gap has not been chased down. A floor set from a local
+        # reading would be red on every push.
+        #
+        # Modules that run only under another adapter or another JSON codec drag
+        # any single run down. CI covers those by running the matrix, not by
+        # pretending one run covers everything.
+        summary: [threshold: 83],
         ignore_modules: [
           # Test support: measuring the coverage of the thing doing the
           # measuring says nothing about the library.
