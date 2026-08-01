@@ -6,8 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-01
+
 Work towards 1.0. Retry and timeout behaviour, observability, and the shape of
 the public surface — the three things 1.0 makes irreversible.
+
+### Upgrading from 0.1.0
+
+Three changes can be noticed by working code, and each is deliberate:
+
+1. Backoff delays are now random within their bound. A test that asserted an
+   exact wait should assert the bound, or pass a function to `:retry_backoff`.
+2. More requests are retried — reads, `rollback`, `close`, `Database.create/2`,
+   `User.set_password/3`, and any response with a status in the new
+   `:retry_on_status`. A test counting requests to the server may see more of
+   them. `max_retries: 0` and `retry_on_status: []` restore the old behaviour.
+3. `TypeDB.Given` and `TypeDB.Duration.to_iso8601/1` raise `%TypeDB.Error{}`
+   with kind `:encode` where they raised `:config`. Code matching on
+   `kind: :config` to catch an unencodable value must match `:encode`.
+
+Everything else is additive.
 
 ### Added
 
@@ -141,5 +159,6 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/v0.1.0

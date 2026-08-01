@@ -20,7 +20,7 @@ Verified against **TypeDB 3.12.1** on **Elixir 1.20 / OTP 29**.
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.1.0"},
+    {:typedb, "~> 0.2.0"},
     # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
     {:finch, "~> 0.23"}
   ]
