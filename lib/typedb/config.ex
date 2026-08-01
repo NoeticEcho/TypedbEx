@@ -34,6 +34,10 @@ defmodule TypeDB.Config do
       once per connection is the cheap guard against that.
     * `:retry_backoff` — either `{:exponential, base_ms}` or a
       `(attempt -> ms)` function. Defaults to `{:exponential, 100}`.
+      The `{:exponential, _}` form is **jittered**: the delay before retry `n`
+      is drawn uniformly from `0..base_ms * 2 ** (n - 1)`, so that callers who
+      failed together do not retry together. Pass a function when you need a
+      delay you can predict.
 
   ## Reading configuration from the environment
 
@@ -233,10 +237,13 @@ defmodule TypeDB.Config do
 
   @doc """
   Computes the backoff delay, in milliseconds, before retry `attempt` (1-based).
+
+  `{:exponential, base}` is jittered: the delay is drawn uniformly from
+  `0..base * 2 ** (attempt - 1)`. A function is used exactly as it returns.
   """
   @spec backoff(t(), pos_integer()) :: non_neg_integer()
   def backoff(%__MODULE__{retry_backoff: {:exponential, base}}, attempt) do
-    trunc(base * :math.pow(2, attempt - 1))
+    base |> exponential(attempt) |> jitter()
   end
 
   # `parse_backoff` can only check the arity of a function, so the value it
@@ -258,6 +265,23 @@ defmodule TypeDB.Config do
               )
     end
   end
+
+  defp exponential(base, attempt), do: trunc(base * :math.pow(2, attempt - 1))
+
+  # Full jitter, drawn from 0..delay rather than centred on it.
+  #
+  # Without this, every caller that failed in the same instant — which is what a
+  # server restart, a network blip or a rolling deploy produces — waits exactly
+  # the same number of milliseconds and retries in lockstep, for as many attempts
+  # as :max_retries allows. The driver then amplifies the outage it is meant to
+  # ride out. Drawing from the whole interval is what AWS's own analysis found
+  # best both for the number of clients in flight and for total work done, and it
+  # is what Finch, Tesla and Oban do for the same reason.
+  #
+  # Anyone who needs a delay they can predict passes a function instead, which is
+  # used verbatim; the test suite does exactly that.
+  defp jitter(0), do: 0
+  defp jitter(delay), do: :rand.uniform(delay + 1) - 1
 
   # Anything before "://" is a scheme. Note that URI.parse/1 reads
   # "localhost:8000" as scheme "localhost", so the scheme cannot be taken from

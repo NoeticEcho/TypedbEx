@@ -232,7 +232,7 @@ defmodule TypeDB.ConnectionTest do
       refute_received {:attempt, 2, _}
     end
 
-    test ":retry_backoff decides how long the driver waits between attempts", %{stub: stub} do
+    test ":retry_backoff bounds how long the driver waits between attempts", %{stub: stub} do
       conn = flaky_connection(stub, 10, max_retries: 2, retry_backoff: {:exponential, 100})
 
       assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(conn)
@@ -241,10 +241,14 @@ defmodule TypeDB.ConnectionTest do
       assert_received {:attempt, 2, second}
       assert_received {:attempt, 3, third}
 
-      # {:exponential, 100} is 100ms then 200ms. Lower bounds only: a loaded
-      # scheduler can always make a sleep longer than it asked for.
-      assert second - first >= 100
-      assert third - second >= 200
+      # {:exponential, 100} draws from 0..100 and then from 0..200, so only the
+      # ceiling is assertable — a jittered draw of zero is a legitimate outcome,
+      # and there is no floor to test. The slack is for the scheduler, which can
+      # always make a sleep longer than it asked for.
+      assert second - first <= 100 + 500
+      assert third - second <= 200 + 500
+
+      # The deterministic half of the contract is the function form, below.
     end
 
     test ":retry_backoff accepts a function of the attempt number", %{stub: stub} do

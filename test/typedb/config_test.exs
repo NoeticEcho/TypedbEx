@@ -241,15 +241,31 @@ defmodule TypeDB.ConfigTest do
   end
 
   describe "backoff/2" do
-    test "grows exponentially from the base" do
+    test "the exponential ceiling doubles with every attempt" do
       config = Config.new!(token: "t", retry_backoff: {:exponential, 100})
-      assert Config.backoff(config, 1) == 100
-      assert Config.backoff(config, 2) == 200
-      assert Config.backoff(config, 3) == 400
+
+      for {attempt, ceiling} <- [{1, 100}, {2, 200}, {3, 400}] do
+        delays = for _ <- 1..500, do: Config.backoff(config, attempt)
+        assert Enum.all?(delays, &(&1 in 0..ceiling))
+
+        # Asserting only the bound would pass for a function that always
+        # returned zero, which is the opposite failure.
+        assert Enum.max(delays) > div(ceiling, 2)
+      end
     end
 
-    test "supports a custom function" do
+    test "two callers backing off at the same moment rarely wait the same time" do
+      # The whole point: lockstep retries are what turns a blip into an outage.
+      config = Config.new!(token: "t", retry_backoff: {:exponential, 100})
+      pairs = for _ <- 1..200, do: {Config.backoff(config, 3), Config.backoff(config, 3)}
+
+      collisions = Enum.count(pairs, fn {a, b} -> a == b end)
+      assert collisions < 20
+    end
+
+    test "supports a custom function, used verbatim" do
       config = Config.new!(token: "t", retry_backoff: fn attempt -> attempt * 7 end)
+      assert Config.backoff(config, 3) == 21
       assert Config.backoff(config, 3) == 21
     end
   end
