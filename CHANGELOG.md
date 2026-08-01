@@ -32,6 +32,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The supported TypeDB floor is 3.12.0, and it is now a measured one.** The
+  suite was run down the published releases rather than reasoned about: 3.12.0
+  passes whole, 3.11.5 fails fourteen integration tests, and 3.5.0 fails more
+  broadly still. TypeQL's `given` stage — the driver's answer to query
+  injection — is a syntax error before 3.12, so every parameterised query fails
+  there, and `User.delete/2` on an unknown user answers 400 rather than 404.
+  3.12.0 is in CI's integration matrix beside 3.12.1 and `latest`, so the claim
+  stays true. The README said "3.12 or newer" before this and happened to be
+  right; it was not evidence.
 - Re-measured throughput, on the scripts now in `bench/`, against a local
   TypeDB 3.12.1 in this project's container — 400 requests per run, warmed
   pool, a one-row `match`. At 200-way concurrency Finch sustains ~1800 req/s

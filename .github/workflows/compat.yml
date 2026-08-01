@@ -1,0 +1,77 @@
+name: TypeDB compatibility
+
+# Run by hand, when the question is "which TypeDB releases does this work
+# against" rather than "does this work". CI answers the second on every push
+# against the supported range; this answers the first across releases that are
+# expected to fail, which is why every job is `continue-on-error` and the run
+# is green whatever happens. Read the job list, not the badge.
+#
+#     Actions -> TypeDB compatibility -> Run workflow
+#
+# The floor in README.md was established this way: 3.12.0 passes whole, 3.11.5
+# fails fourteen tests because TypeQL's `given` stage does not exist there.
+# Re-run it when TypeDB publishes a release the driver has not met, or when a
+# user asks for an older one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'TypeDB versions, JSON array — e.g. ["3.11.5", "3.12.0"]'
+        required: true
+        default: '["3.5.0", "3.7.3", "3.8.3", "3.10.4", "3.11.5", "3.12.0", "3.12.1"]'
+
+env:
+  MIX_ENV: test
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: TypeDB ${{ matrix.typedb }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        typedb: ${{ fromJSON(inputs.versions) }}
+
+    services:
+      typedb:
+        image: typedb/typedb:${{ matrix.typedb }}
+        ports:
+          - 8000:8000
+          - 1729:1729
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then break; fi
+            sleep 2
+          done
+
+      # Which server actually answered, before anything is concluded from a
+      # pass. A stale container on the same port makes every version look like
+      # whichever one is running — the first local bisect of this was wrong
+      # for exactly that reason, and reported four passes it had not measured.
+      - name: Report the server version
+        run: curl -fsS http://localhost:8000/v1/version
+
+      - name: Run the integration suite
+        env:
+          TYPEDB_INTEGRATION_URL: http://localhost:8000
+          TYPEDB_INTEGRATION_USERNAME: admin
+          TYPEDB_INTEGRATION_PASSWORD: password
+        run: mix test --include integration --only integration

@@ -15,17 +15,23 @@ An Elixir driver for [TypeDB](https://typedb.com), built on the TypeDB HTTP API.
 
 ## Requirements
 
-**TypeDB 3.12 or newer**, Elixir 1.18+ / OTP 25+. Linux, macOS and Windows —
+**TypeDB 3.12.0 or newer**, Elixir 1.18+ / OTP 25+. Linux, macOS and Windows —
 CI compiles and runs the unit suite through all three HTTP adapters on Windows
 as well as Linux. The one exception is the `mix typedb.check` task, which
 shells out and therefore wants Git Bash, WSL or MSYS2 there.
 
-Every release runs the full suite against TypeDB 3.12.1 and against `latest`,
-through all three HTTP adapters. Older 3.x is not supported, and not merely
-untested: measured against 3.5.0, `given` rows are rejected outright, several
-error codes differ, `/v1/servers` does not exist, and inserting then matching
-fails. The exact release where the driver starts working has not been
-established — if you need one older than 3.12, open an issue and it can be.
+Every release runs the full suite against TypeDB 3.12.0, 3.12.1 and `latest`,
+through all three HTTP adapters. 3.12.0 is the floor because it is the oldest
+release the suite passes on, bisected rather than guessed: on 3.11.5, fourteen
+integration tests fail. TypeQL's `given` stage — which is how this driver makes
+a parameterised query safe — is a syntax error there, so every parameterised
+query, and everything that reads a typed value back, fails. `User.delete/2` on
+an unknown user also answers 400 where 3.12 answers 404.
+
+Older still is worse, not better: on 3.5.0 `/v1/servers` does not exist and
+inserting then matching fails outright. If you need a release older than
+3.12.0, open an issue — it would mean giving up `given`, so it is a decision
+rather than a patch.
 
 ## Installation
 
@@ -523,7 +529,8 @@ do not share sockets. That is usually what you want and occasionally is not.
 that shells out, and on Windows it wants Git Bash, WSL or MSYS2. The driver
 itself is pure Elixir and CI proves it on Windows.
 
-**TypeDB 3.12 or newer.** Older 3.x does not work — see [Requirements](#requirements).
+**TypeDB 3.12.0 or newer**, and that is a measured floor rather than a cautious
+one: 3.11.5 has no `given` stage. See [Requirements](#requirements).
 
 **`Transaction.analyze/3` returns TypeDB's own map**, from an endpoint that is
 not in the published HTTP API reference. It is the one return value this

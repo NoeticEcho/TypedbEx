@@ -71,6 +71,17 @@ TYPEDB_INTEGRATION_URL=http://localhost:8000 mix test --include integration
 The integration suite creates and drops its own databases, so it is safe against
 a scratch server — and only a scratch server.
 
+To ask which TypeDB releases the driver works against — as opposed to whether it
+works, which CI answers on every push — run the **TypeDB compatibility** workflow
+by hand from the Actions tab with a JSON list of versions. Every job in it is
+`continue-on-error`, because most of the interesting ones are expected to fail;
+read the job list rather than the run's status. That workflow is where the
+3.12.0 floor in the README comes from.
+
+If you bisect locally instead, check `/v1/version` before believing a pass. A
+server left running on port 8000 answers for every version you think you are
+testing, and a bisect that does not check reports passes it never measured.
+
 `TypeDB.TLSIntegrationTest` additionally checks the TLS defaults. Its module doc
 carries the `openssl` invocations and the server flags needed to run it.
 

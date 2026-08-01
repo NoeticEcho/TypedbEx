@@ -107,16 +107,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The version the driver is developed against, and the newest published.
-        # `latest` is here so that a TypeDB release breaks this build before it
-        # breaks somebody's application; it is expected to be green, and a
-        # failure on it is a real signal rather than noise.
+        # The oldest supported release, the version the driver is developed
+        # against, and the newest published. `latest` is here so that a TypeDB
+        # release breaks this build before it breaks somebody's application; it
+        # is expected to be green, and a failure on it is a real signal rather
+        # than noise.
         #
-        # Older 3.x is NOT supported and is deliberately absent. Measured
-        # against 3.5.0: `given` rows are rejected with HSR2, `/v1/servers`
-        # answers 404, several error codes differ, and insert-then-match fails
-        # outright. See the `Requirements` section of README.md.
-        typedb: ["3.12.1", "latest"]
+        # 3.12.0 is the floor, established by running this suite down the
+        # published releases: 3.11.5 fails fourteen integration tests because
+        # TypeQL's `given` stage does not exist there, and 3.5.0 fails more
+        # broadly still. It is in the matrix so that the claim in README.md's
+        # `Requirements` section stays true rather than becoming folklore.
+        typedb: ["3.12.0", "3.12.1", "latest"]
 
     services:
       typedb:
