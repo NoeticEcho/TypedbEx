@@ -98,7 +98,7 @@ defmodule TypeDB.Stub.Router do
     if MapSet.member?(get(state, :databases), name) do
       {200, [{"content-type", "text/plain"}], "define\n  entity person, owns name;\n"}
     else
-      error(404, "SRV5", "Database '#{name}' does not exist.")
+      error(404, "SRV3", "Database '#{name}' not found.")
     end
   end
 
@@ -106,7 +106,7 @@ defmodule TypeDB.Stub.Router do
     if MapSet.member?(get(state, :databases), name) do
       {200, [{"content-type", "text/plain"}], "define\n  entity person;\n"}
     else
-      error(404, "SRV5", "Database '#{name}' does not exist.")
+      error(404, "SRV3", "Database '#{name}' not found.")
     end
   end
 
@@ -124,6 +124,20 @@ defmodule TypeDB.Stub.Router do
   #   POST   /v1/users/existing    400 USC2  "User already exists."
   #   PUT    /v1/users/nobody      404 USU4  "User not found."
   #   DELETE /v1/users/nobody      404 USD3  "User not found."
+  #   DELETE /v1/users/admin       400 USD1  "Default user cannot be deleted."
+  #
+  # And, on the transaction and database endpoints:
+  #
+  #   GET  /v1/databases/nope/schema     404 SRV3  "Database 'nope' not found."
+  #   POST /v1/transactions/open (nope)  400 SRV3  — a 400, unlike the GET above
+  #   POST /v1/query (nope)              400 SRV3
+  #   POST /v1/transactions/{gone}/*     404 TSV12 "Operation failed: no open transaction."
+  #   POST /v1/transactions/{read}/commit    400 TSV2  "Read transactions cannot be committed."
+  #   POST /v1/transactions/{read}/rollback  400 TSV3  "Read transactions cannot be rolled back..."
+  #
+  # Five of those the stub had invented, and every one of them was asserted by a
+  # test. See test/integration/error_code_integration_test.exs, which pins them
+  # against a live server so this comment stops being the only guard.
   defp dispatch(state, "GET", ["v1", "users", username], _body) do
     if MapSet.member?(get(state, :users), username) do
       json(200, %{username: username})
@@ -177,7 +191,7 @@ defmodule TypeDB.Stub.Router do
 
       json(200, %{transactionId: id})
     else
-      error(404, "TSV2", "Database '#{database}' not found.")
+      error(400, "SRV3", "Database '#{database}' not found.")
     end
   end
 
@@ -194,7 +208,7 @@ defmodule TypeDB.Stub.Router do
         {200, [], ""}
 
       {:error, _} ->
-        error(404, "TSV11", "No open transaction.")
+        error(404, "TSV12", "Operation failed: no open transaction.")
     end
   end
 
@@ -204,7 +218,7 @@ defmodule TypeDB.Stub.Router do
     if MapSet.member?(get(state, :databases), payload["databaseName"]) do
       json(200, answer_for(state, payload["query"]))
     else
-      error(404, "TSV2", "Database '#{payload["databaseName"]}' not found.")
+      error(400, "SRV3", "Database '#{payload["databaseName"]}' not found.")
     end
   end
 
@@ -222,7 +236,7 @@ defmodule TypeDB.Stub.Router do
         json(200, %{query: %{stages: []}})
 
       "commit" when transaction.type == "read" ->
-        error(400, "TSV3", "Cannot commit a read transaction.")
+        error(400, "TSV2", "Read transactions cannot be committed.")
 
       "commit" ->
         if get(state, :fail_commit) do

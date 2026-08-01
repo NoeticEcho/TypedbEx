@@ -98,12 +98,12 @@ defmodule TypeDB.QueryTest do
     end
 
     test "reports an unknown database", %{conn: conn} do
-      assert {:error, %Error{kind: :server, status: 404, code: "TSV2"}} =
+      assert {:error, %Error{kind: :server, status: 400, code: "SRV3"}} =
                TypeDB.query(conn, "nonexistent", "match $p isa person;")
     end
 
     test "query!/4 raises on error", %{conn: conn} do
-      assert_raise Error, ~r/TSV2/, fn -> TypeDB.query!(conn, "nonexistent", "match $p isa person;") end
+      assert_raise Error, ~r/SRV3/, fn -> TypeDB.query!(conn, "nonexistent", "match $p isa person;") end
     end
   end
 

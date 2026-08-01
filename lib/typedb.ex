@@ -317,9 +317,7 @@ defmodule TypeDB do
 
     case result do
       {:error, _reason} ->
-        _ = Transaction.rollback(tx)
-        _ = Transaction.close(tx)
-        {result, Map.put(metadata, :outcome, :rollback)}
+        {result, Map.put(metadata, :outcome, abandon(tx))}
 
       _ ->
         finish(tx, result, metadata)
@@ -327,9 +325,22 @@ defmodule TypeDB do
   catch
     kind, reason ->
       stacktrace = __STACKTRACE__
-      _ = Transaction.rollback(tx)
-      _ = Transaction.close(tx)
+      _ = abandon(tx)
       :erlang.raise(kind, reason, stacktrace)
+  end
+
+  # A read transaction has nothing to roll back, and TypeDB says so — `400 TSV3`,
+  # "Read transactions cannot be rolled back, since they cannot modify data".
+  # Sending it anyway spends a round trip to be told off.
+  defp abandon(%Transaction{type: :read} = tx) do
+    _ = Transaction.close(tx)
+    :close
+  end
+
+  defp abandon(tx) do
+    _ = Transaction.rollback(tx)
+    _ = Transaction.close(tx)
+    :rollback
   end
 
   defp finish(%Transaction{type: :read} = tx, result, metadata) do

@@ -293,6 +293,19 @@ defmodule TypeDB.TelemetryTest do
       assert_receive {:telemetry, [:typedb, :transaction, :stop], _, %{outcome: :close}}
     end
 
+    test "a read block that fails reports :close too, and sends no rollback", %{
+      conn: conn,
+      stub: stub
+    } do
+      # TypeDB answers 400 TSV3 to a rollback on a read transaction, so sending
+      # one spends a round trip to be told off.
+      assert {:error, :nope} = TypeDB.transaction(conn, "social", :read, fn _ -> {:error, :nope} end)
+
+      assert_receive {:telemetry, [:typedb, :transaction, :stop], _, %{outcome: :close}}
+      assert requests(stub, "/rollback") == []
+      assert length(requests(stub, "/close")) == 1
+    end
+
     test "a block that raises produces an exception event", %{conn: conn} do
       assert_raise RuntimeError, fn ->
         TypeDB.transaction(conn, "social", :write, fn _tx -> raise "boom" end)

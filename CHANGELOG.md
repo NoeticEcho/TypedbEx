@@ -90,6 +90,17 @@ Everything else is additive.
   wire value. `Error.kind()` gains `:encode`.
 - TypeDB.Transport and TypeDB.Token are internal and no longer published in
   the documentation. They were never meant to be called directly.
+- **Five error codes were wrong.** Verified against a live TypeDB 3.12.1 and
+  corrected in the stub, the unit tests and the documentation: opening a
+  transaction on an unknown database answers `400 SRV3` (not `404 TSV2`);
+  committing a read transaction answers `400 TSV2` (not `400 TSV3`); any
+  operation on a finished transaction answers `404 TSV12` (not `404 TSV11`);
+  `/v1/databases/{name}/schema` on an unknown database answers `404 SRV3` (not
+  `404 SRV5`); and a one-shot query on an unknown database answers `400 SRV3`.
+  Code matching on any of the old values must change.
+- `TypeDB.transaction/5` no longer rolls back a failed `:read` block. TypeDB
+  rejects that with `400 TSV3`, so it was a wasted round trip; the transaction
+  is closed instead, and its telemetry `:outcome` is `:close`.
 - `TypeDB.Transaction.open/4` raises `ArgumentError` naming the bad transaction
   type and the three accepted ones, where it raised `FunctionClauseError`.
 - `Exception.message/1` on a `%TypeDB.Error{}` now includes the HTTP status:

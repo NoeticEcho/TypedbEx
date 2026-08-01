@@ -25,7 +25,10 @@ defmodule TypeDB.TransactionTest do
     end
 
     test "reports an unknown database", %{conn: conn} do
-      assert {:error, %Error{status: 404, code: "TSV2"}} = Transaction.open(conn, "nope", :read)
+      # 400, not the 404 the shape of the request suggests, and SRV3 rather than
+      # a transaction code. Verified against TypeDB 3.12.1 — see
+      # test/integration/error_code_integration_test.exs.
+      assert {:error, %Error{status: 400, code: "SRV3"}} = Transaction.open(conn, "nope", :read)
     end
 
     test "rejects an unknown transaction type by name", %{conn: conn} do
@@ -88,17 +91,17 @@ defmodule TypeDB.TransactionTest do
     test "commit finishes the transaction", %{conn: conn} do
       {:ok, tx} = Transaction.open(conn, "social", :write)
       assert :ok = Transaction.commit(tx)
-      assert {:error, %Error{code: "TSV11"}} = Transaction.query(tx, "match $p isa person;")
+      assert {:error, %Error{status: 404, code: "TSV12"}} = Transaction.query(tx, "match $p isa person;")
     end
 
     test "commit on a read transaction is rejected by the server", %{conn: conn} do
       {:ok, tx} = Transaction.open(conn, "social", :read)
-      assert {:error, %Error{status: 400, code: "TSV3"}} = Transaction.commit(tx)
+      assert {:error, %Error{status: 400, code: "TSV2"}} = Transaction.commit(tx)
     end
 
     test "commit! raises on failure", %{conn: conn} do
       {:ok, tx} = Transaction.open(conn, "social", :read)
-      assert_raise Error, ~r/TSV3/, fn -> Transaction.commit!(tx) end
+      assert_raise Error, ~r/TSV2/, fn -> Transaction.commit!(tx) end
     end
 
     test "rollback leaves the transaction usable", %{conn: conn} do
@@ -198,7 +201,7 @@ defmodule TypeDB.TransactionTest do
     end
 
     test "returns an error when the transaction cannot be opened", %{conn: conn} do
-      assert {:error, %Error{code: "TSV2"}} =
+      assert {:error, %Error{code: "SRV3"}} =
                TypeDB.transaction(conn, "nope", :write, fn _tx -> :never_runs end)
     end
 
