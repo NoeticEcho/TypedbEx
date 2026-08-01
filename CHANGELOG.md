@@ -90,6 +90,10 @@ Everything else is additive.
   wire value. `Error.kind()` gains `:encode`.
 - TypeDB.Transport and TypeDB.Token are internal and no longer published in
   the documentation. They were never meant to be called directly.
+- `Exception.message/1` on a `%TypeDB.Error{}` now includes the HTTP status:
+  `[server 404] TSV2: Database not found.` The rendered form is what reaches a
+  log line and an exit reason, where nobody has the struct to inspect. Message
+  text remains outside SemVer — match on `:kind` and `:code`.
 
 ## [0.1.0] - 2026-07-31
 

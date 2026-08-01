@@ -156,12 +156,22 @@ defmodule TypeDB.Error do
   defp kind_for_status(_status, "AUT" <> _), do: :unauthenticated
   defp kind_for_status(_status, _code), do: :server
 
+  # The rendered form is what lands in a log line, an exit reason and a
+  # supervisor report, and those are read by someone who has no `%TypeDB.Error{}`
+  # in front of them to inspect. Every field that narrows the failure therefore
+  # goes in the string: the kind says which layer failed, the status says what
+  # the server answered, and the code is the stable thing to search for.
+  #
+  # Not covered by SemVer — see the versioning policy in CONTRIBUTING. Match on
+  # `:kind` and `:code`, never on this.
   @impl true
-  def message(%__MODULE__{kind: kind, code: nil, message: message}) do
-    "[#{kind}] #{message}"
+  def message(%__MODULE__{kind: kind, status: status, code: code, message: message}) do
+    "[#{kind}#{status_suffix(status)}]#{code_prefix(code)} #{message}"
   end
 
-  def message(%__MODULE__{kind: kind, code: code, message: message}) do
-    "[#{kind}] #{code}: #{message}"
-  end
+  defp status_suffix(nil), do: ""
+  defp status_suffix(status), do: " #{status}"
+
+  defp code_prefix(nil), do: ""
+  defp code_prefix(code), do: " #{code}:"
 end

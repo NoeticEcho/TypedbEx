@@ -47,14 +47,24 @@ defmodule TypeDB.ErrorTest do
   end
 
   describe "message/1" do
-    test "includes the kind and code" do
-      error = Error.new(:server, "Query failed.", code: "TSV9")
-      assert Exception.message(error) == "[server] TSV9: Query failed."
+    test "includes the kind, the status and the code" do
+      # All three, because this string is what reaches a log line and an exit
+      # reason, where nobody has the struct in front of them to inspect.
+      error = Error.new(:server, "Query failed.", code: "TSV9", status: 400)
+      assert Exception.message(error) == "[server 400] TSV9: Query failed."
     end
 
-    test "omits an absent code" do
-      error = Error.new(:transport, "connection refused")
-      assert Exception.message(error) == "[transport] connection refused"
+    test "omits whatever is absent" do
+      assert Exception.message(Error.new(:transport, "connection refused")) ==
+               "[transport] connection refused"
+
+      assert Exception.message(Error.new(:server, "gone", status: 404)) == "[server 404] gone"
+      assert Exception.message(Error.new(:server, "nope", code: "TSV1")) == "[server] TSV1: nope"
+    end
+
+    test "a real server error carries the status a caller would otherwise have to guess" do
+      error = Error.from_response(404, %{"code" => "TSV2", "message" => "Database not found."})
+      assert Exception.message(error) == "[server 404] TSV2: Database not found."
     end
   end
 
