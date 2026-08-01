@@ -71,6 +71,12 @@ defmodule TypeDB.MixProject do
       # needs no dependency at all. See `TypeDB.JSON`.
 
       # Tooling below is never required by consumers of this library.
+      #
+      # `stream_data` generates the inputs for the round-trip properties over
+      # `TypeDB.Duration`, `TypeDB.DateTimeTZ`, `TypeDB.Given` and
+      # `TypeDB.Concept` — the boundary where TypeDB's wire format meets Elixir
+      # types, and where every subtle bug in this driver has actually been.
+      {:stream_data, "~> 1.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :docs, runtime: false},
       {:credo, "~> 1.7", only: [:dev], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false}

@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Property-based round-trip tests over the wire boundary — `TypeDB.Duration`,
+  `TypeDB.DateTimeTZ`, `TypeDB.Given` and `TypeDB.Concept` — where every
+  subtle bug in this driver has actually been. `stream_data` is a test-only
+  dependency and does not reach the package.
+
 ## [0.2.1] - 2026-08-01
 
 Documentation only. The single change under `lib/` is six lines of moduledoc;
