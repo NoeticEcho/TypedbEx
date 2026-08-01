@@ -181,6 +181,7 @@ defmodule TypeDB.ConfigTest do
             :max_auth_renewals -> {:max_auth_renewals, 1}
             :answer_count_limit -> {:answer_count_limit, 10}
             :retry_backoff -> {:retry_backoff, {:exponential, 10}}
+            :retry_max_delay -> {:retry_max_delay, 1_000}
           end
         end
 
@@ -217,6 +218,7 @@ defmodule TypeDB.ConfigTest do
       assert config.timeout == 60_000
       assert config.connect_timeout == 10_000
       assert config.max_retries == 1
+      assert config.retry_max_delay == 5_000
     end
   end
 
@@ -267,6 +269,43 @@ defmodule TypeDB.ConfigTest do
       config = Config.new!(token: "t", retry_backoff: fn attempt -> attempt * 7 end)
       assert Config.backoff(config, 3) == 21
       assert Config.backoff(config, 3) == 21
+    end
+
+    test ":retry_max_delay caps the exponential ceiling" do
+      # Without it, attempt 10 of {:exponential, 100} would draw from 0..51_200 —
+      # a fifty-second sleep in the calling process.
+      config = Config.new!(token: "t", retry_backoff: {:exponential, 100}, retry_max_delay: 750)
+
+      for attempt <- 1..40 do
+        assert Config.backoff(config, attempt) in 0..750
+      end
+    end
+
+    test ":retry_max_delay caps a custom function too" do
+      # One option answers "how long can this sleep for" completely, rather than
+      # for two of the three ways a delay can be produced.
+      config = Config.new!(token: "t", retry_backoff: fn _ -> 90_000 end, retry_max_delay: 400)
+      assert Config.backoff(config, 1) == 400
+    end
+
+    test ":infinity opts out of the cap" do
+      config =
+        Config.new!(token: "t", retry_backoff: fn _ -> 90_000 end, retry_max_delay: :infinity)
+
+      assert Config.backoff(config, 1) == 90_000
+    end
+
+    test "a very large attempt number neither overflows nor allocates" do
+      # `attempt` is bounded only by :max_retries, which the user sets.
+      config = Config.new!(token: "t", retry_backoff: {:exponential, 100})
+      assert Config.backoff(config, 100_000) in 0..5_000
+    end
+
+    test "rejects a bad :retry_max_delay" do
+      assert {:error, %Error{kind: :config, message: message}} =
+               Config.new(token: "t", retry_max_delay: "5s")
+
+      assert message =~ ":retry_max_delay"
     end
   end
 end

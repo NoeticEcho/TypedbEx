@@ -38,6 +38,11 @@ defmodule TypeDB.Config do
       is drawn uniformly from `0..base_ms * 2 ** (n - 1)`, so that callers who
       failed together do not retry together. Pass a function when you need a
       delay you can predict.
+    * `:retry_max_delay` — the ceiling on any single backoff, in ms, whichever
+      form produced it. Defaults to `5_000`; `:infinity` opts out. Exponential
+      growth is otherwise unbounded, and the sleep happens in the calling
+      process — with `max_retries: 10` and the default base, the last wait would
+      be over fifty seconds.
 
   ## Reading configuration from the environment
 
@@ -53,6 +58,7 @@ defmodule TypeDB.Config do
   @default_url "http://localhost:8000"
   @default_timeout :timer.seconds(60)
   @default_connect_timeout :timer.seconds(10)
+  @default_retry_max_delay :timer.seconds(5)
 
   @type t :: %__MODULE__{
           base_url: String.t(),
@@ -67,7 +73,8 @@ defmodule TypeDB.Config do
           max_retries: non_neg_integer(),
           max_auth_renewals: non_neg_integer(),
           answer_count_limit: pos_integer() | nil,
-          retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer())
+          retry_backoff: {:exponential, pos_integer()} | (pos_integer() -> non_neg_integer()),
+          retry_max_delay: timeout()
         }
 
   # Credentials must not reach logs, crash reports or LiveDashboard through an
@@ -93,7 +100,8 @@ defmodule TypeDB.Config do
     :max_retries,
     :max_auth_renewals,
     :answer_count_limit,
-    :retry_backoff
+    :retry_backoff,
+    :retry_max_delay
   ]
 
   @doc "The HTTP API version this driver speaks."
@@ -117,7 +125,8 @@ defmodule TypeDB.Config do
          {:ok, connect_timeout} <- parse_timeout(opts, :connect_timeout, @default_connect_timeout),
          {:ok, max_retries} <- parse_count(opts, :max_retries, 1),
          {:ok, max_auth_renewals} <- parse_count(opts, :max_auth_renewals, 2),
-         {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit) do
+         {:ok, answer_count_limit} <- parse_limit(opts, :answer_count_limit),
+         {:ok, retry_max_delay} <- parse_timeout(opts, :retry_max_delay, @default_retry_max_delay) do
       {:ok,
        %__MODULE__{
          base_url: base_url,
@@ -132,7 +141,8 @@ defmodule TypeDB.Config do
          max_retries: max_retries,
          max_auth_renewals: max_auth_renewals,
          answer_count_limit: answer_count_limit,
-         retry_backoff: backoff
+         retry_backoff: backoff,
+         retry_max_delay: retry_max_delay
        }}
     end
   end
@@ -149,7 +159,8 @@ defmodule TypeDB.Config do
     :max_retries,
     :max_auth_renewals,
     :answer_count_limit,
-    :retry_backoff
+    :retry_backoff,
+    :retry_max_delay
   ]
 
   @doc """
@@ -239,11 +250,12 @@ defmodule TypeDB.Config do
   Computes the backoff delay, in milliseconds, before retry `attempt` (1-based).
 
   `{:exponential, base}` is jittered: the delay is drawn uniformly from
-  `0..base * 2 ** (attempt - 1)`. A function is used exactly as it returns.
+  `0..base * 2 ** (attempt - 1)`. A function is used as it returns. Either way
+  the result is capped by `:retry_max_delay`.
   """
   @spec backoff(t(), pos_integer()) :: non_neg_integer()
-  def backoff(%__MODULE__{retry_backoff: {:exponential, base}}, attempt) do
-    base |> exponential(attempt) |> jitter()
+  def backoff(%__MODULE__{retry_backoff: {:exponential, base}} = config, attempt) do
+    base |> exponential(attempt) |> cap(config.retry_max_delay) |> jitter()
   end
 
   # `parse_backoff` can only check the arity of a function, so the value it
@@ -252,10 +264,10 @@ defmodule TypeDB.Config do
   # integer and nothing else — so without this, a typo in a documented option
   # raises FunctionClauseError in the *caller's* process, outside `contain/3`,
   # and escapes as a bare exception rather than a `%TypeDB.Error{}`.
-  def backoff(%__MODULE__{retry_backoff: fun}, attempt) when is_function(fun, 1) do
+  def backoff(%__MODULE__{retry_backoff: fun} = config, attempt) when is_function(fun, 1) do
     case fun.(attempt) do
       delay when is_integer(delay) and delay >= 0 ->
-        delay
+        cap(delay, config.retry_max_delay)
 
       other ->
         raise TypeDB.Error.new(
@@ -266,7 +278,18 @@ defmodule TypeDB.Config do
     end
   end
 
-  defp exponential(base, attempt), do: trunc(base * :math.pow(2, attempt - 1))
+  # An integer shift rather than :math.pow/2, which loses precision above 2^53
+  # and raises on the overflow to infinity. The exponent is clamped because
+  # `attempt` is bounded only by :max_retries, and 1 <<< 100_000 is a twelve-
+  # kilobyte integer computed only to be capped away. 2^63 ms is 300 million
+  # years, so nothing below the clamp is reachable in practice either.
+  defp exponential(base, attempt), do: base * Bitwise.bsl(1, min(attempt, 64) - 1)
+
+  # `:retry_max_delay` is a ceiling on the delay, not on the growth: it is
+  # applied to whatever produced the number, including a caller's own function,
+  # so that one option answers "how long can this sleep for" completely.
+  defp cap(delay, :infinity), do: delay
+  defp cap(delay, max_delay), do: min(delay, max_delay)
 
   # Full jitter, drawn from 0..delay rather than centred on it.
   #
