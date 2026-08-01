@@ -41,7 +41,12 @@ defmodule TypeDB.APISnapshotTest do
       File.write!(@snapshot, current)
       IO.puts("\nRewrote #{Path.relative_to_cwd(@snapshot)}.")
     else
-      recorded = File.read!(@snapshot)
+      # A Windows checkout rewrites the file to CRLF unless git is told
+      # otherwise, and `render/0` builds LF. `.gitattributes` pins the file, but
+      # normalising here as well means the test does not depend on the checkout
+      # having been done with it. Found by the Windows job, whose report read
+      # "recorded: ## Mix.Tasks.Typedb.Check / current: ## Mix.Tasks.Typedb.Check".
+      recorded = @snapshot |> File.read!() |> String.replace("\r\n", "\n")
 
       assert current == recorded, """
       The public API no longer matches #{Path.relative_to_cwd(@snapshot)}.

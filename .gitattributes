@@ -1,0 +1,7 @@
+# Checked-in fixtures are compared byte for byte against generated text, and a
+# Windows checkout with autocrlf would rewrite them to CRLF. Pin them to LF so
+# the comparison is about content.
+*.txt text eol=lf
+
+# Everything else: normalise in the repository, let git decide on checkout.
+* text=auto
