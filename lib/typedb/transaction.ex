@@ -207,12 +207,20 @@ defmodule TypeDB.Transaction do
   a failed commit does not leave anything to roll back.
 
   Committing a `:read` transaction is an error; use `close/1`.
+
+  ## Options
+
+    * `:timeout` — overrides the connection's `:timeout` for this call. A commit
+      is usually the most expensive request a transaction makes, since it is
+      where the server does the work, so it is the one most likely to want more
+      time than an ordinary query.
   """
-  @spec commit(t()) :: :ok | {:error, Error.t()}
-  def commit(%__MODULE__{} = tx) do
+  @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
+  def commit(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/commit",
            idempotent: false,
-           expect: :empty
+           expect: :empty,
+           timeout: opts[:timeout]
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -222,20 +230,23 @@ defmodule TypeDB.Transaction do
   @doc """
   Commits the transaction, raising on failure.
   """
-  @spec commit!(t()) :: :ok
-  def commit!(%__MODULE__{} = tx), do: ok!(commit(tx))
+  @spec commit!(t(), keyword()) :: :ok
+  def commit!(%__MODULE__{} = tx, opts \\ []), do: ok!(commit(tx, opts))
 
   @doc """
   Discards everything written so far, leaving the transaction open.
 
   The transaction returns to the state it had when opened, so you can retry
   inside the same transaction rather than reopening one.
+
+  Takes the same `:timeout` option as `commit/2`.
   """
-  @spec rollback(t()) :: :ok | {:error, Error.t()}
-  def rollback(%__MODULE__{} = tx) do
+  @spec rollback(t(), keyword()) :: :ok | {:error, Error.t()}
+  def rollback(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/rollback",
            idempotent: false,
-           expect: :empty
+           expect: :empty,
+           timeout: opts[:timeout]
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -245,18 +256,24 @@ defmodule TypeDB.Transaction do
   @doc """
   Discards everything written so far, raising on failure.
   """
-  @spec rollback!(t()) :: :ok
-  def rollback!(%__MODULE__{} = tx), do: ok!(rollback(tx))
+  @spec rollback!(t(), keyword()) :: :ok
+  def rollback!(%__MODULE__{} = tx, opts \\ []), do: ok!(rollback(tx, opts))
 
   @doc """
   Closes the transaction, discarding uncommitted writes.
 
   Closing is idempotent and never fails on an already-closed transaction — it is
   safe to call in an `after` block.
+
+  Takes the same `:timeout` option as `commit/2`.
   """
-  @spec close(t()) :: :ok | {:error, Error.t()}
-  def close(%__MODULE__{} = tx) do
-    case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/close", idempotent: false, expect: :empty) do
+  @spec close(t(), keyword()) :: :ok | {:error, Error.t()}
+  def close(%__MODULE__{} = tx, opts \\ []) do
+    case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/close",
+           idempotent: false,
+           expect: :empty,
+           timeout: opts[:timeout]
+         ) do
       {:ok, _} -> :ok
       # The server treats closing an unknown transaction as a no-op; a 404 here
       # means someone else already closed it, which is the state we wanted.
@@ -268,6 +285,6 @@ defmodule TypeDB.Transaction do
   @doc """
   Closes the transaction, raising on failure.
   """
-  @spec close!(t()) :: :ok
-  def close!(%__MODULE__{} = tx), do: ok!(close(tx))
+  @spec close!(t(), keyword()) :: :ok
+  def close!(%__MODULE__{} = tx, opts \\ []), do: ok!(close(tx, opts))
 end

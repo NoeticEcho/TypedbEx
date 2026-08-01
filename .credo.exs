@@ -145,7 +145,22 @@
           {Credo.Check.Warning.ExpensiveEmptyEnumCheck, []},
           {Credo.Check.Warning.IExPry, []},
           {Credo.Check.Warning.IoInspect, []},
-          {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig, []},
+          # This check reads the *host application's* Logger config, which a
+          # library cannot set. These are the keys `TypeDB` documents itself as
+          # emitting (see the "Logging" section of its moduledoc); listing them
+          # here keeps the check useful — a metadata key that is not on this
+          # list is still flagged — without demanding config we do not own.
+          {Credo.Check.Warning.MissedMetadataKeyInLoggerConfig,
+           [
+             metadata_keys: [
+               :typedb_adapter,
+               :typedb_attempt,
+               :typedb_connection,
+               :typedb_error_kind,
+               :typedb_method,
+               :typedb_path
+             ]
+           ]},
           {Credo.Check.Warning.OperationOnSameValues, []},
           {Credo.Check.Warning.OperationWithConstantResult, []},
           {Credo.Check.Warning.RaiseInsideRescue, []},

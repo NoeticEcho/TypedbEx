@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `TypeDB.DateTimeTZ.new/2` — builds a `datetime-tz` for writing, from a
+  `NaiveDateTime` plus an IANA zone name or a UTC offset in seconds. The struct
+  could previously only be obtained by parsing what TypeDB sent, so writing an
+  IANA-zoned value meant formatting the wire string by hand.
+- `:timeout` on `TypeDB.Transaction.commit/2`, `rollback/2` and `close/2`, and
+  their `!` forms. A commit is where the server does the work, so it is the
+  request most likely to want more time than an ordinary query; raising the
+  whole connection's `:timeout` was the only way to give it any.
+- A documented Logger metadata convention — `:typedb_connection` on every line,
+  plus `:typedb_method`, `:typedb_path`, `:typedb_attempt` and
+  `:typedb_error_kind` on retries. See the "Logging" section of `TypeDB`.
+
+### Changed
+
+- `TypeDB.Database.exists?/2` and `TypeDB.User.exists?/2` raise `TypeDB.Error`
+  for anything other than a clean 404, instead of answering `false`. A boolean
+  cannot express "I could not ask", and `false` is the answer that makes a
+  caller do the wrong thing — `unless exists?(conn, x), do: create(conn, x)`
+  would try to create while the server was unreachable.
+  `TypeDB.Database.create_if_not_exists/2` is unaffected: it goes through
+  `get/2` directly so that it still returns the error rather than raising.
+
 ## [0.1.0] - 2026-07-31
 
 Initial release. Complete coverage of the TypeDB HTTP API v1, verified against

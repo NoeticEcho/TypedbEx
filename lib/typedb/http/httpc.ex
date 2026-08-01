@@ -216,12 +216,15 @@ defmodule TypeDB.HTTP.Httpc do
     [cacerts: :public_key.cacerts_get()]
   rescue
     _ ->
-      Logger.warning("""
-      TypeDB: no operating system CA trust store found. HTTPS connections will \
-      fail until you pass :cacertfile or :cacerts, e.g.
+      Logger.warning(
+        """
+        TypeDB: no operating system CA trust store found. HTTPS connections will \
+        fail until you pass :cacertfile or :cacerts, e.g.
 
-          http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/certs/ca-certificates.crt"}
-      """)
+            http: {TypeDB.HTTP.Httpc, cacertfile: "/etc/ssl/certs/ca-certificates.crt"}
+        """,
+        typedb_adapter: __MODULE__
+      )
 
       []
   end

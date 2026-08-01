@@ -117,6 +117,57 @@ defmodule TypeDB.TemporalTest do
     end
   end
 
+  describe "DateTimeTZ.new/2" do
+    # Before this, the only way to obtain a %DateTimeTZ{} was parse/1 on a string
+    # TypeDB had already produced — so a consumer who wanted to *write* an
+    # IANA-zoned value had to format the wire string by hand and stuff it in :raw.
+    test "builds an IANA-zoned value in TypeDB's own wire format" do
+      value = DateTimeTZ.new(~N[2024-03-01 10:30:00], "Europe/London")
+
+      assert value.time_zone == "Europe/London"
+      assert value.utc_offset == nil
+      assert to_string(value) == "2024-03-01T10:30:00.000000000 Europe/London"
+    end
+
+    test "builds a fixed-offset value" do
+      assert DateTimeTZ.new(~N[2024-03-01 10:30:00], 3600) |> to_string() ==
+               "2024-03-01T10:30:00.000000000+01:00"
+
+      assert DateTimeTZ.new(~N[2024-03-01 10:30:00], 0) |> to_string() ==
+               "2024-03-01T10:30:00.000000000+00:00"
+
+      assert DateTimeTZ.new(~N[2024-03-01 10:30:00], -18_000) |> to_string() ==
+               "2024-03-01T10:30:00.000000000-05:00"
+
+      # A half-hour zone: the minutes component has to be rendered, not dropped.
+      assert DateTimeTZ.new(~N[2024-03-01 10:30:00], 19_800) |> to_string() ==
+               "2024-03-01T10:30:00.000000000+05:30"
+    end
+
+    test "keeps sub-second precision" do
+      assert DateTimeTZ.new(~N[2024-03-01 10:30:00.123456], 0) |> to_string() ==
+               "2024-03-01T10:30:00.123456000+00:00"
+    end
+
+    test "what it builds is what parse/1 reads back" do
+      for value <- [
+            DateTimeTZ.new(~N[2024-03-01 10:30:00], "Europe/London"),
+            DateTimeTZ.new(~N[2024-03-01 10:30:00.500000], 3600),
+            DateTimeTZ.new(~N[2024-03-01 10:30:00], -18_000)
+          ] do
+        reparsed = value |> DateTimeTZ.to_iso8601() |> DateTimeTZ.parse()
+
+        # compare/2, not ==: the wire format always carries nine fractional
+        # digits, so a round trip normalises NaiveDateTime's precision
+        # annotation from {0, 0} to {0, 6}. The instant is unchanged, which is
+        # the property that matters.
+        assert NaiveDateTime.compare(reparsed.naive, value.naive) == :eq
+        assert reparsed.time_zone == value.time_zone
+        assert reparsed.utc_offset == value.utc_offset
+      end
+    end
+  end
+
   describe "DateTimeTZ" do
     test "parses an IANA zone" do
       value = DateTimeTZ.parse("2024-03-01T10:30:00.000000000 Europe/London")

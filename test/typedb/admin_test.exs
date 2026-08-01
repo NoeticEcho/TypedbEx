@@ -24,6 +24,19 @@ defmodule TypeDB.AdminTest do
       assert {:ok, ["social"]} = Database.list(conn)
     end
 
+    test "create_if_not_exists/2 still returns the error when the server is unreachable" do
+      # It used to go through exists?/2, which now raises — so this function's
+      # own contract (return the error) had to stop depending on it.
+      name = :"cine_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(name: name, url: "http://127.0.0.1:1", token: "t", max_retries: 0)
+
+      assert {:error, %Error{kind: :transport}} = Database.create_if_not_exists(name, "social")
+
+      TypeDB.stop(pid)
+    end
+
     test "create_if_not_exists/2 is idempotent", %{conn: conn} do
       assert :ok = Database.create_if_not_exists(conn, "social")
       assert :ok = Database.create_if_not_exists(conn, "social")
@@ -120,6 +133,22 @@ defmodule TypeDB.AdminTest do
 
       assert {:error, %Error{kind: :server, status: 400, code: "USC2"}} =
                User.create(conn, "alice", "x")
+    end
+
+    test "exists?/2 raises rather than answering false when it could not ask" do
+      # A boolean cannot express "I could not ask", and `false` is the answer
+      # that makes a caller do the wrong thing:
+      # `unless exists?(conn, x), do: create(conn, x)` would try to create while
+      # the server is down.
+      name = :"unreachable_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(name: name, url: "http://127.0.0.1:1", token: "t", max_retries: 0)
+
+      assert_raise Error, fn -> TypeDB.User.exists?(name, "alice") end
+      assert_raise Error, fn -> Database.exists?(name, "social") end
+
+      TypeDB.stop(pid)
     end
 
     test "get/2 on an unknown user", %{conn: conn} do

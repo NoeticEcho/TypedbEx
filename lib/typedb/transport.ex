@@ -139,10 +139,19 @@ defmodule TypeDB.Transport do
   defp retry_or_give_up(%Request{} = request, attempt_no, attempts, error) do
     delay = Config.backoff(request.config, attempt_no)
 
-    Logger.debug(fn ->
-      "TypeDB: #{error.kind} on #{request.method} #{request.url} " <>
-        "(attempt #{attempt_no}/#{attempts}), retrying in #{delay}ms"
-    end)
+    # Metadata as well as message text, so a log backend can filter and group on
+    # these rather than parse the sentence. See "Logging" in `TypeDB`.
+    Logger.debug(
+      fn ->
+        "TypeDB: #{error.kind} on #{request.method} #{request.url} " <>
+          "(attempt #{attempt_no}/#{attempts}), retrying in #{delay}ms"
+      end,
+      typedb_connection: request.config.name,
+      typedb_method: request.method,
+      typedb_path: request.path,
+      typedb_attempt: attempt_no,
+      typedb_error_kind: error.kind
+    )
 
     Process.sleep(delay)
     attempt(request, attempt_no + 1, attempts)

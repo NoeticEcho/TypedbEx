@@ -321,7 +321,9 @@ defmodule TypeDB.Connection do
   # raised from inside the adapter, and nothing ever restarts it.
   @impl true
   def handle_info({:EXIT, pid, reason}, %{transport: pid} = state) when is_pid(pid) do
-    Logger.error("TypeDB connection #{inspect(state.config.name)}: transport died (#{inspect(reason)})")
+    Logger.error("TypeDB connection #{inspect(state.config.name)}: transport died (#{inspect(reason)})",
+      typedb_connection: state.config.name
+    )
 
     {:stop, {:transport_down, reason}, state}
   end
@@ -329,7 +331,10 @@ defmodule TypeDB.Connection do
   def handle_info({:EXIT, _pid, :normal}, state), do: {:noreply, state}
 
   def handle_info(message, state) do
-    Logger.debug(fn -> "TypeDB connection #{inspect(state.config.name)}: ignoring #{inspect(message)}" end)
+    Logger.debug(
+      fn -> "TypeDB connection #{inspect(state.config.name)}: ignoring #{inspect(message)}" end,
+      typedb_connection: state.config.name
+    )
 
     {:noreply, state}
   end

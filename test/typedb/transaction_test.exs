@@ -164,6 +164,36 @@ defmodule TypeDB.TransactionTest do
       assert length(requests(stub, "/close")) == 1
     end
 
+    test "commit, rollback and close each take their own :timeout", %{conn: conn, stub: stub} do
+      # A commit is where the server does the work, so it is the request most
+      # likely to want more time than an ordinary query — and until now the only
+      # way to give it any was to raise the whole connection's :timeout.
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.commit(tx, timeout: 30_000)
+
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.rollback(tx, timeout: 30_000)
+      assert :ok = Transaction.close(tx, timeout: 30_000)
+
+      # And the arity-1 forms still work, so this stayed additive.
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.rollback(tx)
+      assert :ok = Transaction.close(tx)
+
+      assert length(requests(stub, "/commit")) == 1
+      assert length(requests(stub, "/rollback")) == 2
+      assert length(requests(stub, "/close")) == 2
+    end
+
+    test "the bang forms take :timeout too", %{conn: conn} do
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.rollback!(tx, timeout: 30_000)
+      assert :ok = Transaction.close!(tx, timeout: 30_000)
+
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      assert :ok = Transaction.commit!(tx, timeout: 30_000)
+    end
+
     test "returns an error when the transaction cannot be opened", %{conn: conn} do
       assert {:error, %Error{code: "TSV2"}} =
                TypeDB.transaction(conn, "nope", :write, fn _tx -> :never_runs end)

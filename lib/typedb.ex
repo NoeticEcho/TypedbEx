@@ -63,6 +63,23 @@ defmodule TypeDB do
   so its `{:error, _}` may be your own value rather than an exception, and a
   bang form would have to guess whether to raise it.
 
+  ## Logging
+
+  The driver logs sparingly: a `debug` line per transport retry, a `debug` line
+  for an unexpected message to a connection, an `error` when a connection's
+  transport dies, and a `warning` when no OS trust store can be found. Nothing
+  is logged on the happy path — use `TypeDB.Telemetry` for that.
+
+  Every line carries `:typedb_connection` in its Logger metadata, and retries
+  additionally carry `:typedb_method`, `:typedb_path`, `:typedb_attempt` and
+  `:typedb_error_kind`. Configure your backend to keep them:
+
+      config :logger, :default_formatter,
+        metadata: [:typedb_connection, :typedb_error_kind]
+
+  Credentials never appear in a log line or in metadata; see `TypeDB.Config`
+  for how the connection keeps them out of crash reports too.
+
   ## Concurrency
 
   Requests run in the calling process, so N processes issue N concurrent

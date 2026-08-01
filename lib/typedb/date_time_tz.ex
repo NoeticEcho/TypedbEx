@@ -31,6 +31,51 @@ defmodule TypeDB.DateTimeTZ do
   defstruct [:naive, :time_zone, :utc_offset, :raw]
 
   @doc """
+  Builds a value for writing, from a wall-clock time and a zone or offset.
+
+  `parse/1` is how you get one *out* of TypeDB; this is how you make one to send
+  back in, which otherwise meant formatting TypeDB's wire string yourself and
+  putting it in `:raw`.
+
+  The second argument is either an IANA zone name or a fixed UTC offset in
+  seconds — the distinction TypeDB itself keeps, and the reason this module
+  exists rather than a plain `DateTime`:
+
+      iex> ~N[2024-03-01 10:30:00] |> TypeDB.DateTimeTZ.new("Europe/London") |> to_string()
+      "2024-03-01T10:30:00.000000000 Europe/London"
+
+      iex> ~N[2024-03-01 10:30:00] |> TypeDB.DateTimeTZ.new(3600) |> to_string()
+      "2024-03-01T10:30:00.000000000+01:00"
+
+  Rendered at nanosecond precision because that is what TypeDB stores and echoes
+  back, so a value written this way and read again compares equal to itself.
+  Pass the result straight to `given_rows`; see `TypeDB.Given`.
+  """
+  @spec new(NaiveDateTime.t(), String.t() | integer()) :: t()
+  def new(%NaiveDateTime{} = naive, time_zone) when is_binary(time_zone) do
+    %__MODULE__{naive: naive, time_zone: time_zone, raw: render(naive) <> " " <> time_zone}
+  end
+
+  def new(%NaiveDateTime{} = naive, utc_offset) when is_integer(utc_offset) do
+    %__MODULE__{naive: naive, utc_offset: utc_offset, raw: render(naive) <> offset(utc_offset)}
+  end
+
+  # TypeDB renders nine fractional digits; NaiveDateTime keeps six at most.
+  defp render(%NaiveDateTime{microsecond: {microsecond, _precision}} = naive) do
+    fraction = microsecond |> Integer.to_string() |> String.pad_leading(6, "0")
+
+    NaiveDateTime.to_iso8601(%{naive | microsecond: {0, 0}}) <> "." <> fraction <> "000"
+  end
+
+  defp offset(seconds) do
+    sign = if seconds < 0, do: "-", else: "+"
+    total = abs(seconds)
+    pad = &(&1 |> Integer.to_string() |> String.pad_leading(2, "0"))
+
+    sign <> pad.(div(total, 3600)) <> ":" <> pad.(div(rem(total, 3600), 60))
+  end
+
+  @doc """
   Parses a TypeDB `datetime-tz` string.
 
   Returns the original string unchanged when it cannot be parsed.
@@ -127,6 +172,11 @@ defmodule TypeDB.DateTimeTZ do
 
   @doc """
   Renders back to the TypeDB wire format.
+
+  Returns `:raw` verbatim — the exact string TypeDB sent, or the one `new/2`
+  built. This struct is a decoded value, not a builder: editing `:naive`,
+  `:time_zone` or `:utc_offset` on one you already have does not change what
+  this renders. Build a new one with `new/2` instead.
   """
   @spec to_iso8601(t()) :: String.t()
   def to_iso8601(%__MODULE__{raw: raw}), do: raw

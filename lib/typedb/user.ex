@@ -58,9 +58,22 @@ defmodule TypeDB.User do
 
   @doc """
   Returns whether a user exists.
+
+  Raises `TypeDB.Error` for anything other than a clean "not found" — an
+  unreachable server, a rejected token, a 500. A boolean cannot express "I could
+  not ask", and answering `false` to that question is the answer that makes a
+  caller do the wrong thing: `unless exists?(conn, x), do: create(conn, x)` would
+  try to create while the server is down. Use `get/2` if you would rather branch
+  on the error yourself.
   """
   @spec exists?(Connection.t(), String.t()) :: boolean()
-  def exists?(conn, username), do: match?({:ok, _}, get(conn, username))
+  def exists?(conn, username) do
+    case get(conn, username) do
+      {:ok, _} -> true
+      {:error, %Error{status: 404}} -> false
+      {:error, error} -> raise error
+    end
+  end
 
   @doc """
   Creates a user with the given password.
