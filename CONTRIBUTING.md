@@ -16,13 +16,17 @@ bd list --status open
 The roadmap to 1.0.0 is ten epics; `bd ready` sorts what is actionable by
 priority, so the top of that list is the answer to "what should I do next".
 
-If `bd ready` comes back empty on a fresh clone, the local database has not been
-seeded yet:
+A fresh clone has no local database yet — `bd` says so rather than showing an
+empty list. Seed it from the committed export:
 
 ```shell
-bd bootstrap                     # clones the issue history from the git remote
-bd init -p tdb --from-jsonl      # or seed from .beads/issues.jsonl, the committed export
+bd init -p tdb
+bd import .beads/issues.jsonl
 ```
+
+Once the issue history has been published to the git remote (`bd dolt push`,
+which needs write access), `bd bootstrap` replaces both of those and clones the
+full history instead of a snapshot.
 
 When you pick something up:
 
