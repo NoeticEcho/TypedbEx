@@ -1,20 +1,23 @@
 defmodule TypeDB.Token do
-  @moduledoc """
-  Reads the lifetime out of a TypeDB access token.
+  @moduledoc false
 
-  TypeDB issues JWTs whose payload carries `iat` and `exp`. The driver reads
-  those claims — it never verifies the signature, which is the server's business
-  — so that it can renew a token *before* sending a request that would be
-  rejected, instead of discovering the expiry from a `401`.
-
-  Only the **lifetime** (`exp - iat`) is used, never the absolute times. Both
-  claims come from the server's clock, so their difference is meaningful while
-  comparing either against the local clock would not be.
-
-  A token that is not a JWT, or carries no usable claims, yields
-  `:unknown` — the driver then falls back to renewing reactively on `401`, which
-  is always correct, just one round trip slower.
-  """
+  # Internal, and deliberately not part of the public API: the way the driver
+  # decides when to renew is an implementation detail, not a promise.
+  #
+  # Reads the lifetime out of a TypeDB access token.
+  #
+  # TypeDB issues JWTs whose payload carries `iat` and `exp`. The driver reads
+  # those claims — it never verifies the signature, which is the server's business
+  # — so that it can renew a token *before* sending a request that would be
+  # rejected, instead of discovering the expiry from a `401`.
+  #
+  # Only the **lifetime** (`exp - iat`) is used, never the absolute times. Both
+  # claims come from the server's clock, so their difference is meaningful while
+  # comparing either against the local clock would not be.
+  #
+  # A token that is not a JWT, or carries no usable claims, yields
+  # `:unknown` — the driver then falls back to renewing reactively on `401`, which
+  # is always correct, just one round trip slower.
 
   @typedoc "Token lifetime in milliseconds, or `:unknown`."
   @type lifetime :: pos_integer() | :unknown

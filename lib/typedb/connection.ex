@@ -4,7 +4,7 @@ defmodule TypeDB.Connection do
 
   A connection process owns exactly two things: the configuration and the current
   access token. It does **not** proxy requests — HTTP calls run in the caller's
-  process (see `TypeDB.Transport`), reading configuration from a
+  process, reading configuration from a
   `:read_concurrency` ETS table owned by this process. A slow query therefore
   never blocks anything else.
 
@@ -34,7 +34,7 @@ defmodule TypeDB.Connection do
   TypeDB issues expiring JWTs. This driver:
 
     * acquires one lazily, on the first request that needs it;
-    * reads the token's own lifetime (see `TypeDB.Token`) and renews it
+    * reads the token's own lifetime from its JWT claims and renews it
       *before* it expires, so ordinary traffic never spends a round trip
       discovering a `401`;
     * still renews reactively when a `401` arrives anyway — a clock skew, a

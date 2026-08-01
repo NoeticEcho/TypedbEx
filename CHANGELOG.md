@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Work towards 1.0. Retry and timeout behaviour, observability, and the shape of
+the public surface — the three things 1.0 makes irreversible.
+
+### Added
+
+- `:retry_max_delay` — a ceiling on any single backoff, whichever form produced
+  it, including a caller's own `:retry_backoff` function. Defaults to `5_000`;
+  `:infinity` opts out.
+- `:deadline` — a wall-clock budget for a whole call, retries and the waits
+  between them included. Defaults to `:infinity`. Each attempt is given
+  whichever is smaller, its own `:timeout` or what the budget has left, and a
+  retry that could not finish inside the budget is not started. Available per
+  connection and on every function that already took `:timeout`.
+- `:retry_on_status` — statuses to retry in addition to transport failures and
+  timeouts. Defaults to `[429, 502, 503, 504]`; `[]` opts out. A numeric
+  `retry-after` is honoured, bounded by `:retry_max_delay`.
+- `:log_level` — the quietest level a connection will log at, `:none` to
+  silence it. Every driver log line now goes through one place, and the
+  `TypeDB` moduledoc lists all of them.
+- `[:typedb, :operation, …]` — a span per call into the public API, with every
+  retry and token renewal inside it, reporting `:attempts` and a
+  low-cardinality `:route` safe to use as a metric tag.
+- `[:typedb, :transaction, …]` — a span per `TypeDB.transaction/5`, from open
+  to commit, with an `:outcome` of `:commit`, `:rollback`, `:close` or
+  `:commit_failed`.
+- `[:typedb, :retry, :exhausted]` — emitted when a call stops retrying, with
+  `:attempts`. The event to alert on.
+- `TypeDB.Telemetry.attach_default_logger/1` and `detach_default_logger/0` — a
+  line per operation, transaction, sign-in and give-up, off unless asked for.
+- `:database`, `:transaction_type` and `:transaction_id` in telemetry metadata,
+  including for `/v1/query`, which carries its database in the request body.
+
+### Changed
+
+- **The default backoff is jittered.** `{:exponential, base}` now draws
+  uniformly from `0..base * 2 ** (n - 1)` instead of returning that value
+  exactly, so callers that failed together no longer retry together. Pass a
+  function to `:retry_backoff` for a delay you can predict.
+- **Retry eligibility is decided per operation, not per HTTP method.** Read
+  queries, opening a `:read` transaction, `analyze`, `rollback`, `close`,
+  `Database.create/2` and `User.set_password/3` are now retried; writes, schema
+  changes, `commit`, `User.create/3` and opening a `:write` or `:schema`
+  transaction are not.
+- Retries exhausted and token renewals that fail now log at `:warning`. Both
+  were silent.
+- `TypeDB.Given` and `TypeDB.Duration.to_iso8601/1` raise `%TypeDB.Error{}` with
+  the new kind **`:encode`** rather than `:config`. `:config` means the driver
+  was configured wrongly at start-up; these mean an Elixir term has no TypeDB
+  wire value. `Error.kind()` gains `:encode`.
+- TypeDB.Transport and TypeDB.Token are internal and no longer published in
+  the documentation. They were never meant to be called directly.
+
 ## [0.1.0] - 2026-07-31
 
 Initial release. Complete coverage of the TypeDB HTTP API v1, verified against
@@ -51,9 +103,9 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   already running Finch through Req, and `TypeDB.HTTP.Httpc` for deployments that
   must run on OTP alone. All three verify TLS by default and are covered by the
   same test suite.
-- `TypeDB.Transport` — request building, retries and response decoding, split out
+- TypeDB.Transport — request building, retries and response decoding, split out
   of the connection process.
-- `TypeDB.Token` — reads a token's lifetime from its JWT claims so the driver can
+- TypeDB.Token — reads a token's lifetime from its JWT claims so the driver can
   renew before expiry instead of discovering it from a `401`.
 - `TypeDB.Telemetry` — `[:typedb, :request, …]` and `[:typedb, :sign_in, …]`
   spans. Logging is deliberately sparse and carries `:typedb_connection` in its

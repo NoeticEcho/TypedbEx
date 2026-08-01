@@ -1,13 +1,16 @@
 defmodule TypeDB.Transport do
-  @moduledoc """
-  Builds, sends and decodes a single TypeDB HTTP request.
+  @moduledoc false
 
-  This is the layer between the public API modules and the `TypeDB.HTTP`
-  adapter. It runs entirely in the caller's process; the only time it talks to
-  the connection process is to obtain or renew an access token.
-
-  Reach for `TypeDB.Connection.request/4` rather than calling this directly.
-  """
+  # Internal, and deliberately not part of the public API. Adapter authors need
+  # `TypeDB.HTTP`; everyone else needs `TypeDB.Connection.request/4`.
+  #
+  # Builds, sends and decodes a single TypeDB HTTP request.
+  #
+  # This is the layer between the public API modules and the `TypeDB.HTTP`
+  # adapter. It runs entirely in the caller's process; the only time it talks to
+  # the connection process is to obtain or renew an access token.
+  #
+  # Reach for `TypeDB.Connection.request/4` rather than calling this directly.
 
   alias TypeDB.{Config, Connection, Error, JSON, Log, Telemetry}
 

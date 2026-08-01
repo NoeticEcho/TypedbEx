@@ -103,7 +103,7 @@ defmodule TypeDB.MixProject do
       source_url: @source_url,
       extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
       groups_for_modules: [
-        Connection: [TypeDB, TypeDB.Connection, TypeDB.Config, TypeDB.Token, TypeDB.Transport],
+        Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
         Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Querying: [
           TypeDB.Transaction,
