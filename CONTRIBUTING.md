@@ -187,6 +187,11 @@ and commit the regenerated file alongside the change that caused it. A pull
 request that changes the snapshot without saying why in its description will be
 asked why.
 
+The test only runs on the newest Elixir in the matrix, and skips elsewhere:
+`Code.Typespec`'s rendering is not stable across versions — 1.18 writes
+`__exception__: true` where 1.20 writes `__exception__: term()` — and comparing
+on every version would report Elixir upgrades as API breaks.
+
 ## Releasing
 
 1. Bump `@version` in `mix.exs` per the rules above.

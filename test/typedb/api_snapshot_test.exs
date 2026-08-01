@@ -12,6 +12,19 @@ defmodule TypeDB.APISnapshotTest do
 
   @snapshot Path.expand("../api_snapshot.txt", __DIR__)
 
+  # The snapshot is rendered by `Code.Typespec`, whose output is not stable
+  # across Elixir versions — 1.18 renders `%TypeDB.Error{}`'s exception field as
+  # `__exception__: true` where 1.20 renders `__exception__: term()`. Neither is
+  # an API change, so comparing on every version in the matrix would report
+  # Elixir upgrades as API breaks. One version is enough to notice a real one.
+  @renders_the_snapshot ">= 1.20.0"
+
+  unless Version.match?(System.version(), @renders_the_snapshot) do
+    @moduletag skip:
+                 "the API snapshot is rendered by Elixir #{@renders_the_snapshot}; " <>
+                   "typespec rendering differs on older versions"
+  end
+
   @regenerate """
   Regenerate with:
 

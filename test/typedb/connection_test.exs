@@ -252,7 +252,21 @@ defmodule TypeDB.ConnectionTest do
       quiet =
         connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end, log_level: :none)
 
-      assert capture_log(fn -> TypeDB.Database.list(quiet) end) == ""
+      # Not `== ""`: this suite is async, and telemetry's own "local function
+      # handler" notices from tests running beside this one land in the same
+      # capture. The property is that *this driver* said nothing.
+      refute capture_log(fn -> TypeDB.Database.list(quiet) end) =~ "TypeDB"
+    end
+
+    test "a connection at :none says nothing even when it gives up" do
+      import ExUnit.CaptureLog
+
+      failing = always_answering(503, "SRV9")
+
+      quiet =
+        connection_to(failing, max_retries: 2, retry_backoff: fn _ -> 1 end, log_level: :none)
+
+      refute capture_log(fn -> TypeDB.Database.list(quiet) end) =~ "giving up"
     end
 
     test "a numeric retry-after is honoured, bounded by :retry_max_delay" do
