@@ -26,6 +26,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `TypeDB.DateTimeTZ`, `TypeDB.Given` and `TypeDB.Concept` — where every
   subtle bug in this driver has actually been. `stream_data` is a test-only
   dependency and does not reach the package.
+- `bench/decode.exs` and `bench/transport.exs`, the scripts behind the numbers
+  quoted here. They were previously run by hand from a scratch directory that
+  no longer exists, which made every figure in this file unfalsifiable.
+
+### Changed
+
+- Re-measured throughput, on the scripts now in `bench/`, against a local
+  TypeDB 3.12.1 in this project's container — 400 requests per run, warmed
+  pool, a one-row `match`. At 200-way concurrency Finch sustains ~1800 req/s
+  and Req ~1770, both with a p99 under 120ms; `:httpc` manages ~280 req/s at a
+  p99 of 960ms. 0.1.0 published 1900 against 77 for the same comparison; the
+  ratio is the finding and it holds, the absolute numbers are a property of
+  whatever machine you run them on.
+
 ### Fixed
 
 - `TypeDB.Concept.cast/2` asked `Code.ensure_loaded?(Decimal)` once per value.
