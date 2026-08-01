@@ -360,7 +360,7 @@ end
 ```
 
 `:kind` is one of `:server`, `:transport`, `:timeout`, `:unauthenticated`,
-`:decode` or `:config`. For `:server` errors, `:code` holds TypeDB's
+`:decode`, `:encode` or `:config`. For `:server` errors, `:code` holds TypeDB's
 own error code (`"TSV11"`, `"AUT3"`, …), which is stable across releases — branch
 on that, not on messages.
 
@@ -462,6 +462,19 @@ If you use an AI coding agent, TypeDB's
 [configure-coding-agent](https://typedb.com/docs/home/configure-coding-agent/)
 guide pairs `typeql-check` with the
 [`typedb-skills`](https://github.com/typedb/typedb-skills) TypeQL skill file.
+
+## Guides
+
+Four, for the things a reference page cannot teach:
+
+- **[Transactions](guides/transactions.md)** — the three types, why the default
+  is the expensive one, what a commit promises and what it does not.
+- **[Errors and retries](guides/errors-and-retries.md)** — what the driver
+  retries for you, what it cannot, and how to bound what a call can cost.
+- **[Telemetry and logging](guides/observability.md)** — three levels of span,
+  which one answers your question, and the metrics worth graphing.
+- **[Testing an application](guides/testing.md)** — a database per test, when a
+  stub is worth it, and how to make the failure paths happen on purpose.
 
 ## Limitations
 

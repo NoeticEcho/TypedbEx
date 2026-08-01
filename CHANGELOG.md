@@ -68,6 +68,13 @@ Everything else is additive.
   variable that names no field. `Kernel.struct/2` silently returns the struct's
   defaults there, which the `to_map/1` docs previously warned about at length
   instead of solving.
+- Four guides, published with the docs and shipped in the package:
+  [Transactions](guides/transactions.md),
+  [Errors and retries](guides/errors-and-retries.md),
+  [Telemetry and logging](guides/observability.md), and
+  [Testing an application](guides/testing.md).
+- A Limitations section in the README: answers arrive whole, a connection points
+  at one server, retries block the caller, one connection is one HTTP pool.
 - An API snapshot test. `test/api_snapshot.txt` records the whole published
   surface and the suite fails when the code and the file disagree, so a SemVer
   decision is forced at the moment the API changes rather than at release.

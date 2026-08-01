@@ -1,0 +1,140 @@
+# Errors and retries
+
+## What the driver retries for you
+
+A request is retried when two things are true: the failure looks transient, and
+re-sending the request is safe.
+
+**Transient** means a transport failure, a timeout, or a response status in
+`:retry_on_status` — `[429, 502, 503, 504]` by default. Those are a proxy or an
+ingress answering while TypeDB restarts, or a server shedding load. Everything
+else is TypeDB saying no, and saying it again will not help.
+
+**Safe** is decided per operation, not per HTTP method — a read query and a
+commit are both `POST`, and treating them alike would either lose recoverable
+reads or re-send writes:
+
+| retried | not retried |
+| --- | --- |
+| reads, one-shot and in-transaction | writes and schema changes |
+| opening a `:read` transaction | opening a `:write` or `:schema` transaction |
+| `analyze`, `rollback`, `close` | `commit` |
+| `Database.create/2`, `User.set_password/3` | `User.create/3` |
+| every `GET` and `DELETE` | |
+
+The asymmetries are TypeDB's. Creating a database that exists is a no-op, so
+re-sending is free; creating a *user* that exists is an error, so a re-send after
+a lost response would report failure for a user that now exists. Opening a
+`:read` transaction twice costs a pinned snapshot until TypeDB's own timeout;
+opening a `:write` one twice costs the locks.
+
+## What it does not, and cannot
+
+A commit that TypeDB rejected is not retried and must not be. Neither is a whole
+`transaction/5` block: the driver retries requests, and a block is not a request.
+See [Transactions](transactions.html#what-commit-promises-and-when-it-does-not)
+for the loop that does.
+
+`TypeDB.Error.retryable?/1` answers "could retrying this help" for the layer
+above — a job that should be requeued, a transaction that should be re-run:
+
+```elixir
+case TypeDB.transaction(conn, "social", :write, &steps/1) do
+  {:error, %TypeDB.Error{} = error} ->
+    if TypeDB.Error.retryable?(error), do: {:snooze, 5}, else: {:discard, error}
+
+  result ->
+    result
+end
+```
+
+By the time you hold an error the driver has already retried whatever its
+configuration allowed, so `true` does not mean it gave up early.
+
+## Bounding the cost
+
+Four options interact, and only one of them bounds the call:
+
+```elixir
+TypeDB.start_link(
+  url: ...,
+  timeout: 15_000,          # one attempt
+  connect_timeout: 2_000,   # opening the socket
+  max_retries: 3,           # extra attempts
+  retry_max_delay: 2_000,   # one wait between attempts
+  deadline: 20_000          # the whole call, retries and waits included
+)
+```
+
+Without `:deadline`, that configuration can spend
+`4 × (2_000 + 15_000) + 3 × 2_000 = 74 seconds` in your process. With it, twenty:
+each attempt is given whichever is smaller, its own timeout or what the budget
+has left, and a retry whose backoff would consume the rest is not started. The
+error then says so, and carries the failure that prompted it.
+
+Both are also per call, on every function that takes `:timeout`:
+
+```elixir
+TypeDB.Transaction.commit(tx, timeout: 60_000, deadline: 90_000)
+```
+
+Backoff is jittered — drawn uniformly from `0..base × 2ⁿ⁻¹` — so that callers who
+failed together do not retry together. Pass a function to `:retry_backoff` when
+you need a delay you can predict.
+
+## Reading an error
+
+```elixir
+%TypeDB.Error{
+  kind: :server,
+  code: "TSV12",
+  status: 404,
+  message: "[TSV12] Operation failed: no open transaction.",
+  reason: nil,
+  body: nil
+}
+```
+
+Branch on `:kind` and `:code`. Never on `:message` — the text is TypeDB's, it
+changes, and the versioning policy does not cover it.
+
+| kind | means |
+| --- | --- |
+| `:server` | TypeDB answered with a structured error. `:code` is stable |
+| `:transport` | no HTTP response: refused, DNS, TLS, socket closed |
+| `:timeout` | the request, or the whole call's `:deadline`, ran out |
+| `:unauthenticated` | credentials rejected, or a token that cannot be renewed |
+| `:decode` | the response was not what this driver expects |
+| `:encode` | an Elixir term has no TypeDB representation. Raised, not returned |
+| `:config` | the connection is misconfigured. Raised at start-up |
+
+Codes worth knowing, all verified against a live server:
+
+| code | status | when |
+| --- | --- | --- |
+| `SRV3` | 400/404 | no such database |
+| `TSV12` | 404 | the transaction has finished |
+| `TSV2` | 400 | commit on a `:read` transaction |
+| `TSV8` / `TSV9` | 400 | schema change in `:write`, write in `:read` |
+| `TQL0` | 400 | the query does not parse |
+| `INF2` | 400 | a type in the query is not in the schema |
+| `CNT9` | 400 | a constraint such as `@key` was violated |
+| `AUT1` / `AUT3` | 401 | bad credentials / rejected token |
+
+## Failing loudly
+
+Every fallible function has a `!` twin that raises instead of returning:
+
+```elixir
+answer = TypeDB.query!(conn, "social", query, transaction_type: :read)
+```
+
+The exception is `transaction/5`, which returns whatever your block returned — a
+bang form would have to guess whether an `{:error, _}` was yours or the commit's.
+
+Some things raise with no twin at all, and deliberately: a transaction type that
+is not one of three atoms, a `given_rows` value TypeDB has no representation for,
+a misconfigured connection. Those are mistakes in your source rather than answers
+from a server, and no amount of error handling makes them work. The rule is
+written down in
+[CONTRIBUTING](https://github.com/NoeticEcho/TypedbEx/blob/main/CONTRIBUTING.md).
