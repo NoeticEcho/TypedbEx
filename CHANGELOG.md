@@ -90,6 +90,8 @@ Everything else is additive.
   wire value. `Error.kind()` gains `:encode`.
 - TypeDB.Transport and TypeDB.Token are internal and no longer published in
   the documentation. They were never meant to be called directly.
+- `TypeDB.Transaction.open/4` raises `ArgumentError` naming the bad transaction
+  type and the three accepted ones, where it raised `FunctionClauseError`.
 - `Exception.message/1` on a `%TypeDB.Error{}` now includes the HTTP status:
   `[server 404] TSV2: Database not found.` The rendered form is what reaches a
   log line and an exit reason, where nobody has the struct to inspect. Message

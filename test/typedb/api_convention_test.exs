@@ -136,6 +136,47 @@ defmodule TypeDB.APIConventionTest do
     end
   end
 
+  describe "the raise-or-return rule" do
+    # See "Failing: return or raise" in CONTRIBUTING. The part worth enforcing
+    # mechanically is the last clause: a public function must never answer a
+    # plausible bad value with a FunctionClauseError, which names an internal
+    # clause and tells the caller nothing about what was expected.
+    setup do
+      stub = start_supervised!({TypeDB.Stub, []})
+      name = :"convention_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = TypeDB.start_link(name: name, url: TypeDB.Stub.url(stub), token: "t")
+      {:ok, conn: name}
+    end
+
+    test "an enum argument is rejected by name, not by clause", %{conn: conn} do
+      # Computed so the compile-time type checker does not flag the bad calls.
+      bad = String.to_atom("sideways")
+
+      for call <- [
+            fn -> TypeDB.Transaction.open(conn, "social", bad) end,
+            fn -> TypeDB.query(conn, "social", "match $p isa person;", transaction_type: bad) end
+          ] do
+        error = assert_raise ArgumentError, call
+
+        assert error.message =~ "sideways"
+        assert error.message =~ ":read"
+        assert error.message =~ ":write"
+        assert error.message =~ ":schema"
+      end
+    end
+
+    test "a value that cannot reach the wire raises TypeDB.Error, not ArgumentError" do
+      # One `rescue TypeDB.Error` at a call site has to cover everything the
+      # driver can throw on the way to the server.
+      for call <- [
+            fn -> TypeDB.Given.encode_rows([%{"n" => {:not, :encodable}}]) end,
+            fn -> TypeDB.Duration.to_iso8601(%TypeDB.Duration{months: -1}) end
+          ] do
+        assert %Error{kind: :encode} = assert_raise(Error, call)
+      end
+    end
+  end
+
   describe "Logger metadata" do
     # Credo's MissedMetadataKeyInLoggerConfig check used to guard this, but it
     # can only see literal `Logger.<level>` calls; every driver log line now

@@ -74,6 +74,17 @@ defmodule TypeDB.Transaction do
   """
   @spec open(Connection.t(), String.t(), type(), keyword()) :: {:ok, t()} | {:error, Error.t()}
   def open(conn, database, type, opts \\ [])
+
+  # An `ArgumentError` naming the value, rather than the `FunctionClauseError`
+  # the guard alone produced: the type is a literal in the caller's source, so
+  # the failure should say which literal is wrong. Same treatment as
+  # `TypeDB.query/4`'s `:transaction_type`.
+  def open(_conn, database, type, _opts) when is_binary(database) and type not in [:read, :write, :schema] do
+    raise ArgumentError,
+          "invalid transaction type #{inspect(type)}, expected :read, :write or :schema"
+  end
+
+  def open(conn, database, type, opts)
       when is_binary(database) and type in [:read, :write, :schema] do
     body =
       %{"databaseName" => database, "transactionType" => Atom.to_string(type)}

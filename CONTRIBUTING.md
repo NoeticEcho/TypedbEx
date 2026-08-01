@@ -105,6 +105,38 @@ transaction succeeds, while committing one does not.
 If you change the stub to make a test pass, check the real server first and
 record what you found.
 
+## Failing: return or raise
+
+One rule, and it is about where the bad value came from, not how bad it is.
+
+**Return `{:error, %TypeDB.Error{}}` when the failure can come from data the
+program received.** A server that says no, a socket that closed, a database
+name read from a request. The caller has to handle these, so they are values,
+and every such function has a `!` twin for callers who would rather not.
+
+**Raise when the failure can only come from the program's own text.** A
+transaction type that is not one of three atoms, a struct handed to
+`ConceptRow.to_struct/2` that has no such field, a `:retry_backoff` function
+that returns a string. No amount of error handling makes these work; they are
+fixed by editing the line above.
+
+Which exception:
+
+- `%TypeDB.Error{}` when the value was on its way to the wire or names
+  configuration, so that one `rescue TypeDB.Error` clause covers everything the
+  driver can throw at a call site. Kind `:encode` for a value TypeDB has no
+  representation for, `:config` for a connection that is misconfigured.
+- `ArgumentError` when the mistake is purely at the Elixir level and never
+  reaches the wire — a bad module, a bad enum value.
+- **Never a bare `FunctionClauseError` from a public function** for a value a
+  caller could plausibly pass. A guard that rejects one of three atoms should
+  say which three; `FunctionClauseError` names an internal clause and helps
+  nobody. Add a clause that raises `ArgumentError` with the accepted values.
+
+`TypeDB.Duration.to_iso8601/1` is the case worth reading, since it looks like
+an exception to the rule and is not: a negative duration can only come from a
+struct the caller built by hand, so it raises.
+
 ## Versioning
 
 This project follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).

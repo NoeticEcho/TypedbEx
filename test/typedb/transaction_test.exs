@@ -28,10 +28,13 @@ defmodule TypeDB.TransactionTest do
       assert {:error, %Error{status: 404, code: "TSV2"}} = Transaction.open(conn, "nope", :read)
     end
 
-    test "rejects an unknown transaction type", %{conn: conn} do
+    test "rejects an unknown transaction type by name", %{conn: conn} do
       # Computed so the compile-time type checker does not flag the bad call.
       type = String.to_atom("sideways")
-      assert_raise FunctionClauseError, fn -> Transaction.open(conn, "social", type) end
+
+      assert_raise ArgumentError, ~r/invalid transaction type :sideways/, fn ->
+        Transaction.open(conn, "social", type)
+      end
     end
   end
 
