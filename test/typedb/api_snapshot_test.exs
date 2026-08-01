@@ -104,6 +104,11 @@ defmodule TypeDB.APISnapshotTest do
     module.module_info(:compile)
     |> Keyword.get(:source, ~c"")
     |> to_string()
+    # Windows reports `D:\a\TypedbEx\test\support\case.ex`, so the separator
+    # has to be normalised before asking. Without this the whole of
+    # `test/support` counted as public surface — which is how the Windows job
+    # earned its keep on its first run.
+    |> String.replace("\\", "/")
     |> String.contains?("/test/")
   end
 

@@ -107,7 +107,11 @@ defmodule TypeDB.ConnectionTest do
           connect_timeout: 500
         )
 
-      assert {:error, %Error{kind: :transport}} = TypeDB.Database.list(name)
+      # `:timeout` on Windows, which does not answer a connect to a closed
+      # loopback port with an RST — it lets the attempt run out instead. Both
+      # are the driver classifying an unreachable server, which is the claim.
+      assert {:error, %Error{kind: kind}} = TypeDB.Database.list(name)
+      assert kind in [:transport, :timeout]
 
       TypeDB.stop(pid)
     end
@@ -497,10 +501,15 @@ defmodule TypeDB.ConnectionTest do
 
       Process.exit(transport, :kill)
 
+      # `GenServer.start_link(name: ...)` registers the name *before* `init/1`
+      # runs, so a fresh pid under the name does not yet mean a connection with
+      # a config table — and reading one that is not there raises from :ets.
+      # Seen as a CI-only failure, which is what a race looks like.
       wait_until(fn ->
         case Process.whereis(name) do
           nil -> false
-          pid -> pid != connection
+          ^connection -> false
+          _rebuilt -> config_readable?(name)
         end
       end)
 
@@ -508,6 +517,13 @@ defmodule TypeDB.ConnectionTest do
              "the connection must be usable again once the supervisor has rebuilt it"
 
       Supervisor.stop(supervisor)
+    end
+
+    defp config_readable?(name) do
+      _ = TypeDB.Connection.config(name)
+      true
+    rescue
+      _ -> false
     end
 
     # `c:TypeDB.HTTP.owner/1` documents that "the connection links itself to that
