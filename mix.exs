@@ -114,15 +114,21 @@ defmodule TypeDB.MixProject do
       groups_for_extras: [
         Guides: ~r{^guides/}
       ],
+      # Reading order, not alphabetical: connect, ask, read what came back,
+      # handle what went wrong, then the things you reach for later. Every
+      # published module belongs to exactly one group, which
+      # test/typedb/api_snapshot_test.exs asserts — a new module that nobody
+      # filed would otherwise land in an unnamed heap at the bottom.
       groups_for_modules: [
         Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
-        Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Querying: [
           TypeDB.Transaction,
+          TypeDB.Given,
           TypeDB.Options,
           TypeDB.Options.Query,
-          TypeDB.Options.Transaction,
-          TypeDB.Given,
+          TypeDB.Options.Transaction
+        ],
+        Answers: [
           TypeDB.Answer,
           TypeDB.Answer.Ok,
           TypeDB.Answer.ConceptRows,
@@ -142,6 +148,9 @@ defmodule TypeDB.MixProject do
           TypeDB.Duration,
           TypeDB.DateTimeTZ
         ],
+        Errors: [TypeDB.Error],
+        Observability: [TypeDB.Telemetry],
+        Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
         Extending: [
           TypeDB.HTTP,
           TypeDB.HTTP.Finch,
@@ -151,8 +160,7 @@ defmodule TypeDB.MixProject do
           TypeDB.JSON.Native,
           TypeDB.JSON.Jason
         ],
-        Observability: [TypeDB.Telemetry],
-        Errors: [TypeDB.Error]
+        "Mix tasks": [Mix.Tasks.Typedb.Check]
       ]
     ]
   end

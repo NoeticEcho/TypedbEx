@@ -75,6 +75,25 @@ defmodule TypeDB.APISnapshotTest do
     end
   end
 
+  test "every published module is filed under exactly one docs group" do
+    # Otherwise a new module lands in an unnamed heap at the bottom of the
+    # sidebar, which is how a reference page stops being a table of contents.
+    grouped =
+      Mix.Project.config()[:docs][:groups_for_modules]
+      |> Enum.flat_map(fn {_group, modules} -> modules end)
+
+    duplicated = grouped -- Enum.uniq(grouped)
+    assert duplicated == [], "filed under more than one group: #{inspect(duplicated)}"
+
+    published = public_modules()
+
+    assert published -- grouped == [],
+           "published but not filed under any docs group: #{inspect(published -- grouped)}"
+
+    assert grouped -- published == [],
+           "filed under a docs group but not published: #{inspect(grouped -- published)}"
+  end
+
   defp render do
     public_modules()
     |> Enum.map_join("\n", &render_module/1)
