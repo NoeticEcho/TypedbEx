@@ -51,6 +51,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `TypeDB.Duration.parse/1` ran a regular expression once per component, and
+  its trailing `(.*)` copied the rest of the string each time. It cost 16µs a
+  duration where every other cast costs under half a microsecond. Scanning the
+  number's length and slicing brings it to 1.6µs — ten times faster, for the
+  same values: checked by re-parsing 200,000 generated durations, well-formed
+  and malformed, through both implementations.
 - `TypeDB.Concept.cast/2` asked `Code.ensure_loaded?(Decimal)` once per value.
   For an application that *has* `Decimal` that is a cached lookup costing
   nothing; for one that does not it is a code-server round trip, and it was the

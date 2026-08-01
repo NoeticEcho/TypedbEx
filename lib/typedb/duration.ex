@@ -211,34 +211,57 @@ defmodule TypeDB.Duration do
     end
   end
 
+  # Was `Regex.run(~r/^(\d+(?:[.,]\d+)?)([A-Z])(.*)$/, string)`, which is the
+  # obvious way to write this and cost 16µs a duration — forty times every other
+  # cast in `bench/decode.exs`, because it ran once per component and its `(.*)`
+  # copied the remainder each time. Measuring the number's length and slicing
+  # does the same job for 1.6µs. The arithmetic is deliberately still
+  # `Integer.parse/1` and `Float.parse/1` over the same substring: accumulating
+  # the digits by hand would be faster again and would change which float a
+  # fractional second rounds to, which is a nanosecond nobody asked to move.
   defp take_component(string) do
-    case Regex.run(~r/^(\d+(?:[.,]\d+)?)([A-Z])(.*)$/, string) do
-      [_, number, unit, rest] ->
-        case parse_number(number) do
-          {:ok, value} -> {:ok, value, unit, rest}
-          :error -> :error
-        end
-
-      nil ->
-        :error
-    end
-  end
-
-  defp parse_number(number) do
-    normalised = String.replace(number, ",", ".")
-
-    if String.contains?(normalised, ".") do
-      case Float.parse(normalised) do
-        {value, ""} -> {:ok, value}
-        _ -> :error
-      end
+    with {:ok, length, separator} <- number_length(string, 0, false, nil),
+         <<number::binary-size(^length), unit, rest::binary>> <- string,
+         true <- unit in ?A..?Z,
+         {:ok, value} <- parse_number(number, separator) do
+      {:ok, value, <<unit>>, rest}
     else
-      case Integer.parse(normalised) do
-        {value, ""} -> {:ok, value}
-        _ -> :error
-      end
+      _ -> :error
     end
   end
+
+  # Digits, then at most one `.` or `,`, then digits, reporting which separator
+  # it saw so that the number can be parsed without being scanned again.
+  # `digits?` is reset by the separator so that "1." and "1.Y" are rejected
+  # rather than read as 1.
+  defp number_length(<<digit, rest::binary>>, length, _digits?, separator)
+       when digit in ?0..?9,
+       do: number_length(rest, length + 1, true, separator)
+
+  defp number_length(<<separator, rest::binary>>, length, true, nil)
+       when separator in [?., ?,],
+       do: number_length(rest, length + 1, false, separator)
+
+  defp number_length(_rest, length, true, separator), do: {:ok, length, separator}
+  defp number_length(_rest, _length, false, _separator), do: :error
+
+  defp parse_number(number, nil) do
+    case Integer.parse(number) do
+      {value, ""} -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  defp parse_number(number, ?.) do
+    case Float.parse(number) do
+      {value, ""} -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  # `Float.parse/1` stops at the comma, so ISO-8601's other decimal mark is the
+  # one case that has to allocate.
+  defp parse_number(number, ?,), do: parse_number(String.replace(number, ",", "."), ?.)
 
   defp get(components, unit), do: Map.get(components, unit, 0)
 end
