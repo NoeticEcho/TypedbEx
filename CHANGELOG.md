@@ -6,30 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
-
-- `TypeDB.DateTimeTZ.new/2` — builds a `datetime-tz` for writing, from a
-  `NaiveDateTime` plus an IANA zone name or a UTC offset in seconds. The struct
-  could previously only be obtained by parsing what TypeDB sent, so writing an
-  IANA-zoned value meant formatting the wire string by hand.
-- `:timeout` on `TypeDB.Transaction.commit/2`, `rollback/2` and `close/2`, and
-  their `!` forms. A commit is where the server does the work, so it is the
-  request most likely to want more time than an ordinary query; raising the
-  whole connection's `:timeout` was the only way to give it any.
-- A documented Logger metadata convention — `:typedb_connection` on every line,
-  plus `:typedb_method`, `:typedb_path`, `:typedb_attempt` and
-  `:typedb_error_kind` on retries. See the "Logging" section of `TypeDB`.
-
-### Changed
-
-- `TypeDB.Database.exists?/2` and `TypeDB.User.exists?/2` raise `TypeDB.Error`
-  for anything other than a clean 404, instead of answering `false`. A boolean
-  cannot express "I could not ask", and `false` is the answer that makes a
-  caller do the wrong thing — `unless exists?(conn, x), do: create(conn, x)`
-  would try to create while the server was unreachable.
-  `TypeDB.Database.create_if_not_exists/2` is unaffected: it goes through
-  `get/2` directly so that it still returns the error rather than raising.
-
 ## [0.1.0] - 2026-07-31
 
 Initial release. Complete coverage of the TypeDB HTTP API v1, verified against
@@ -41,12 +17,15 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.Connection` — lazy sign-in, transparent token renewal bounded by
   `:max_auth_renewals`, and per-connection configuration held in a
   read-concurrent ETS table so requests run in the caller's process.
-- `TypeDB.Database` — list, get, create, create-if-not-exists, delete, schema and
-  type-schema.
+- `TypeDB.Database` — list, get, create, create-if-not-exists, delete, schema
+  and type-schema. `exists?/2` raises rather than answering `false` when it
+  could not reach the server, since `false` is the answer that makes a caller
+  create something that already exists.
 - `TypeDB.User` — list, get, create, set password, delete.
 - `TypeDB.Server` — health, version and cluster membership.
 - `TypeDB.Transaction` — explicit `:read`, `:write` and `:schema` transactions
-  with `query/3`, `analyze/3`, `commit/1`, `rollback/1` and idempotent `close/1`.
+  with `query/3`, `analyze/3`, `commit/2`, `rollback/2` and idempotent
+  `close/2`, each taking its own `:timeout`.
 - `TypeDB.Answer` — `Ok`, `ConceptRows` and `ConceptDocuments`; the latter two
   are `Enumerable`.
 - `TypeDB.ConceptRow` — `Access`-backed rows, plus `value/2`, `typed_value/2` and
@@ -54,7 +33,10 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.Concept` — structs for entities, relations, attributes, values and
   every type kind, with conversion of TypeDB values to native Elixir terms.
 - `TypeDB.Duration` and `TypeDB.DateTimeTZ` — lossless representations of
-  TypeDB's `duration` and `datetime-tz` values.
+  TypeDB's `duration` and `datetime-tz` values, keeping the original wire string
+  so TypeDB's nanosecond precision survives conversion to Elixir's coarser
+  types. `DateTimeTZ.new/2` builds one for writing, from a `NaiveDateTime` plus
+  an IANA zone name or a UTC offset.
 - `TypeDB.Options` — transaction and query options.
 - `TypeDB.Given` — encodes input rows for TypeQL's `given` stage into TypeDB's
   tagged wire form, making parameterised queries safe against TypeQL injection
@@ -74,7 +56,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
 - `TypeDB.Token` — reads a token's lifetime from its JWT claims so the driver can
   renew before expiry instead of discovering it from a `401`.
 - `TypeDB.Telemetry` — `[:typedb, :request, …]` and `[:typedb, :sign_in, …]`
-  spans.
+  spans. Logging is deliberately sparse and carries `:typedb_connection` in its
+  Logger metadata; see the "Logging" section of `TypeDB`.
 - `TypeDB.JSON` — a codec behaviour resolving to the built-in `JSON`, to `Jason`,
   or to a codec you configure.
 - `mix typedb.check` — validates `.tql` files with TypeDB's `typeql-check` CLI.
