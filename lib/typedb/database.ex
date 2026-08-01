@@ -87,7 +87,9 @@ defmodule TypeDB.Database do
   def create(conn, name) when is_binary(name) do
     case Connection.request(conn, :post, "/databases/#{Wire.path_segment(name)}",
            expect: :empty,
-           idempotent: false
+           # Creating a database that already exists is a no-op on TypeDB 3.x,
+           # which is what makes a re-send safe. Creating a *user* is not.
+           idempotent: true
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}

@@ -201,9 +201,13 @@ defmodule TypeDB.Connection do
     * `:expect` — `:json` (default), `:text` or `:empty`
     * `:versioned` — prefix the path with the API version. Defaults to `true`
     * `:authenticated` — send a bearer token. Defaults to `true`
-    * `:idempotent` — allow transport-level retries. Defaults to `true` for
-      `:get` and `:delete`
+    * `:idempotent` — allow retries. Defaults to `true` for `:get` and
+      `:delete`, but the method is a poor proxy for the question and every
+      caller in this driver answers it for itself: a read query is safe to
+      re-send and a commit is not, though both are `POST`
     * `:timeout` — overrides the connection timeout for this request
+    * `:deadline` — overrides the connection's wall-clock budget for the whole
+      call, retries included
   """
   @type request_opts :: keyword()
 

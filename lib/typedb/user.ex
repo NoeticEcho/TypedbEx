@@ -107,7 +107,8 @@ defmodule TypeDB.User do
     case Connection.request(conn, :put, "/users/#{Wire.path_segment(username)}",
            body: %{"password" => password},
            expect: :empty,
-           idempotent: false
+           # Setting the same password twice sets the same password.
+           idempotent: true
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}

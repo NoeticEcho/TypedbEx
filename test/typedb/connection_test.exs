@@ -174,6 +174,34 @@ defmodule TypeDB.ConnectionTest do
       assert length(requests(failing, "/query")) == 1
     end
 
+    test "a read query is retried where a write is not, though both are POST" do
+      # The whole point of deciding per operation rather than per method.
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end)
+
+      assert {:error, _} =
+               TypeDB.query(conn, "social", "match $p isa person;", transaction_type: :read)
+
+      assert length(requests(failing, "/query")) == 2
+    end
+
+    test "rollback and close are retried, commit is not" do
+      failing = always_answering(503, "SRV9")
+      conn = connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end)
+      tx = %TypeDB.Transaction{conn: conn, id: "tx-1", database: "social", type: :write}
+
+      assert {:error, _} = TypeDB.Transaction.rollback(tx)
+      assert length(requests(failing, "/rollback")) == 2
+
+      assert {:error, _} = TypeDB.Transaction.close(tx)
+      assert length(requests(failing, "/close")) == 2
+
+      # A commit that reached the server and lost its answer must not be
+      # re-sent; there is no way to tell that case from one that never arrived.
+      assert {:error, _} = TypeDB.Transaction.commit(tx)
+      assert length(requests(failing, "/commit")) == 1
+    end
+
     test "a numeric retry-after is honoured, bounded by :retry_max_delay" do
       failing = always_answering(429, "SRV9", [{"retry-after", "600"}])
 

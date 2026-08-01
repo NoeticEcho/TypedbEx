@@ -21,8 +21,13 @@ defmodule TypeDB.Config do
     * `:http` — `{adapter_module, adapter_opts}`. Defaults to
       `{TypeDB.HTTP.Finch, []}`. See `TypeDB.HTTP` for the alternatives and why
       this is the default.
-    * `:max_retries` — how many times to retry *idempotent* requests after a
-      transport failure. Defaults to `1`.
+    * `:max_retries` — how many times to retry a request that is safe to
+      re-send, after a transport failure, a timeout or a status in
+      `:retry_on_status`. Defaults to `1`.
+
+      Safety is decided per operation, not per HTTP method: reads, `analyze`,
+      `rollback`, `close`, `Database.create/2` and `User.set_password/3` are
+      retried; writes, schema changes, `commit` and `User.create/3` are not.
     * `:max_auth_renewals` — how many times a single request will renew its
       token and retry after a `401`. Defaults to `2`; more than one matters only
       when a burst of requests is wide enough for the freshly minted token to

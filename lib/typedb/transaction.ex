@@ -77,7 +77,11 @@ defmodule TypeDB.Transaction do
 
     case Connection.request(conn, :post, "/transactions/open",
            body: body,
-           idempotent: false,
+           # A retried open can leave an orphan if the first one succeeded and
+           # the answer was lost. For :read that costs a pinned snapshot until
+           # TypeDB's own transaction timeout; for :write and :schema it costs
+           # the locks, so those stay one-shot.
+           idempotent: type == :read,
            timeout: opts[:timeout],
            deadline: opts[:deadline]
          ) do
@@ -166,7 +170,9 @@ defmodule TypeDB.Transaction do
     with {:ok, payload} <-
            Connection.request(tx.conn, :post, "/transactions/#{tx.id}/query",
              body: body,
-             idempotent: false,
+             # A read query changes nothing, so re-sending it after a dropped
+             # packet is free. In a write or schema transaction it is not.
+             idempotent: tx.type == :read,
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
@@ -194,7 +200,8 @@ defmodule TypeDB.Transaction do
   def analyze(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     Connection.request(tx.conn, :post, "/transactions/#{tx.id}/analyze",
       body: %{"query" => query},
-      idempotent: false,
+      # Analysis does not execute the query.
+      idempotent: true,
       timeout: opts[:timeout],
       deadline: opts[:deadline]
     )
@@ -253,7 +260,8 @@ defmodule TypeDB.Transaction do
   @spec rollback(t(), keyword()) :: :ok | {:error, Error.t()}
   def rollback(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/rollback",
-           idempotent: false,
+           # Rolling back twice reaches the same state as rolling back once.
+           idempotent: true,
            expect: :empty,
            timeout: opts[:timeout],
            deadline: opts[:deadline]
@@ -280,7 +288,9 @@ defmodule TypeDB.Transaction do
   @spec close(t(), keyword()) :: :ok | {:error, Error.t()}
   def close(%__MODULE__{} = tx, opts \\ []) do
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/close",
-           idempotent: false,
+           # Idempotent by design, and a 404 from a second close is treated as
+           # success below.
+           idempotent: true,
            expect: :empty,
            timeout: opts[:timeout],
            deadline: opts[:deadline]

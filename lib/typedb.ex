@@ -195,7 +195,9 @@ defmodule TypeDB do
     with {:ok, payload} <-
            Connection.request(conn, :post, "/query",
              body: body,
-             idempotent: false,
+             # A read runs in a transaction the server opens and closes for it,
+             # so a re-send after a dropped packet changes nothing.
+             idempotent: transaction_type == :read,
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
