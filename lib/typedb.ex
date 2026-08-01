@@ -63,6 +63,33 @@ defmodule TypeDB do
   so its `{:error, _}` may be your own value rather than an exception, and a
   bang form would have to guess whether to raise it.
 
+  ## How long a call can take
+
+  Four options interact, and only the last of them bounds the call rather than
+  one attempt. With the defaults:
+
+  | | default | what it bounds |
+  | --- | --- | --- |
+  | `:connect_timeout` | `10_000` | opening the socket |
+  | `:timeout` | `60_000` | waiting for one response |
+  | `:max_retries` | `1` | how many extra attempts |
+  | `:retry_max_delay` | `5_000` | one wait between attempts |
+  | `:deadline` | `:infinity` | **the whole call** |
+
+  So a retryable call costs at worst
+
+      (max_retries + 1) * (connect_timeout + timeout) + max_retries * retry_max_delay
+
+  which is a little over two minutes by default, plus one more
+  `connect_timeout + timeout` if the call has to mint a token first. Raising
+  `:max_retries` multiplies the first term — that is the arithmetic `:deadline`
+  exists for, since setting it makes the whole expression irrelevant: no call
+  outlives its budget, each attempt is given only what the budget has left, and
+  a retry that could not finish inside it is not started.
+
+  Retries and their backoffs happen in the calling process. Nothing is queued
+  behind a connection, but nothing is running in the caller either.
+
   ## Logging
 
   The driver logs sparingly: a `debug` line per transport retry, a `debug` line
