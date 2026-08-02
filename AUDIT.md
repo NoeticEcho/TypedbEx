@@ -335,26 +335,48 @@ calls compile and behave as before. Step 4 changes which exception an invalid
 argument raises — `ArgumentError` instead of `FunctionClauseError` — which is not
 a covered surface, and is called out because it is a behaviour change.
 
-### Still open for you
+### Raised as judgement calls, then decided
 
-Nothing is blocked and nothing was skipped. Two judgement calls are worth your
-attention rather than mine:
+Two things were left for the maintainer at the end of the refactor and settled
+immediately afterwards, in `0.6.0`. Both are recorded here because the reasoning
+matters more than the outcome.
 
-1. **`create_if_not_exists/3` spends the caller's budget twice.** It makes two
-   requests and gives each the full `:timeout` and `:deadline`, so the pair can
-   cost double what was asked for. The alternative is to give the second call
-   what the first did not spend — arithmetic this driver does nowhere else, and
-   which would make the option mean something different here than everywhere
-   else. Left as it is, with a comment saying so.
-2. **`:deadline` cannot interrupt a blocking connect.** Found while measuring
-   step 7: against a black-holed address, a call with `deadline: 300` still took
-   the full `connect_timeout`, because the budget is checked between attempts and
-   Finch bakes its connect timeout into the pool at build time. This is
-   pre-existing and unrelated to this refactor — `TypeDB.query/4` behaves the
-   same — so it was not touched. It is a real gap between what `:deadline`
-   promises and what it can enforce, and deserves either a fix or a sentence in
-   the guide. **Not filed as a finding because it was not audited**, only
-   stumbled on.
+1. **`create_if_not_exists/3` spent the caller's budget twice — fixed.** It makes
+   two requests and gave each the full `:timeout` and `:deadline`, so
+   `deadline: 5_000` could cost ten seconds. `:deadline` is documented as the
+   budget for *the whole call*, and the caller made one call, so the second
+   request now gets what the first did not spend. Measured: 1203ms before, under
+   1100 after; the test fails without the arithmetic. `:timeout` is deliberately
+   unchanged — it bounds one attempt, and these are two.
+2. **`:deadline` cannot interrupt a blocking connect — documented, not fixed.**
+   Against a host that accepts nothing, a call with `deadline: 300` still takes
+   the full `connect_timeout`: the budget is enforced between attempts and by
+   shortening each attempt's *receive* timeout, while opening the socket is
+   bounded by `:connect_timeout` alone. Fixing it is possible for
+   `TypeDB.HTTP.Req` and `TypeDB.HTTP.Httpc`, whose connect timeout is per
+   request, and impossible for the default: Mint reads it from a pool built once.
+   Doing it for two adapters out of three would make one option mean different
+   things depending on the transport — which is Audit I's finding M2, and the
+   reason this driver does not do that. Now stated in `TypeDB.Config` and in
+   `guides/errors-and-retries.md`, with the advice to size the two together.
+
+**Nothing from Audit II is open.**
+
+### Found by CI after the refactor
+
+One flaky test, mine, from step 7. The check that every accepted option value is
+accepted feeds each call `timeout: 1` — one millisecond, in the list precisely to
+prove that 1 is legal — and rescued only `ArgumentError`. One millisecond is also
+long enough to expire, and `exists?/3` is documented to raise anything that is
+not a clean 404, so on a slow enough adapter a `%TypeDB.Error{}` escaped. Twelve
+local matrix runs missed it; CI failed on two of five entries at the first
+attempt. Fixed in `890b194`: the rescue ignores a `TypeDB.Error`, since the test
+is about the option being accepted rather than the request succeeding, and still
+fails on an `ArgumentError` — checked by making a validator reject the value.
+
+Worth recording as a method note rather than a defect: a local run is not proof,
+and a green matrix repeated a dozen times is still not proof of the absence of a
+race.
 
 ---
 
