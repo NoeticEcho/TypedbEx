@@ -105,6 +105,10 @@ TypeDB.start_link(
   url: "http://localhost:8000",
   username: "admin",
   password: "password",
+  # Two injected failures need two retries. The default is one, which would
+  # make this example demonstrate the give-up path instead — count the
+  # failures you inject against `:max_retries`, not against attempts.
+  max_retries: 2,
   http: {FlakyAdapter, [inner: {TypeDB.HTTP.Finch, []}]}
 )
 ```

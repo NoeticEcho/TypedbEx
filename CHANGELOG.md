@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The retry example in [Testing an application](guides/testing.md) did not
+  retry. Its adapter fails the first two requests and the text claimed that
+  "two failures then a success exercises the retry path end to end", but
+  `:max_retries` defaults to `1`, so the published example demonstrated the
+  give-up path while saying it demonstrated the other one. It now sets
+  `max_retries: 2`, and the suite compiles the guide's own adapter and runs
+  both outcomes through it, so the claim cannot rot back.
+- Every `elixir` block in every guide and in the README is now parsed by the
+  test suite, as the notebook's already was. Nothing compiles a guide, which
+  makes prose edited into code invisible until a reader hits it.
+
 ## [0.3.0] - 2026-08-02
 
 What using it finds. Everything here came from installing the published 0.2.2
