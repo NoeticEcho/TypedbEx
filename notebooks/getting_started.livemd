@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:typedb, "~> 0.3"},
+  {:typedb, "~> 0.4"},
   {:kino, "~> 0.14"}
 ])
 ```

@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-02
+
+One bug, and it is the one that matters most: the driver's central claim —
+requests run in the calling process, so N processes issue N concurrent
+requests — was true of two HTTP adapters out of three.
+
+A minor rather than a patch because the fix changes an option's default, which
+this project counts as breaking whatever the option is. No public API changed;
+`test/api_snapshot.txt` is byte for byte 0.3.1's.
+
+### Upgrading from 0.3.1
+
+Nothing to do unless you set `:max_keep_alive_length` on `TypeDB.HTTP.Httpc`
+yourself. Its default is now `0` rather than `100`, and if you had raised it
+deliberately, read the entry below before setting it back.
+
 ### Fixed
 
 - **Under `:httpc`, one slow query stalled every other request on the
@@ -426,7 +442,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...v0.2.2
