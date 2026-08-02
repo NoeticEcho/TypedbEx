@@ -90,9 +90,15 @@ defmodule TypeDB.MixProject do
       # visible and resolvable, never fetched on its own.
       {:decimal, "~> 2.4 or ~> 3.0", optional: true},
 
-      # JSON comes from the built-in `JSON` module (Elixir >= 1.18), falling
-      # back to `Jason` if the host application happens to depend on it, so it
-      # needs no dependency at all. See `TypeDB.JSON`.
+      # JSON comes from the built-in `JSON` module on every supported Elixir, so
+      # this driver needs no JSON dependency. `:jason` is declared for the same
+      # reason as `:decimal` above — `TypeDB.JSON.Jason` exists for host
+      # applications that already have it, and declaring it optional makes the
+      # version that codec is written against visible and resolvable without
+      # ever fetching it on its own. It also lets the suite drive that codec,
+      # which nothing did until 0.6.0. `:req` cannot be relied on to bring it:
+      # a dependency of a dependency is not a dependency. See `TypeDB.JSON`.
+      {:jason, "~> 1.4", optional: true},
 
       # Tooling below is never required by consumers of this library.
       #

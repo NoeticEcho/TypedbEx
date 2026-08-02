@@ -2,6 +2,7 @@ defmodule TypeDB.JSONTest do
   use ExUnit.Case, async: false
 
   alias TypeDB.JSON
+  alias TypeDB.JSON.Jason, as: JasonCodec
 
   defmodule ShoutingCodec do
     @moduledoc false
@@ -49,6 +50,47 @@ defmodule TypeDB.JSONTest do
     assert JSON.codec() == ShoutingCodec
     assert JSON.encode!(%{"a" => 1}) == "ENCODED"
     assert JSON.decode("anything") == {:ok, :decoded}
+  end
+
+  describe "the Jason codec" do
+    # It is documented in the README as `config :typedb, :json_codec,
+    # TypeDB.JSON.Jason`, it ships in the package, and until this it was executed
+    # by nothing — 0.00% coverage. Published code that nothing runs is published
+    # code nobody has checked, which is the same hazard `TypeDB.GuideTest` exists
+    # for.
+    test "encodes, decodes, and reports malformed input" do
+      assert JasonCodec.encode_to_iodata!(%{"a" => [1, true, nil]}) |> IO.iodata_to_binary() ==
+               ~s({"a":[1,true,null]})
+
+      assert JasonCodec.decode(~s({"a":[1,true,null]})) == {:ok, %{"a" => [1, true, nil]}}
+      assert {:error, %Jason.DecodeError{}} = JasonCodec.decode("{not json")
+    end
+
+    test "drives a whole query when configured as the codec" do
+      # The configuration the README documents, exercised end to end rather than
+      # asserted about: request encoding, response decoding and concept casting
+      # all go through it.
+      Application.put_env(:typedb, :json_codec, JasonCodec)
+      JSON.reset()
+      assert JSON.codec() == JasonCodec
+
+      {:ok, stub} = TypeDB.Stub.start_link(databases: ["social"])
+      name = :"jason_codec_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(name: name, url: TypeDB.Stub.url(stub), username: "admin", password: "password")
+
+      # Both are linked to this process and die with it, as everywhere else in
+      # the suite; an on_exit that stops them races that and exits.
+      _ = pid
+
+      assert {:ok, ["social"]} = TypeDB.Database.list(name)
+
+      assert {:ok, answer} =
+               TypeDB.query(name, "social", "match $p isa person;", transaction_type: :read)
+
+      assert %TypeDB.Answer.ConceptRows{} = answer
+    end
   end
 
   test "the resolved codec is memoised" do
