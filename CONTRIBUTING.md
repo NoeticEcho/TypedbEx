@@ -66,6 +66,10 @@ TYPEDB_INTEGRATION_URL=http://localhost:8000 mix test --include integration
 #   TYPEDB_SHORT_TOKEN_URL=...       token renewal, see the moduledoc of
 #                                    TypeDB.TokenRenewalIntegrationTest
 #   TYPEDB_TLS_URL=...               the TLS suite, see TypeDB.TLSIntegrationTest
+#
+# The last two now also run in CI, in their own jobs — a service container
+# cannot be given the server flags they need, so those jobs use `docker run`.
+# Read them if you want the exact invocations rather than the prose.
 ```
 
 The integration suite creates and drops its own databases, so it is safe against

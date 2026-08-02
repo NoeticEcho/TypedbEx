@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- CI runs the token-renewal and TLS suites. Both verify headline claims —
+  tokens renewed before they expire, and TLS verification on by default — and
+  neither had ever run outside somebody's terminal, because a GitHub Actions
+  service container cannot be given the server flags they need. Their jobs
+  start TypeDB with `docker run` instead: one with a five-second token
+  lifetime, one with encryption enabled and a CA minted in the job. The TLS
+  job also adds the extra hostname the mismatch test needs, so that assertion
+  stops skipping itself, and runs all three adapters.
+
 ## [0.4.1] - 2026-08-02
 
 A crash on the way out, and the test suite that should have found it. No public
