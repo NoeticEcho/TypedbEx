@@ -1,10 +1,11 @@
 # Audit — TypeDB Elixir driver
 
-Two audits of this driver, newest first.
+Three audits of this driver, newest first.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
-| [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | see `REFACTOR_PLAN.md` |
+| [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | open |
+| [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | all fixed, shipped in 0.6.0 |
 | [Audit I](#audit-i--010) | `b96ae98` (0.1.0) | 31: 2 critical, 9 major, 20 minor | all fixed |
 
 Audit I is kept in full, in its original wording, because it records *why*
@@ -12,6 +13,102 @@ several things are the way they are — read it before proposing to change one o
 them.
 
 ---
+
+# Audit III — 0.6.0, through a real caller
+
+Audited at `41a526b`, against **`NoeticEcho/newgen-elixir`** at `17e6b20` — a
+twelve-application umbrella that uses this driver in `apps/lingua_nkr` and pins
+`{:typedb, "~> 0.3"}`.
+
+**Why this audit is not a third read-through of `lib/`.** Audit I found 31
+things, Audit II found 8; a third pass over the same code with the same eyes
+would find fewer still. What changed is that the driver now has a real caller,
+which is the one thing neither earlier audit could consult. So the method here
+is different: read how the driver is actually used, run the application's own
+suite against the current driver, and treat every workaround the application
+had to write as evidence of something the driver did not give it.
+
+## What was verified
+
+The headline is a compatibility claim I made when cutting 0.6.0 and had not
+tested against anyone: *nothing is removed and nothing changes shape, so
+existing code compiles and behaves as before.*
+
+| | |
+| --- | --- |
+| the umbrella compiles against 0.6.0, pinned at `~> 0.3` | ✅ all twelve applications |
+| `apps/lingua_nkr` graph suite against a live TypeDB 3.12.1 | ✅ **31/31** |
+| and that suite is not vacuous | ✅ pointed at a dead port: **0 tests, 31 invalid** |
+
+The claim holds. It is now tested rather than asserted.
+
+## Findings
+
+### R1 — There is no way to ask whether a connection is usable, so the caller invented a broken one
+`lib/typedb/connection.ex:109`; used at `newgen-elixir` `apps/lingua_nkr/lib/lingua/nkr/client.ex:28`
+**Category: gap — a missing affordance, with a real casualty. Severity: major.**
+
+A call against a connection that is not running **raises** `%TypeDB.Error{kind:
+:config}` rather than returning it. Audit II settled that deliberately: a name
+that is not running is nearly always a typo, and it is what the ecosystem does.
+
+Here is what it costs a real application. It cannot let the raise happen — it
+maps driver failures onto its own error taxonomy — so it built a predicate:
+
+```elixir
+def connected?, do: is_pid(Process.whereis(@conn))
+```
+
+and guards **six** public functions with it. The driver offers nothing better,
+so the application reached into the process registry.
+
+**The guard does not work.** `GenServer.start_link(name: ...)` registers the
+name before `init/1` returns, so the pid exists before the ETS table the driver
+reads does. Reproduced with an adapter whose `init/2` takes 150ms:
+
+```
+app's predicate says connected?: true
+...and the very next call:        {:raised, :config, "TypeDB connection ... is not running."}
+```
+
+This is not the application being careless — the driver's own
+`connection_test.exs` records the same race ("a fresh pid under the name does
+not yet mean a connection with a config table … Seen as a CI-only failure").
+The driver knows the fact and keeps it private, and the caller could only guess.
+
+The fix is small and does not reopen the raise-or-return decision: a public
+predicate that answers what `Connection.config/1` would do, without doing it.
+
+### R2 — `create_if_not_exists` is invisible from the facade the application uses
+`lib/typedb.ex` convenience delegates; `apps/lingua_nkr/lib/lingua/nkr/client.ex:79`
+**Category: quality — discoverability. Severity: minor.**
+
+`TypeDB` delegates `databases/2`, `create_database/3`, `delete_database/3`,
+`health/2` and `version/2`. It does **not** delegate
+`Database.create_if_not_exists/3`. An application that works through the facade
+— as this one does, exclusively — does not meet that function, and this one
+reimplemented it:
+
+```elixir
+case TypeDB.databases(@conn) do
+  {:ok, databases} -> if name in databases, do: :ok, else: create_database(name)
+```
+
+Two round trips instead of one, and a list of every database on the server to
+answer a question about one. The reimplementation is *correct* — `create` is
+idempotent on TypeDB 3.x, so the race is benign — which is exactly why nobody
+would notice it was unnecessary.
+
+## Not a driver defect, but worth saying
+
+`apps/lingua_nkr/mix.exs` pins `{:typedb, "~> 0.3"}`, which means
+`>= 0.3.0 and < 1.0.0`. This driver's own CONTRIBUTING says that in `0.x` a
+**minor** carries anything a `1.x` would call breaking — so that requirement
+admits every breaking release between here and 1.0, silently. The README's
+install snippet shows the form that does not: `{:typedb, "~> 0.6.0"}`, which is
+`>= 0.6.0 and < 0.7.0`. 0.6.0 happens to be compatible, as the suite above
+proves; the next minor is under no obligation to be.
+
 
 # Audit II — 0.5.1
 
