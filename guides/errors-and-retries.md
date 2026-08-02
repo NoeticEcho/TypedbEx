@@ -51,6 +51,31 @@ end
 By the time you hold an error the driver has already retried whatever its
 configuration allowed, so `true` does not mean it gave up early.
 
+The case that makes this function worth having is an **isolation conflict**:
+two concurrent `:write` transactions touched the same data, and the loser's
+commit is rejected with code `STC2`. It is the one failure that is *certain* to
+be worth another attempt, since the state it lost the race to is now committed —
+and it arrives as a `400`, which is otherwise the driver's signal that a request
+will fail identically forever. `TypeDB.Error.retryable_codes/0` is the list of
+codes that override the status, and `STC2` is on it:
+
+```elixir
+defp with_retry(conn, attempts \\ 3) do
+  case TypeDB.transaction(conn, "social", :write, &steps/1) do
+    {:error, %TypeDB.Error{} = error} when attempts > 1 ->
+      # The conflict invalidated the whole transaction, so this re-runs the
+      # block against the state that won — it does not resend a request.
+      if TypeDB.Error.retryable?(error), do: with_retry(conn, attempts - 1), else: {:error, error}
+
+    result ->
+      result
+  end
+end
+```
+
+Back off between attempts if the contention is real; two processes retrying a
+conflict in lockstep will conflict again.
+
 ## Bounding the cost
 
 Four options interact, and only one of them bounds the call:
@@ -120,6 +145,7 @@ Codes worth knowing, all verified against a live server:
 | `INF2` | 400 | a type in the query is not in the schema |
 | `CNT9` | 400 | a constraint such as `@key` was violated |
 | `AUT1` / `AUT3` | 401 | bad credentials / rejected token |
+| `STC2` | 400 | isolation conflict — re-run the transaction |
 
 ## Failing loudly
 

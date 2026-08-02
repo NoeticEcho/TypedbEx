@@ -90,6 +90,20 @@ defmodule TypeDB.ErrorTest do
       end
     end
 
+    test "an isolation conflict is retryable despite its status" do
+      # The case the function was written for, and the one it used to get wrong:
+      # TypeDB rejects the loser of a concurrent write with a 400, which every
+      # other time means "this will fail identically forever".
+      for code <- Error.retryable_codes() do
+        error = Error.new(:server, "isolation conflict", code: code, status: 400)
+        assert Error.retryable?(error), "code #{code}"
+      end
+    end
+
+    test "another 400 with a code is still not retryable" do
+      refute Error.retryable?(Error.new(:server, "no such type", code: "INF2", status: 400))
+    end
+
     test "the kinds that describe something permanently wrong are not" do
       for kind <- [:unauthenticated, :decode, :encode, :config] do
         refute Error.retryable?(Error.new(kind, "nope")), "kind #{kind}"

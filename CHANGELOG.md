@@ -33,6 +33,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`TypeDB.Error.retryable?/1` said `false` for an isolation conflict**, which
+  is the failure its own documentation is about. Two concurrent `:write`
+  transactions touching the same data end with the loser's commit rejected as
+  `400 STC2`, and a `400` was otherwise the driver's signal that a request will
+  fail identically forever — so a caller following the documented retry loop
+  gave up on precisely the error that re-running fixes. `retryable_codes/0` is
+  the new list of codes that override the status, pinned by an integration test
+  that provokes a real conflict against a live server rather than asserting the
+  code from the stub.
+- `TypeDB.ConceptRow.to_struct/3`'s documented example raised: its `match` binds
+  the entity variable `$p`, which names no field of the struct. The example now
+  carries the `select` stage that makes it true, the docs say why it is not
+  optional, and the `ArgumentError` names `select` as the fix.
 - `TypeDB.Transaction.query/3`'s docs said an unencodable `:given_rows` value
   raises kind `:config`. It has raised `:encode` since 0.2.0.
 

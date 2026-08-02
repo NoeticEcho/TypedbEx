@@ -100,6 +100,39 @@ defmodule TypeDB.ErrorCodeIntegrationTest do
     end
   end
 
+  describe "isolation conflicts" do
+    test "the loser of a concurrent write is STC2, and retryable", %{conn: conn, database: database} do
+      # The code Error.retryable_codes/0 is built on, and the reason
+      # retryable?/1 exists at all: two writers touching the same data, one of
+      # them told to try again. Provoked here rather than asserted from the
+      # stub, because a retry policy built on a code nobody checked is a retry
+      # policy that silently stops working.
+      name = "conflict_#{System.unique_integer([:positive])}"
+      {:ok, _} = TypeDB.query(conn, database, ~s|insert $p isa person, has name "#{name}";|)
+
+      {:ok, first} = Transaction.open(conn, database, :write)
+      {:ok, second} = Transaction.open(conn, database, :write)
+
+      rename = fn tx, to ->
+        Transaction.query(tx, """
+          match $p isa person, has name "#{name}", has name $old;
+          delete has $old of $p;
+          insert $p has name "#{to}";
+        """)
+      end
+
+      {:ok, _} = rename.(first, "#{name}_a")
+      {:ok, _} = rename.(second, "#{name}_b")
+
+      assert :ok = Transaction.commit(first)
+      assert {:error, %Error{status: 400, code: "STC2"} = error} = Transaction.commit(second)
+
+      assert error.message =~ "isolation conflict"
+      assert Error.retryable?(error)
+      assert "STC2" in Error.retryable_codes()
+    end
+  end
+
   describe "transactions" do
     test "opening one on a database that does not exist", %{conn: conn} do
       # 400 and SRV3 — not the 404 the request shape suggests, and not a

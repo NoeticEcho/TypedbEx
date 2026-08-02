@@ -58,14 +58,16 @@ second entity that breaks a `@key` fails on the `insert` with `400 CNT9`, inside
 the block, before you ever reach the commit. So a commit failing is *not* the
 normal way you learn your data was wrong.
 
-**A commit can still fail after your block succeeded**, most often because a
-concurrent `:write` transaction touched the same data. That surfaces as
-`{:error, %TypeDB.Error{}}` from `transaction/5` even though your block returned
-happily.
+**A commit can still fail after your block succeeded**, because a concurrent
+`:write` transaction touched the same data and committed first. TypeDB answers
+the loser with `400 STC2` — "Transaction uses a lock held by a concurrent
+commit" — and that surfaces as `{:error, %TypeDB.Error{}}` from `transaction/5`
+even though your block returned happily.
 
 `:max_retries` does not cover this, and cannot: it retries a request that never
 reached the server, and a rejected commit reached it. The unit of retry here is
-the whole block, which only you can re-run:
+the whole block, which only you can re-run — against the state that won the
+race, which is why re-running is the right answer rather than a hopeful one:
 
 ```elixir
 defp with_retry(fun, attempts \\ 3)
@@ -74,7 +76,8 @@ defp with_retry(fun, 1), do: fun.()
 defp with_retry(fun, attempts) do
   case fun.() do
     {:error, %TypeDB.Error{} = error} ->
-      if TypeDB.Error.retryable?(error) or error.code in ~w(TSV11),
+      # `retryable?/1` covers STC2 as well as transport failures and timeouts.
+      if TypeDB.Error.retryable?(error),
         do: with_retry(fun, attempts - 1),
         else: {:error, error}
 

@@ -149,9 +149,16 @@ defmodule TypeDB.ConceptRow do
         defstruct [:name, :age]
       end
 
-      TypeDB.query!(conn, "social", "match $p isa person, has name $name, has age $age;")
+      TypeDB.query!(conn, "social", \"""
+        match $p isa person, has name $name, has age $age;
+        select $name, $age;
+      \""")
       |> Enum.map(&TypeDB.ConceptRow.to_struct(&1, Person))
       #=> [%Person{name: "Alice", age: 31}]
+
+  **The `select` stage is not decoration.** A `match` binds every variable it
+  names, `$p` included, and `$p` names no field of `Person` — so without it this
+  raises. Narrowing the row is the query's job, and TypeQL has a stage for it.
 
   Values are unwrapped as `to_map/1` unwraps them — TypeDB's own, uncast. Pass
   `typed: true` for `to_typed_map/1`'s conversions instead, which is what you
@@ -172,7 +179,7 @@ defmodule TypeDB.ConceptRow do
 
       iex> row = %TypeDB.ConceptRow{data: %{"hsot" => nil}}
       iex> TypeDB.ConceptRow.to_struct(row, URI)
-      ** (ArgumentError) query variable "hsot" does not name a field of URI. Its fields are: :authority, :fragment, :host, :path, :port, :query, :scheme, :userinfo
+      ** (ArgumentError) query variable "hsot" does not name a field of URI. Its fields are: :authority, :fragment, :host, :path, :port, :query, :scheme, :userinfo. Narrow the row with TypeQL's select stage, or add the field.
   """
   @spec to_struct(t(), module(), keyword()) :: struct()
   def to_struct(%__MODULE__{} = row, module, opts \\ []) when is_atom(module) do
@@ -190,7 +197,8 @@ defmodule TypeDB.ConceptRow do
           raise ArgumentError,
                 "query variable #{inspect(variable)} does not name a field of " <>
                   "#{inspect(module)}. Its fields are: " <>
-                  Enum.map_join(Enum.sort(Map.values(fields)), ", ", &inspect/1)
+                  Enum.map_join(Enum.sort(Map.values(fields)), ", ", &inspect/1) <>
+                  ". Narrow the row with TypeQL's select stage, or add the field."
       end
     end)
     |> then(&struct(module, &1))

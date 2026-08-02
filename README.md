@@ -173,11 +173,12 @@ end)
 The block commits on success, and rolls back if it returns `{:error, _}`, raises,
 throws or exits. A `:read` block is closed rather than committed.
 
-The commit itself can fail after your block succeeded — most often because a
-concurrent `:write` transaction touched the same data — and that surfaces as
-`{:error, %TypeDB.Error{}}` from `transaction/5`. Retry the whole block if you
-want to survive it; `:max_retries` does not cover this, as it retries *transport*
-failures on requests that never reached the server.
+The commit itself can fail after your block succeeded — because a concurrent
+`:write` transaction touched the same data and committed first, which TypeDB
+answers with `400 STC2` — and that surfaces as `{:error, %TypeDB.Error{}}` from
+`transaction/5`. `TypeDB.Error.retryable?/1` is true for it; re-run the whole
+block to survive it. `:max_retries` does not cover this, as it retries
+*transport* failures on requests that never reached the server.
 
 For a commit point that isn't lexically scoped, drive it yourself with
 `TypeDB.Transaction.open/4`, `commit/1`, `rollback/1` and `close/1`.

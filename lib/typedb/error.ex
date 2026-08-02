@@ -93,6 +93,27 @@ defmodule TypeDB.Error do
   @spec retryable_statuses() :: [pos_integer()]
   def retryable_statuses, do: @retryable_statuses
 
+  @retryable_codes ["STC2"]
+
+  @doc """
+  TypeDB error codes that `retryable?/1` treats as worth another attempt,
+  whatever status they arrive with.
+
+  `STC2` is an isolation conflict: two concurrent `:write` transactions touched
+  the same data and the loser's commit was rejected. It arrives as a `400`,
+  which is otherwise the driver's signal that a request will fail the same way
+  forever — and this one will not. Replaying the transaction against the
+  committed state is the intended response, and the only one available: the
+  conflict invalidates the whole transaction, so the driver cannot retry it for
+  you.
+
+  Note that this is not the same list as `:retry_on_status`. The driver never
+  retries a request on one of these codes by itself, because the unit that has
+  to be retried is bigger than the request.
+  """
+  @spec retryable_codes() :: [String.t()]
+  def retryable_codes, do: @retryable_codes
+
   @doc """
   Whether retrying the call that produced this error could plausibly help.
 
@@ -112,9 +133,16 @@ defmodule TypeDB.Error do
 
   `:server` errors are judged by `retryable_statuses/0` rather than by a
   connection's `:retry_on_status`, because an error does not carry the
-  connection that produced it.
+  connection that produced it — plus `retryable_codes/0`, which is how an
+  isolation conflict qualifies despite arriving as a `400`. That case is the
+  reason this function exists: a commit rejected because a concurrent `:write`
+  transaction won the race is exactly the failure a caller is meant to replay.
 
       iex> TypeDB.Error.retryable?(TypeDB.Error.new(:transport, "connection refused"))
+      true
+
+      iex> conflict = TypeDB.Error.new(:server, "isolation conflict", code: "STC2", status: 400)
+      iex> TypeDB.Error.retryable?(conflict)
       true
 
       iex> TypeDB.Error.retryable?(TypeDB.Error.new(:server, "no such database", status: 404))
@@ -125,6 +153,8 @@ defmodule TypeDB.Error do
   """
   @spec retryable?(t()) :: boolean()
   def retryable?(%__MODULE__{kind: kind}) when kind in [:transport, :timeout], do: true
+
+  def retryable?(%__MODULE__{kind: :server, code: code}) when code in @retryable_codes, do: true
 
   def retryable?(%__MODULE__{kind: :server, status: status}), do: status in @retryable_statuses
 
