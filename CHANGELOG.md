@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-02
+
+What using it finds. Everything here came from installing the published 0.2.2
+package into an application that is not this repository and writing ordinary
+code against it: a typo that did nothing, a documented example that raised, and
+a retry helper that said no to the one error it exists for.
+
+### Upgrading from 0.2.2
+
+One change can be noticed by working code. **An option a function does not
+accept now raises `ArgumentError`** instead of being ignored. If a call passes
+a key that was quietly doing nothing, it will now say so — which is the point,
+but it is a compile-clean change that fails at runtime, so run your tests.
+
+Everything else is additive.
+
 ### Added
 
 - `TypeDB.ConceptRow.to_typed_map/1`, and `typed: true` on
@@ -334,7 +350,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.1.0...v0.2.0
