@@ -66,6 +66,19 @@ before.
   seconds. The second request now gets what the first did not spend. `:timeout`
   is deliberately unchanged: it bounds one attempt, and these are two.
 
+### Testing
+
+- **A flaky test of my own making, caught by CI rather than by me.** The check
+  that every accepted option value *is* accepted feeds each call `timeout: 1` —
+  one millisecond, in the list precisely to prove that 1 is legal. It rescued
+  only `ArgumentError`. One millisecond is also long enough to expire, and
+  `exists?/3` is documented to raise anything that is not a clean 404, so on a
+  slow enough adapter the request timed out and a `%TypeDB.Error{}` escaped.
+  It passed locally and failed on two of the five CI matrix entries. The rescue
+  now ignores a `TypeDB.Error` — this test is about the option being accepted,
+  not about the request succeeding — and still fails on an `ArgumentError`,
+  which was checked by making a validator reject the value.
+
 ### Known limits
 
 - **`:deadline` cannot cut short a connect that is already blocking.** It is

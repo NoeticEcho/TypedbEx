@@ -188,6 +188,16 @@ defmodule TypeDB.CallOptionsTest do
         rescue
           error in ArgumentError ->
             flunk("#{name} rejected #{inspect(option)}: #{inspect(value)} — #{error.message}")
+
+          # This test is about the option being *accepted*, not about the
+          # request then succeeding, and `timeout: 1` is in `@good` precisely to
+          # prove that one millisecond is a legal value. One millisecond is also
+          # long enough to expire, and `exists?/3` is documented to raise
+          # anything that is not a clean 404 — so a `%TypeDB.Error{}` here is the
+          # option working, not failing. Ignored deliberately; an `ArgumentError`
+          # above is still a failure.
+          _error in TypeDB.Error ->
+            :ok
         end
       end
     end
