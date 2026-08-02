@@ -490,13 +490,56 @@ defmodule TypeDB.Config do
   end
 
   defp parse_http({adapter, adapter_opts}) when is_atom(adapter) and is_list(adapter_opts) do
-    {:ok, {adapter, adapter_opts}}
+    check_adapter(adapter, adapter_opts)
   end
 
-  defp parse_http(adapter) when is_atom(adapter), do: {:ok, {adapter, []}}
+  defp parse_http(adapter) when is_atom(adapter), do: check_adapter(adapter, [])
 
   defp parse_http(other) do
     {:error, config_error("invalid :http #{inspect(other)}, expected {module, keyword}")}
+  end
+
+  # `:http` is the only option that names *code*, and it was the only one this
+  # module did not check — `is_atom/1` accepts `nil`, a module that does not
+  # exist and a module that is not an adapter alike. All three then failed at
+  # `TypeDB.Connection.init/1` as `{:error, {:undef, …}}`, which names neither
+  # the option nor the module, and is not the `%TypeDB.Error{kind: :config}` this
+  # driver documents for a misconfigured connection.
+  #
+  # Only the required callbacks are demanded. `owner/1` and `terminate/1` are
+  # optional and the connection already probes for them with
+  # `function_exported?/3`.
+  @required_adapter_callbacks [init: 2, request: 6]
+
+  defp check_adapter(adapter, adapter_opts) do
+    cond do
+      not Code.ensure_loaded?(adapter) ->
+        {:error,
+         config_error(
+           "invalid :http #{inspect(adapter)}, which could not be loaded as a module. " <>
+             "Expected a module implementing the TypeDB.HTTP behaviour, such as " <>
+             "TypeDB.HTTP.Finch, TypeDB.HTTP.Req or TypeDB.HTTP.Httpc."
+         )}
+
+      missing = missing_callbacks(adapter) ->
+        {:error,
+         config_error(
+           "invalid :http #{inspect(adapter)}, which does not implement the TypeDB.HTTP " <>
+             "behaviour: it is missing #{missing}."
+         )}
+
+      true ->
+        {:ok, {adapter, adapter_opts}}
+    end
+  end
+
+  defp missing_callbacks(adapter) do
+    case Enum.reject(@required_adapter_callbacks, fn {fun, arity} ->
+           function_exported?(adapter, fun, arity)
+         end) do
+      [] -> nil
+      missing -> Enum.map_join(missing, " and ", fn {fun, arity} -> "#{fun}/#{arity}" end)
+    end
   end
 
   defp parse_backoff({:exponential, base} = backoff) when is_integer(base) and base > 0, do: {:ok, backoff}

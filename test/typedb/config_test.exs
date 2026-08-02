@@ -3,6 +3,22 @@ defmodule TypeDB.ConfigTest do
 
   alias TypeDB.{Config, Error}
 
+  # The smallest thing that is still an adapter: `TypeDB.HTTP`'s two mandatory
+  # callbacks and neither optional one. It exists to prove the `:http` check
+  # demands no more than the behaviour does.
+  defmodule MinimalAdapter do
+    @moduledoc false
+    @behaviour TypeDB.HTTP
+
+    @impl true
+    def init(_name, _opts), do: {:ok, %{}}
+
+    @impl true
+    def request(_state, _method, _url, _headers, _body, _opts) do
+      {:ok, %{status: 200, headers: [], body: ""}}
+    end
+  end
+
   doctest TypeDB.Config
 
   describe "new/1 url parsing" do
@@ -208,6 +224,45 @@ defmodule TypeDB.ConfigTest do
       assert {:ok, config} = Config.new(token: "t", http: TypeDB.HTTP.Httpc)
       assert config.http_adapter == TypeDB.HTTP.Httpc
       assert config.http_opts == []
+    end
+
+    # `:http` is the only option that names *code*. Every other option is checked
+    # here so that a typo cannot boot a green application that then fails every
+    # request deep inside an adapter — and this one was not. `nil` passed because
+    # `nil` is an atom; a module that does not exist passed because nothing
+    # looked; `Enum` passed because nothing asked what it implements. All three
+    # then came back from `start_link/1` as `{:error, {:undef, …}}`, naming
+    # neither the option nor the module.
+    test "rejects an :http that does not name a loadable module" do
+      for value <- [{NoSuchAdapter, []}, NoSuchAdapter, nil] do
+        assert {:error, %Error{kind: :config, message: message}} = Config.new(token: "t", http: value),
+               "accepted http: #{inspect(value)}"
+
+        assert message =~ "invalid :http"
+        assert message =~ "could not be loaded"
+        # The message has to be actionable: it names the three shipped adapters,
+        # since the fix is almost always to have meant one of them.
+        assert message =~ "TypeDB.HTTP.Finch"
+      end
+    end
+
+    test "rejects an :http module that is not an adapter" do
+      assert {:error, %Error{kind: :config, message: message}} = Config.new(token: "t", http: {Enum, []})
+
+      assert message =~ "does not implement the TypeDB.HTTP behaviour"
+      assert message =~ "init/2"
+      assert message =~ "request/6"
+    end
+
+    test "accepts every adapter this driver ships" do
+      # The other half: a check that rejects what the driver documents would be
+      # worse than no check. `owner/1` and `terminate/1` are deliberately not
+      # required — they are optional callbacks, and the connection probes for
+      # them — so an adapter defining only the two mandatory ones is accepted.
+      for adapter <- [TypeDB.HTTP.Finch, TypeDB.HTTP.Req, TypeDB.HTTP.Httpc, __MODULE__.MinimalAdapter] do
+        assert {:ok, config} = Config.new(token: "t", http: {adapter, []}), "rejected #{inspect(adapter)}"
+        assert config.http_adapter == adapter
+      end
     end
 
     test "rejects a bad backoff spec" do
