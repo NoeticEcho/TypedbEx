@@ -118,7 +118,19 @@ defmodule TypeDB.TLSIntegrationTest do
           )
 
         assert {:error, %Error{kind: :transport, message: message}} = TypeDB.health(conn)
-        assert message =~ "hostname_check_failed" or message =~ "handshake"
+
+        # A name that does not resolve fails here too, and for the wrong
+        # reason: the point of this test is that TLS rejected the certificate,
+        # not that DNS rejected the name. Without this it reports "Expected
+        # truthy, got false" on a message comparison, which names nothing —
+        # and setting the variable while forgetting the hosts entry is the
+        # obvious way to get here.
+        refute message =~ "non-existing domain",
+               "#{wrong_host_url} does not resolve, so this tested DNS rather than TLS. " <>
+                 "Point the name at the server — an /etc/hosts entry will do."
+
+        assert message =~ "hostname_check_failed" or message =~ "handshake",
+               "expected a TLS failure, got: #{message}"
     end
   end
 

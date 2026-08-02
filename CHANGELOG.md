@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-02
+
+Documentation and CI. Not one line under `lib/` changed, and
+`test/api_snapshot.txt` is byte for byte 0.4.1's — the release exists because
+the package ships its guides, and there is a new one worth having.
+
 ### Added
 
 - A fifth guide, [Recipes](guides/recipes.md): paging a `match` bigger than
@@ -29,6 +35,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lifetime, one with encryption enabled and a CA minted in the job. The TLS
   job also adds the extra hostname the mismatch test needs, so that assertion
   stops skipping itself, and runs all three adapters.
+
+### Fixed
+
+- The TLS suite's hostname-mismatch test failed with "Expected truthy, got
+  false" when the extra hostname did not resolve — testing DNS rather than TLS
+  and saying nothing about which. It now names the real problem. Found by
+  running the suite on a machine that had lost its `/etc/hosts` entry.
 
 ## [0.4.1] - 2026-08-02
 
@@ -498,7 +511,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...v0.3.1
