@@ -12,6 +12,26 @@ the code — see Audit III in `AUDIT.md`, which was conducted through
 
 ### Added
 
+- **`TypeDB.Answer.truncated?/1`** — whether TypeDB gave you the whole answer.
+  Reported as [#1](https://github.com/NoeticEcho/TypedbEx/issues/1) by an
+  application that must refuse to build on a partial read: the only signal was
+  `warning/1`, which is free text, so the guard was a regular expression over a
+  server message.
+
+  The obvious substitute does not work, and both halves were measured against
+  3.12.1 with eight rows present: `answer_count_limit: 2` truncates and warns,
+  `answer_count_limit: 8` returns all eight and warns *nothing*. TypeDB warns
+  only when it really had more — right behaviour, and exactly what makes
+  `length(rows) == limit` useless in both directions.
+
+  It is defined as "the server attached a warning", deliberately **not** as a
+  match against the notice's text: that text is the server's, this driver's
+  versioning does not cover it, and a rephrasing would silently turn the guard
+  back into `false`. A warning of some other kind, should TypeDB ever attach
+  one, therefore reads as truncated — erring toward refusing an answer rather
+  than building on half of one. `TypeDB.TruncationIntegrationTest` pins what the
+  server actually does against every TypeDB in the CI matrix, so a change there
+  is a red build here rather than a short answer in your application.
 - **`TypeDB.running?/1` and `TypeDB.Connection.running?/1`** — whether a
   connection can serve a request. Every other function raises
   `%TypeDB.Error{kind: :config}` against a connection that is not running, which

@@ -122,6 +122,7 @@ defmodule TypeDB.QueryTest do
     test "expose server warnings", %{conn: conn} do
       assert {:ok, answer} = TypeDB.query(conn, "social", "warned")
       assert Answer.warning(answer) == "answer count limit reached"
+      assert Answer.truncated?(answer)
     end
 
     test "are enumerable", %{conn: conn} do

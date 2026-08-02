@@ -13,7 +13,9 @@ defmodule TypeDB.Answer do
       plain decoded JSON, shaped by the query itself.
 
   Every answer carries `query_type` (`:read`, `:write` or `:schema`), which is
-  what TypeDB determined the query to be — not what you asked for.
+  what TypeDB determined the query to be — not what you asked for, and
+  `truncated?/1`, which is how you find out that a read was capped before you
+  build on half of it.
 
       query = "match $p isa person; select $p;"
 
@@ -170,23 +172,71 @@ defmodule TypeDB.Answer do
   def documents(_answer), do: []
 
   @doc """
+  Returns `true` when TypeDB did not give you the whole answer.
+
+  A read over the HTTP API is capped — at 10,000 rows by default, or at
+  whatever `:answer_count_limit` says — and exceeding the cap is **not an
+  error**. The answer arrives with the rows it did produce, and code that counts
+  what came back is quietly wrong.
+
+      {:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;", transaction_type: :read)
+
+      if TypeDB.Answer.truncated?(answer) do
+        {:error, :partial}      # page it, raise the cap, or aggregate server-side
+      else
+        {:ok, TypeDB.Answer.rows(answer)}
+      end
+
+  ## Why the row count cannot answer this
+
+  `length(rows) == limit` is neither necessary nor sufficient, and both halves
+  were measured against TypeDB 3.12.1. With eight rows in the database:
+
+  | request | rows | truncated? |
+  | --- | --- | --- |
+  | `answer_count_limit: 2` | 2 | `true` |
+  | `answer_count_limit: 8` | 8 | **`false`** |
+
+  The server warns only when it really had more, which is the right behaviour
+  and exactly what makes the count useless: a complete answer can be the size of
+  the cap, and a truncated one can be smaller than it when the query carries its
+  own `limit`.
+
+  ## What this is, precisely
+
+  `true` when TypeDB attached a warning to the answer. It is deliberately *not*
+  a match against the notice's text — that text is the server's, this driver's
+  versioning does not cover it, and a rephrasing would silently turn a guard
+  back into `false`, which is the failure this function exists to prevent. A
+  warning of some other kind, if TypeDB ever attaches one, therefore reads as
+  truncated here: the error is in the direction of refusing an answer rather
+  than building on half of one.
+
+  `TypeDB.TruncationIntegrationTest` pins the server's actual behaviour against
+  every TypeDB in the CI matrix, so a change in what the server warns about is a
+  red build here rather than a short answer in your application.
+
+  Use `warning/1` for the text, which names which limit was hit.
+  """
+  @spec truncated?(t()) :: boolean()
+  def truncated?(answer), do: warning(answer) != nil
+
+  @doc """
   Returns the server-side warning attached to an answer, if any.
 
-  **A read that returns exactly 10,000 rows has probably been truncated.** That
-  is TypeDB's own default cap on a read over the HTTP API, and it is not an
-  error: the answer arrives with the rows it did produce and this warning
-  attached. Raise it — or lower it — with `:answer_count_limit`, per query or
-  per connection.
+  The text names which limit was hit:
 
-      {:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;",
-        transaction_type: :read, answer_count_limit: 50_000)
+      "Read query results limit (10000) exceeded. Not all answers are returned."
+
+  It is prose, and prose from the *server* — branch on `truncated?/1` rather
+  than on this. Read it, log it, put it in front of a person.
 
       case TypeDB.Answer.warning(answer) do
         nil -> :ok
         warning -> Logger.warning("partial answer: " <> warning)
       end
 
-  The driver logs the warning for you at `:warning` level, so a truncated answer
+  The driver already logs it for you at `:warning` level, so a truncated answer
   is never silent — but a log line is not a decision, and only you know whether
   a partial answer is one your code can use.
   """

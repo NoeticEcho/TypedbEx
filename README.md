@@ -331,19 +331,26 @@ is no server flag for it: the request option is the only control. Measured
 against 3.12.1 — a `match` over 20,000 entities returns exactly 10,000 rows,
 while `reduce $n = count` over the same data says 20,000.
 
-Truncation is not an error. The answer arrives with the rows it did produce and
-a warning attached, so code that counts what came back is quietly wrong:
+Truncation is not an error. The answer arrives with the rows it did produce, so
+code that counts what came back is quietly wrong — ask instead:
 
 ```elixir
-# All 20,000, because the cap was raised.
-{:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;",
-  transaction_type: :read, answer_count_limit: 50_000)
+{:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;", transaction_type: :read)
 
-TypeDB.Answer.warning(answer)
-#=> nil, or "Read query results limit (10000) exceeded. Not all answers are returned."
+if TypeDB.Answer.truncated?(answer) do
+  {:error, :partial}      # page it, raise the cap, or aggregate server-side
+else
+  {:ok, TypeDB.Answer.rows(answer)}
+end
 ```
 
-The driver logs that warning at `:warning` level so a truncated answer is never
+**The row count cannot answer this**, in either direction. TypeDB warns only
+when it really had more, so a complete answer can be exactly the size of the
+cap; and a query carrying its own `limit` can come back smaller than the cap and
+still be complete. `TypeDB.Answer.warning/1` gives you the server's text, which
+names the limit that was hit — read it, log it, but branch on `truncated?/1`.
+
+The driver logs the warning at `:warning` level so a truncated answer is never
 silent, but the decision is yours: raise the limit, page the query yourself with
 `offset`/`limit` in TypeQL, or aggregate server-side with `reduce`.
 
