@@ -7,7 +7,7 @@ defmodule TypeDB.CallOptionsTest do
   # commits. `TypeDB.Config` has rejected unknown *connection* options since
   # 0.1.0 for the same reason; this is the rest of the surface.
 
-  alias TypeDB.{CallOptions, Options}
+  alias TypeDB.{CallOptions, Database, Options, Server, User}
 
   @moduletag stub_opts: [databases: ["social"]]
 
@@ -27,9 +27,62 @@ defmodule TypeDB.CallOptionsTest do
        fn opts -> Transaction.analyze(tx, "match $p isa person;", opts) end},
       {"TypeDB.Transaction.commit/2", CallOptions.request(), fn opts -> Transaction.commit(tx, opts) end},
       {"TypeDB.Transaction.rollback/2", CallOptions.request(), fn opts -> Transaction.rollback(tx, opts) end},
-      {"TypeDB.Transaction.close/2", CallOptions.request(), fn opts -> Transaction.close(tx, opts) end}
+      {"TypeDB.Transaction.close/2", CallOptions.request(), fn opts -> Transaction.close(tx, opts) end},
+
+      # Administration. Every one of these makes a request, so every one takes
+      # the same `:timeout` and `:deadline` as everything else that does.
+      {"TypeDB.Database.list/2", CallOptions.request(), fn opts -> Database.list(conn, opts) end},
+      {"TypeDB.Database.get/3", CallOptions.request(), fn opts -> Database.get(conn, "social", opts) end},
+      {"TypeDB.Database.create/3", CallOptions.request(),
+       fn opts -> Database.create(conn, "social", opts) end},
+      {"TypeDB.Database.create_if_not_exists/3", CallOptions.request(),
+       fn opts -> Database.create_if_not_exists(conn, "social", opts) end},
+      {"TypeDB.Database.exists?/3", CallOptions.request(),
+       fn opts -> Database.exists?(conn, "social", opts) end},
+      {"TypeDB.Database.delete/3", CallOptions.request(),
+       fn opts -> Database.delete(conn, "social", opts) end},
+      {"TypeDB.Database.schema/3", CallOptions.request(),
+       fn opts -> Database.schema(conn, "social", opts) end},
+      {"TypeDB.Database.type_schema/3", CallOptions.request(),
+       fn opts -> Database.type_schema(conn, "social", opts) end},
+      {"TypeDB.User.list/2", CallOptions.request(), fn opts -> User.list(conn, opts) end},
+      {"TypeDB.User.get/3", CallOptions.request(), fn opts -> User.get(conn, "admin", opts) end},
+      {"TypeDB.User.exists?/3", CallOptions.request(), fn opts -> User.exists?(conn, "admin", opts) end},
+      {"TypeDB.User.create/4", CallOptions.request(),
+       fn opts -> User.create(conn, "alice", "password", opts) end},
+      {"TypeDB.User.set_password/4", CallOptions.request(),
+       fn opts -> User.set_password(conn, "admin", "password", opts) end},
+      {"TypeDB.User.delete/3", CallOptions.request(), fn opts -> User.delete(conn, "alice", opts) end},
+      {"TypeDB.Server.health/2", CallOptions.request(), fn opts -> Server.health(conn, opts) end},
+      {"TypeDB.Server.version/2", CallOptions.request(), fn opts -> Server.version(conn, opts) end},
+      {"TypeDB.Server.servers/2", CallOptions.request(), fn opts -> Server.servers(conn, opts) end},
+
+      # The convenience delegates on `TypeDB` forward their options, so they
+      # validate them too — a delegate that silently dropped `:timeout` would be
+      # worse than one that never took it.
+      {"TypeDB.databases/2", CallOptions.request(), fn opts -> TypeDB.databases(conn, opts) end},
+      {"TypeDB.create_database/3", CallOptions.request(),
+       fn opts -> TypeDB.create_database(conn, "social", opts) end},
+      {"TypeDB.delete_database/3", CallOptions.request(),
+       fn opts -> TypeDB.delete_database(conn, "social", opts) end},
+      {"TypeDB.health/2", CallOptions.request(), fn opts -> TypeDB.health(conn, opts) end},
+      {"TypeDB.version/2", CallOptions.request(), fn opts -> TypeDB.version(conn, opts) end}
     ]
   end
+
+  # A `defdelegate` is the same function under another name, so its validation —
+  # and therefore its error message — belongs to the function it forwards to.
+  # Making a delegate name itself would mean hand-writing five wrappers to gain
+  # nothing; the message still says exactly which function rejected the option.
+  @delegated_to %{
+    "TypeDB.databases/2" => "TypeDB.Database.list/2",
+    "TypeDB.create_database/3" => "TypeDB.Database.create/3",
+    "TypeDB.delete_database/3" => "TypeDB.Database.delete/3",
+    "TypeDB.health/2" => "TypeDB.Server.health/2",
+    "TypeDB.version/2" => "TypeDB.Server.version/2"
+  }
+
+  defp named_in_message(name), do: Map.get(@delegated_to, name, name)
 
   setup %{conn: conn} do
     {:ok, tx} = Transaction.open(conn, "social", :read)
@@ -41,7 +94,7 @@ defmodule TypeDB.CallOptionsTest do
       error = assert_raise(ArgumentError, fn -> call.(timout: 5_000) end)
 
       assert error.message =~ "unknown option :timout"
-      assert error.message =~ name
+      assert error.message =~ named_in_message(name)
       # The accepted set is in the message, because the fix is to pick one of
       # them and a message that does not say what they are sends you to the docs.
       assert error.message =~ ":timeout"
@@ -121,7 +174,7 @@ defmodule TypeDB.CallOptionsTest do
         error = assert_raise(ArgumentError, fn -> call.([{option, value}]) end)
 
         assert error.message =~ "invalid #{inspect(option)} #{inspect(value)}"
-        assert error.message =~ name
+        assert error.message =~ named_in_message(name)
       end
     end
 
@@ -147,6 +200,61 @@ defmodule TypeDB.CallOptionsTest do
                  TypeDB.Config.new([{:url, "http://example.com"}, {:token, "t"}, {option, value}]),
                "TypeDB.Config accepts #{inspect(option)}: #{inspect(value)}, a call does not"
       end
+    end
+  end
+
+  describe "an administrative call's own budget" do
+    @describetag :slow
+
+    # Accepting an option and forwarding it are different things, and only the
+    # second is worth having. A socket that accepts the connection and never
+    # answers puts the *receive* timeout — the one `:timeout` names — in the way,
+    # where a refused or black-holed address would measure the connect timeout
+    # instead and prove nothing about this.
+    setup do
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false, reuseaddr: true])
+      {:ok, port} = :inet.port(listener)
+      accepter = spawn_link(fn -> accept_forever(listener) end)
+
+      on_exit(fn ->
+        Process.unlink(accepter)
+        Process.exit(accepter, :kill)
+        :gen_tcp.close(listener)
+      end)
+
+      name = :"silent_#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} =
+        TypeDB.start_link(
+          name: name,
+          url: "http://127.0.0.1:#{port}",
+          token: "t",
+          connect_timeout: 2_000,
+          timeout: 8_000,
+          max_retries: 0
+        )
+
+      {:ok, silent: name}
+    end
+
+    defp accept_forever(listener) do
+      {:ok, _socket} = :gen_tcp.accept(listener)
+      accept_forever(listener)
+    end
+
+    defp elapsed_ms(fun), do: fun |> :timer.tc() |> elem(0) |> div(1000)
+
+    test "a per-call :timeout is shorter than the connection's", %{silent: conn} do
+      # The connection would wait eight seconds. Measured rather than asserted
+      # about, because "the option is accepted" was true before this change too.
+      assert elapsed_ms(fn -> TypeDB.Server.health(conn, timeout: 500) end) in 400..2_000
+      assert elapsed_ms(fn -> TypeDB.Database.list(conn, timeout: 400) end) in 300..2_000
+      assert elapsed_ms(fn -> TypeDB.User.list(conn, timeout: 400) end) in 300..2_000
+    end
+
+    test "a per-call :deadline bounds the whole call, delegates included", %{silent: conn} do
+      assert elapsed_ms(fn -> TypeDB.databases(conn, deadline: 600) end) in 500..2_000
+      assert elapsed_ms(fn -> TypeDB.health(conn, deadline: 600) end) in 500..2_000
     end
   end
 
@@ -179,12 +287,14 @@ defmodule TypeDB.CallOptionsTest do
       |> MapSet.new()
 
     takes_options =
-      for module <- [TypeDB, Transaction],
+      for module <- [TypeDB, Transaction, Database, User, Server],
           {function, arity} <- module.__info__(:functions),
           not String.starts_with?(Atom.to_string(function), "__"),
           # `start_link/1` and its two delegates take a keyword list too, and
           # `TypeDB.Config` has validated it since 0.1.0.
           function not in [:child_spec, :start_link, :stop],
+          # `query_defaults/1` returns a keyword list rather than taking one.
+          function != :query_defaults,
           takes_options?(module, function, arity),
           into: MapSet.new() do
         "#{inspect(module)}.#{function}/#{arity}"

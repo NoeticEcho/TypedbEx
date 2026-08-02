@@ -386,7 +386,7 @@ TypeDB.Database.type_schema(conn, "social")      # types only, without functions
 TypeDB.User.get(conn, "alice")
 TypeDB.User.exists?(conn, "alice")
 
-TypeDB.Server.health(conn)                       # unauthenticated readiness probe
+TypeDB.Server.health(conn, timeout: 500)         # unauthenticated readiness probe
 TypeDB.Server.version(conn)
 TypeDB.Server.servers(conn)                      # cluster membership
 ```

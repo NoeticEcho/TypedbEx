@@ -6,14 +6,34 @@ run/1
 
 @type conn() :: TypeDB.Connection.t()
 child_spec/1
-create_database!(conn(), String.t()) :: :ok
-create_database(conn(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-databases!(conn()) :: [String.t()]
-databases(conn()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
-delete_database!(conn(), String.t()) :: :ok
-delete_database(conn(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-health!(conn()) :: :ok
-health(conn()) :: :ok | {:error, TypeDB.Error.t()}
+create_database!(conn(), String.t(), keyword()) :: :ok
+create_database!/2
+create_database(conn(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+create_database/2
+databases!(
+  conn(),
+  keyword()
+) :: [String.t()]
+databases!/1
+databases(
+  conn(),
+  keyword()
+) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+databases/1
+delete_database!(conn(), String.t(), keyword()) :: :ok
+delete_database!/2
+delete_database(conn(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+delete_database/2
+health!(
+  conn(),
+  keyword()
+) :: :ok
+health!/1
+health(
+  conn(),
+  keyword()
+) :: :ok | {:error, TypeDB.Error.t()}
+health/1
 query!(conn(), String.t(), String.t(), keyword()) :: TypeDB.Answer.t()
 query!/3
 query(conn(), String.t(), String.t(), keyword()) ::
@@ -33,8 +53,16 @@ transaction(
 ) :: result | {:error, TypeDB.Error.t()}
 when result: term()
 transaction/4
-version!(conn()) :: TypeDB.Server.version()
-version(conn()) :: {:ok, TypeDB.Server.version()} | {:error, TypeDB.Error.t()}
+version!(
+  conn(),
+  keyword()
+) :: TypeDB.Server.version()
+version!/1
+version(
+  conn(),
+  keyword()
+) :: {:ok, TypeDB.Server.version()} | {:error, TypeDB.Error.t()}
+version/1
 
 ## TypeDB.Answer
 
@@ -209,21 +237,46 @@ token(t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
 
 ## TypeDB.Database
 
-create!(TypeDB.Connection.t(), String.t()) :: :ok
-create(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-create_if_not_exists!(TypeDB.Connection.t(), String.t()) :: :ok
-create_if_not_exists(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-delete!(TypeDB.Connection.t(), String.t()) :: :ok
-delete(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-exists?(TypeDB.Connection.t(), String.t()) :: boolean()
-get!(TypeDB.Connection.t(), String.t()) :: String.t()
-get(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
-list!(TypeDB.Connection.t()) :: [String.t()]
-list(TypeDB.Connection.t()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
-schema!(TypeDB.Connection.t(), String.t()) :: String.t()
-schema(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
-type_schema!(TypeDB.Connection.t(), String.t()) :: String.t()
-type_schema(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+create!(TypeDB.Connection.t(), String.t(), keyword()) :: :ok
+create!/2
+create(TypeDB.Connection.t(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+create/2
+create_if_not_exists!(TypeDB.Connection.t(), String.t(), keyword()) :: :ok
+create_if_not_exists!/2
+create_if_not_exists(TypeDB.Connection.t(), String.t(), keyword()) ::
+  :ok | {:error, TypeDB.Error.t()}
+create_if_not_exists/2
+delete!(TypeDB.Connection.t(), String.t(), keyword()) :: :ok
+delete!/2
+delete(TypeDB.Connection.t(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+delete/2
+exists?(TypeDB.Connection.t(), String.t(), keyword()) :: boolean()
+exists?/2
+get!(TypeDB.Connection.t(), String.t(), keyword()) :: String.t()
+get!/2
+get(TypeDB.Connection.t(), String.t(), keyword()) ::
+  {:ok, String.t()} | {:error, TypeDB.Error.t()}
+get/2
+list!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: [String.t()]
+list!/1
+list(
+  TypeDB.Connection.t(),
+  keyword()
+) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+list/1
+schema!(TypeDB.Connection.t(), String.t(), keyword()) :: String.t()
+schema!/2
+schema(TypeDB.Connection.t(), String.t(), keyword()) ::
+  {:ok, String.t()} | {:error, TypeDB.Error.t()}
+schema/2
+type_schema!(TypeDB.Connection.t(), String.t(), keyword()) :: String.t()
+type_schema!/2
+type_schema(TypeDB.Connection.t(), String.t(), keyword()) ::
+  {:ok, String.t()} | {:error, TypeDB.Error.t()}
+type_schema/2
 
 ## TypeDB.DateTimeTZ
 
@@ -407,12 +460,36 @@ struct [:schema_lock_acquire_timeout_millis, :transaction_timeout_millis]
 ## TypeDB.Server
 
 @type version() :: %{distribution: String.t(), version: String.t()}
-health!(TypeDB.Connection.t()) :: :ok
-health(TypeDB.Connection.t()) :: :ok | {:error, TypeDB.Error.t()}
-servers!(TypeDB.Connection.t()) :: [map()]
-servers(TypeDB.Connection.t()) :: {:ok, [map()]} | {:error, TypeDB.Error.t()}
-version!(TypeDB.Connection.t()) :: version()
-version(TypeDB.Connection.t()) :: {:ok, version()} | {:error, TypeDB.Error.t()}
+health!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: :ok
+health!/1
+health(
+  TypeDB.Connection.t(),
+  keyword()
+) :: :ok | {:error, TypeDB.Error.t()}
+health/1
+servers!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: [map()]
+servers!/1
+servers(
+  TypeDB.Connection.t(),
+  keyword()
+) :: {:ok, [map()]} | {:error, TypeDB.Error.t()}
+servers/1
+version!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: version()
+version!/1
+version(
+  TypeDB.Connection.t(),
+  keyword()
+) :: {:ok, version()} | {:error, TypeDB.Error.t()}
+version/1
 
 ## TypeDB.Telemetry
 
@@ -487,14 +564,34 @@ rollback/1
 
 ## TypeDB.User
 
-create!(TypeDB.Connection.t(), String.t(), String.t()) :: :ok
-create(TypeDB.Connection.t(), String.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-delete!(TypeDB.Connection.t(), String.t()) :: :ok
-delete(TypeDB.Connection.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
-exists?(TypeDB.Connection.t(), String.t()) :: boolean()
-get!(TypeDB.Connection.t(), String.t()) :: String.t()
-get(TypeDB.Connection.t(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
-list!(TypeDB.Connection.t()) :: [String.t()]
-list(TypeDB.Connection.t()) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
-set_password!(TypeDB.Connection.t(), String.t(), String.t()) :: :ok
-set_password(TypeDB.Connection.t(), String.t(), String.t()) :: :ok | {:error, TypeDB.Error.t()}
+create!(TypeDB.Connection.t(), String.t(), String.t(), keyword()) :: :ok
+create!/3
+create(TypeDB.Connection.t(), String.t(), String.t(), keyword()) ::
+  :ok | {:error, TypeDB.Error.t()}
+create/3
+delete!(TypeDB.Connection.t(), String.t(), keyword()) :: :ok
+delete!/2
+delete(TypeDB.Connection.t(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+delete/2
+exists?(TypeDB.Connection.t(), String.t(), keyword()) :: boolean()
+exists?/2
+get!(TypeDB.Connection.t(), String.t(), keyword()) :: String.t()
+get!/2
+get(TypeDB.Connection.t(), String.t(), keyword()) ::
+  {:ok, String.t()} | {:error, TypeDB.Error.t()}
+get/2
+list!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: [String.t()]
+list!/1
+list(
+  TypeDB.Connection.t(),
+  keyword()
+) :: {:ok, [String.t()]} | {:error, TypeDB.Error.t()}
+list/1
+set_password!(TypeDB.Connection.t(), String.t(), String.t(), keyword()) :: :ok
+set_password!/3
+set_password(TypeDB.Connection.t(), String.t(), String.t(), keyword()) ::
+  :ok | {:error, TypeDB.Error.t()}
+set_password/3

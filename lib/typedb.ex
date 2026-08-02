@@ -419,64 +419,64 @@ defmodule TypeDB do
   @doc """
   Returns `:ok` when the server is reachable. See `TypeDB.Server.health/1`.
   """
-  @spec health(conn()) :: :ok | {:error, Error.t()}
-  defdelegate health(conn), to: Server
+  @spec health(conn(), keyword()) :: :ok | {:error, Error.t()}
+  defdelegate health(conn, opts \\ []), to: Server
 
   @doc """
   Returns `:ok` when the server is reachable, raising otherwise.
   See `TypeDB.Server.health!/1`.
   """
-  @spec health!(conn()) :: :ok
-  defdelegate health!(conn), to: Server
+  @spec health!(conn(), keyword()) :: :ok
+  defdelegate health!(conn, opts \\ []), to: Server
 
   @doc """
   Returns the server distribution and version. See `TypeDB.Server.version/1`.
   """
-  @spec version(conn()) :: {:ok, Server.version()} | {:error, Error.t()}
-  defdelegate version(conn), to: Server
+  @spec version(conn(), keyword()) :: {:ok, Server.version()} | {:error, Error.t()}
+  defdelegate version(conn, opts \\ []), to: Server
 
   @doc """
   Returns the server distribution and version, raising on failure.
   See `TypeDB.Server.version!/1`.
   """
-  @spec version!(conn()) :: Server.version()
-  defdelegate version!(conn), to: Server
+  @spec version!(conn(), keyword()) :: Server.version()
+  defdelegate version!(conn, opts \\ []), to: Server
 
   @doc """
   Lists databases. See `TypeDB.Database.list/1`.
   """
-  @spec databases(conn()) :: {:ok, [String.t()]} | {:error, Error.t()}
-  defdelegate databases(conn), to: Database, as: :list
+  @spec databases(conn(), keyword()) :: {:ok, [String.t()]} | {:error, Error.t()}
+  defdelegate databases(conn, opts \\ []), to: Database, as: :list
 
   @doc """
   Lists databases, raising on failure. See `TypeDB.Database.list!/1`.
   """
-  @spec databases!(conn()) :: [String.t()]
-  defdelegate databases!(conn), to: Database, as: :list!
+  @spec databases!(conn(), keyword()) :: [String.t()]
+  defdelegate databases!(conn, opts \\ []), to: Database, as: :list!
 
   @doc """
   Creates a database. See `TypeDB.Database.create/2`.
   """
-  @spec create_database(conn(), String.t()) :: :ok | {:error, Error.t()}
-  defdelegate create_database(conn, name), to: Database, as: :create
+  @spec create_database(conn(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  defdelegate create_database(conn, name, opts \\ []), to: Database, as: :create
 
   @doc """
   Creates a database, raising on failure. See `TypeDB.Database.create!/2`.
   """
-  @spec create_database!(conn(), String.t()) :: :ok
-  defdelegate create_database!(conn, name), to: Database, as: :create!
+  @spec create_database!(conn(), String.t(), keyword()) :: :ok
+  defdelegate create_database!(conn, name, opts \\ []), to: Database, as: :create!
 
   @doc """
   Deletes a database and all of its data. See `TypeDB.Database.delete/2`.
   """
-  @spec delete_database(conn(), String.t()) :: :ok | {:error, Error.t()}
-  defdelegate delete_database(conn, name), to: Database, as: :delete
+  @spec delete_database(conn(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  defdelegate delete_database(conn, name, opts \\ []), to: Database, as: :delete
 
   @doc """
   Deletes a database, raising on failure. See `TypeDB.Database.delete!/2`.
   """
-  @spec delete_database!(conn(), String.t()) :: :ok
-  defdelegate delete_database!(conn, name), to: Database, as: :delete!
+  @spec delete_database!(conn(), String.t(), keyword()) :: :ok
+  defdelegate delete_database!(conn, name, opts \\ []), to: Database, as: :delete!
 
   @doc false
   @spec query_defaults(conn()) :: keyword()

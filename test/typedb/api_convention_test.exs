@@ -202,17 +202,21 @@ defmodule TypeDB.APIConventionTest do
     # less useful than the thing it delegates to, and nothing noticed. A
     # defdelegate is the same function under another name; its spec should say
     # the same thing.
+    # The arity is the one the *spec* declares, options included — a delegate
+    # that could not be given a timeout when the function it delegates to can is
+    # strictly less useful than the thing it wraps, which is the defect this
+    # block was written for in the first place.
     @delegates [
-      {TypeDB, :health, 1, TypeDB.Server, :health},
-      {TypeDB, :health!, 1, TypeDB.Server, :health!},
-      {TypeDB, :version, 1, TypeDB.Server, :version},
-      {TypeDB, :version!, 1, TypeDB.Server, :version!},
-      {TypeDB, :databases, 1, TypeDB.Database, :list},
-      {TypeDB, :databases!, 1, TypeDB.Database, :list!},
-      {TypeDB, :create_database, 2, TypeDB.Database, :create},
-      {TypeDB, :create_database!, 2, TypeDB.Database, :create!},
-      {TypeDB, :delete_database, 2, TypeDB.Database, :delete},
-      {TypeDB, :delete_database!, 2, TypeDB.Database, :delete!}
+      {TypeDB, :health, 2, TypeDB.Server, :health},
+      {TypeDB, :health!, 2, TypeDB.Server, :health!},
+      {TypeDB, :version, 2, TypeDB.Server, :version},
+      {TypeDB, :version!, 2, TypeDB.Server, :version!},
+      {TypeDB, :databases, 2, TypeDB.Database, :list},
+      {TypeDB, :databases!, 2, TypeDB.Database, :list!},
+      {TypeDB, :create_database, 3, TypeDB.Database, :create},
+      {TypeDB, :create_database!, 3, TypeDB.Database, :create!},
+      {TypeDB, :delete_database, 3, TypeDB.Database, :delete},
+      {TypeDB, :delete_database!, 3, TypeDB.Database, :delete!}
     ]
 
     # Same hazard as the block above, and it bit here: `function_exported?/3`

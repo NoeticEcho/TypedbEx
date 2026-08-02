@@ -13,14 +13,16 @@ defmodule TypeDB.User do
 
   use TypeDB.Bang
 
-  alias TypeDB.{Connection, Error, Wire}
+  alias TypeDB.{CallOptions, Connection, Error, Wire}
 
   @doc """
   Lists all usernames.
   """
-  @spec list(Connection.t()) :: {:ok, [String.t()]} | {:error, Error.t()}
-  def list(conn) do
-    case Connection.request(conn, :get, "/users") do
+  @spec list(Connection.t(), keyword()) :: {:ok, [String.t()]} | {:error, Error.t()}
+  def list(conn, opts \\ []) do
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.list/2")
+
+    case Connection.request(conn, :get, "/users", request_opts(opts)) do
       {:ok, %{"users" => users}} when is_list(users) ->
         {:ok, Enum.map(users, &Map.get(&1, "username"))}
 
@@ -35,17 +37,18 @@ defmodule TypeDB.User do
   @doc """
   Lists all usernames, raising on failure.
   """
-  @spec list!(Connection.t()) :: [String.t()]
-  def list!(conn), do: unwrap!(list(conn))
+  @spec list!(Connection.t(), keyword()) :: [String.t()]
+  def list!(conn, opts \\ []), do: unwrap!(list(conn, opts))
 
   @doc """
   Returns a username, or an error when the user does not exist.
   """
-  @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
-  def get(conn, username) do
+  @spec get(Connection.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, Error.t()}
+  def get(conn, username, opts \\ []) do
     username = Wire.string!(username, "username")
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.get/3")
 
-    case Connection.request(conn, :get, "/users/#{Wire.path_segment(username)}") do
+    case Connection.request(conn, :get, "/users/#{Wire.path_segment(username)}", request_opts(opts)) do
       {:ok, %{"username" => username}} -> {:ok, username}
       {:ok, other} -> {:error, Error.new(:decode, "unexpected user response", body: other)}
       {:error, error} -> {:error, error}
@@ -55,8 +58,8 @@ defmodule TypeDB.User do
   @doc """
   Returns a username, raising when the user does not exist.
   """
-  @spec get!(Connection.t(), String.t()) :: String.t()
-  def get!(conn, username), do: unwrap!(get(conn, username))
+  @spec get!(Connection.t(), String.t(), keyword()) :: String.t()
+  def get!(conn, username, opts \\ []), do: unwrap!(get(conn, username, opts))
 
   @doc """
   Returns whether a user exists.
@@ -68,9 +71,11 @@ defmodule TypeDB.User do
   try to create while the server is down. Use `get/2` if you would rather branch
   on the error yourself.
   """
-  @spec exists?(Connection.t(), String.t()) :: boolean()
-  def exists?(conn, username) do
-    case get(conn, username) do
+  @spec exists?(Connection.t(), String.t(), keyword()) :: boolean()
+  def exists?(conn, username, opts \\ []) do
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.exists?/3")
+
+    case get(conn, username, opts) do
       {:ok, _} -> true
       {:error, %Error{status: 404}} -> false
       {:error, error} -> raise error
@@ -80,15 +85,17 @@ defmodule TypeDB.User do
   @doc """
   Creates a user with the given password.
   """
-  @spec create(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
-  def create(conn, username, password) do
+  @spec create(Connection.t(), String.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def create(conn, username, password, opts \\ []) do
     username = Wire.string!(username, "username")
     password = Wire.string!(password, "password")
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.create/4")
 
-    case Connection.request(conn, :post, "/users/#{Wire.path_segment(username)}",
-           body: %{"password" => password},
-           expect: :empty,
-           idempotent: false
+    case Connection.request(
+           conn,
+           :post,
+           "/users/#{Wire.path_segment(username)}",
+           [body: %{"password" => password}, expect: :empty, idempotent: false] ++ request_opts(opts)
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -98,8 +105,8 @@ defmodule TypeDB.User do
   @doc """
   Creates a user, raising on failure.
   """
-  @spec create!(Connection.t(), String.t(), String.t()) :: :ok
-  def create!(conn, username, password), do: ok!(create(conn, username, password))
+  @spec create!(Connection.t(), String.t(), String.t(), keyword()) :: :ok
+  def create!(conn, username, password, opts \\ []), do: ok!(create(conn, username, password, opts))
 
   @doc """
   Replaces a user's password.
@@ -107,16 +114,23 @@ defmodule TypeDB.User do
   Existing tokens issued to that user are not revoked by this call; they expire
   on their own schedule.
   """
-  @spec set_password(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
-  def set_password(conn, username, password) do
+  @spec set_password(Connection.t(), String.t(), String.t(), keyword()) ::
+          :ok | {:error, Error.t()}
+  def set_password(conn, username, password, opts \\ []) do
     username = Wire.string!(username, "username")
     password = Wire.string!(password, "password")
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.set_password/4")
 
-    case Connection.request(conn, :put, "/users/#{Wire.path_segment(username)}",
-           body: %{"password" => password},
-           expect: :empty,
-           # Setting the same password twice sets the same password.
-           idempotent: true
+    case Connection.request(
+           conn,
+           :put,
+           "/users/#{Wire.path_segment(username)}",
+           [
+             body: %{"password" => password},
+             expect: :empty,
+             # Setting the same password twice sets the same password.
+             idempotent: true
+           ] ++ request_opts(opts)
          ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -126,17 +140,24 @@ defmodule TypeDB.User do
   @doc """
   Replaces a user's password, raising on failure.
   """
-  @spec set_password!(Connection.t(), String.t(), String.t()) :: :ok
-  def set_password!(conn, username, password), do: ok!(set_password(conn, username, password))
+  @spec set_password!(Connection.t(), String.t(), String.t(), keyword()) :: :ok
+  def set_password!(conn, username, password, opts \\ []),
+    do: ok!(set_password(conn, username, password, opts))
 
   @doc """
   Deletes a user.
   """
-  @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
-  def delete(conn, username) do
+  @spec delete(Connection.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  def delete(conn, username, opts \\ []) do
     username = Wire.string!(username, "username")
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.delete/3")
 
-    case Connection.request(conn, :delete, "/users/#{Wire.path_segment(username)}", expect: :empty) do
+    case Connection.request(
+           conn,
+           :delete,
+           "/users/#{Wire.path_segment(username)}",
+           [expect: :empty] ++ request_opts(opts)
+         ) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
     end
@@ -145,6 +166,9 @@ defmodule TypeDB.User do
   @doc """
   Deletes a user, raising on failure.
   """
-  @spec delete!(Connection.t(), String.t()) :: :ok
-  def delete!(conn, username), do: ok!(delete(conn, username))
+  @spec delete!(Connection.t(), String.t(), keyword()) :: :ok
+  def delete!(conn, username, opts \\ []), do: ok!(delete(conn, username, opts))
+
+  # See `TypeDB.Database`'s helper of the same name.
+  defp request_opts(opts), do: [timeout: opts[:timeout], deadline: opts[:deadline]]
 end

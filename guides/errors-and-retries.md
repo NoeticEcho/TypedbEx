@@ -97,11 +97,18 @@ each attempt is given whichever is smaller, its own timeout or what the budget
 has left, and a retry whose backoff would consume the rest is not started. The
 error then says so, and carries the failure that prompted it.
 
-Both are also per call, on every function that takes `:timeout`:
+Both are also per call, on every function in the driver that makes a request —
+queries, transactions, and the administrative calls alike:
 
 ```elixir
 TypeDB.Transaction.commit(tx, timeout: 60_000, deadline: 90_000)
+TypeDB.Database.schema(conn, "social", timeout: 120_000)
+TypeDB.Server.health(conn, timeout: 500)
 ```
+
+A readiness probe is the clearest case for the last one: waiting the
+connection's default sixty seconds to learn that a server is down is not a
+probe.
 
 Backoff is jittered — drawn uniformly from `0..base × 2ⁿ⁻¹` — so that callers who
 failed together do not retry together. Pass a function to `:retry_backoff` when
