@@ -6,7 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+## [0.4.3] - 2026-08-02
+
+0.4.2's new recipes guide told people to bulk load in batches of 2,000 rows.
+The real limit is on bytes, and a batch of 2,000 can exceed it. The only change
+under `lib/` is six lines of `@doc`; `test/api_snapshot.txt` is byte for byte
+0.4.2's.
+
+### Fixed
 
 - **TypeDB refuses a request body over 2 MiB**, and nothing said so. Bisected
   against 3.12.1: 2047 KiB is accepted, 2048 KiB is not, and there is no server
@@ -527,7 +534,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...v0.4.0
