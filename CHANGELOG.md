@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **TypeDB refuses a request body over 2 MiB**, and nothing said so. Bisected
+  against 3.12.1: 2047 KiB is accepted, 2048 KiB is not, and there is no server
+  flag for it. The bulk-load recipe now batches by payload size rather than row
+  count — the ceiling is bytes, so 2,000 rows of two short attributes is 620 KiB
+  and fine while the same 2,000 rows carrying a kilobyte of text each is not —
+  and an integration test pins the boundary either side.
+
+  The failure has two shapes, which is the part worth knowing: a body a little
+  over the line comes back as `400 HSR2`, while one far over it makes the server
+  close the socket, so the driver reports `:transport` — which `retryable?/1`
+  calls retryable and `:max_retries` will re-send. The driver cannot tell that
+  apart from a network blip, so the guides say it instead: a bulk load that
+  reproducibly "times out" is a batch that is too big.
+
 ## [0.4.2] - 2026-08-02
 
 Documentation and CI. Not one line under `lib/` changed, and

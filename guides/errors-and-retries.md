@@ -146,6 +146,14 @@ Codes worth knowing, all verified against a live server:
 | `CNT9` | 400 | a constraint such as `@key` was violated |
 | `AUT1` / `AUT3` | 401 | bad credentials / rejected token |
 | `STC2` | 400 | isolation conflict — re-run the transaction |
+| `HSR2` | 400 | the request body is over TypeDB's 2 MiB limit |
+
+A request far past that 2 MiB limit does not get `HSR2` at all: the server
+closes the socket, and the driver can only report a `:transport` failure, which
+`retryable?/1` calls retryable and `:max_retries` will re-send. There is no way
+for the driver to tell that apart from a network blip — so a bulk load that
+reproducibly "times out" is a batch that is too big. See
+[Recipes](recipes.html#load-a-lot-of-rows) for batching by payload size.
 
 ## Failing loudly
 

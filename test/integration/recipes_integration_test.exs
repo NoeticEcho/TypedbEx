@@ -66,8 +66,9 @@ defmodule TypeDB.RecipesIntegrationTest do
     define
       attribute name, value string;
       attribute email, value string;
+      attribute note, value string;
       attribute age, value integer;
-      entity person, owns name @key, owns age, owns email;
+      entity person, owns name @key, owns age, owns email, owns note;
   """
 
   test "the recipes work", %{conn: conn, database: database} do
@@ -230,6 +231,53 @@ defmodule TypeDB.RecipesIntegrationTest do
     |> Enum.take_while(&(&1 > 0))
 
     assert count(conn, database) == 0
+  end
+
+  test "a request body over 2 MiB is refused", %{conn: conn} do
+    # Its own database: ExUnit orders tests within a module by seed, and the
+    # recipes test counts every person and then deletes them all.
+    database = "recipes_size_#{System.unique_integer([:positive])}"
+    on_exit(fn -> Database.delete(conn, database) end)
+
+    # The bulk-load recipe batches by payload size rather than row count,
+    # because this limit is on bytes and has no server-side flag. Bisected
+    # against 3.12.1: 2047 KiB accepted, 2048 KiB not. Pinned here so that a
+    # server that moves it fails a build rather than a reader's bulk load —
+    # the `latest` job in the matrix is the one to watch.
+    assert :ok = Database.create_if_not_exists(conn, database)
+    assert {:ok, _} = TypeDB.query(conn, database, @schema)
+
+    query = """
+      given $n: string, $t: string;
+      insert $p isa person, has name == $n, has note == $t;
+    """
+
+    # Rows of a known size, so the body can be aimed either side of the line.
+    rows = fn count ->
+      for i <- 1..count, do: %{"n" => "big-#{i}", "t" => String.duplicate("x", 1_000)}
+    end
+
+    under = rows.(1_800)
+    over = rows.(2_100)
+
+    assert body_bytes(query, under) < 2 * 1024 * 1024
+    assert body_bytes(query, over) > 2 * 1024 * 1024
+
+    assert {:ok, _} = TypeDB.query(conn, database, query, transaction_type: :write, given_rows: under)
+
+    assert {:error, %TypeDB.Error{status: 400, code: "HSR2"} = error} =
+             TypeDB.query(conn, database, query, transaction_type: :write, given_rows: over)
+
+    assert error.message =~ "length limit exceeded"
+
+    # And the rows from the accepted batch are all there, so "under the limit"
+    # means the whole batch landed rather than part of it.
+    assert count(conn, database, ~s|, has note $t|) == 1_800
+  end
+
+  # What the driver will actually send: the tagged wire form, not the maps.
+  defp body_bytes(query, rows) do
+    byte_size(TypeDB.JSON.encode!(%{"query" => query, "givenRows" => TypeDB.Given.encode_rows(rows)}))
   end
 
   defp page(conn, database, offset, size) do

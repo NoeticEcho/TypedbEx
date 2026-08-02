@@ -174,6 +174,12 @@ defmodule TypeDB.Transaction do
   the accepted types and explains why the driver encodes them rather than
   forwarding raw JSON.
 
+  **TypeDB refuses a request body over 2 MiB**, which is a limit on bytes rather
+  than rows and has no server-side flag: measured against 3.12.1, 2047 KiB is
+  accepted and 2048 KiB comes back as `400 HSR2`. Batch large loads by payload
+  size — see [Recipes](recipes.html#load-a-lot-of-rows), which also explains why
+  a body *far* over the limit presents as a `:transport` failure instead.
+
   ## Raises
 
   A `:given_rows` value the driver cannot encode raises `TypeDB.Error` with kind

@@ -138,11 +138,55 @@ end)
 
 20,000 rows in batches of 2,000: **2468ms**, about 8,100 rows a second.
 
-Batch size is a trade between round trips and blast radius: each request is its
-own transaction, so a batch that fails takes its 2,000 rows with it and leaves
-the ones before it committed. If the whole load has to be all-or-nothing, open
-one `:write` transaction and send the batches through it — but a transaction
-held open that long is also a transaction holding locks that long.
+**The ceiling is bytes, not rows.** TypeDB refuses a request body over
+**2 MiB** — bisected against 3.12.1, 2047 KiB is accepted and 2048 KiB is not —
+and there is no server flag for it. 2,000 rows of two short attributes is
+620 KiB and comfortable; the same 2,000 rows carrying a kilobyte of text each is
+not. Batch on the size of what you are sending:
+
+```elixir
+people
+|> Stream.map(&%{"n" => &1.name, "t" => &1.note})
+|> Stream.chunk_while(
+     {[], 0},
+     fn row, {batch, bytes} ->
+       size = byte_size(row["n"]) + byte_size(row["t"]) + 64
+
+       # Well under 2 MiB: the tagged wire form and the query travel with it,
+       # and being wrong here is expensive — see below.
+       if bytes + size > 1_500_000,
+         do: {:cont, Enum.reverse(batch), {[row], size}},
+         else: {:cont, {[row | batch], bytes + size}}
+     end,
+     fn {[], _bytes} -> {:cont, []}
+        {batch, _bytes} -> {:cont, Enum.reverse(batch), {[], 0}}
+     end
+   )
+|> Enum.each(fn batch ->
+  {:ok, _} =
+    TypeDB.query(conn, "social", """
+      given $n: string, $t: string;
+      insert $p isa person, has name == $n, has note == $t;
+    """, transaction_type: :write, given_rows: batch)
+end)
+```
+
+Being wrong about it fails in two different ways, and only one of them is
+obvious. A body a little over the line comes back as `400 HSR2` — *"Failed to
+buffer the request body: length limit exceeded"* — which says what happened. A
+body far over it (15 MiB, say) makes the server close the socket instead, and
+the driver can only report that as a `:transport` failure, which
+`TypeDB.Error.retryable?/1` calls retryable, so `:max_retries` will send the
+whole thing again to no purpose. **A bulk load that "times out" or reports a
+closed socket, reproducibly, is a batch that is too big rather than a network
+problem.**
+
+Batch size is otherwise a trade between round trips and blast radius: each
+request is its own transaction, so a batch that fails takes its rows with it
+and leaves the ones before it committed. If the whole load has to be
+all-or-nothing, open one `:write` transaction and send the batches through it —
+but a transaction held open that long is also a transaction holding locks that
+long.
 
 ## Upsert
 
