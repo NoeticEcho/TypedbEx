@@ -166,6 +166,8 @@ The connection recovers by itself. You do not restart it, reopen it, or tell it
 the server is back — and there is no supervision trick to add, because the
 connection process does not hold the sockets. What callers see:
 
+| when | what a caller gets |
+| --- | --- |
 | while it is down | `{:error, %TypeDB.Error{kind: :transport}}`, `:reason` carrying the adapter's own — `:econnrefused` and friends |
 | the first call after the port reopens | succeeds |
 | a transaction that was open | gone, uncommitted work included |
