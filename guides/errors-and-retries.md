@@ -131,7 +131,7 @@ changes, and the versioning policy does not cover it.
 | `:unauthenticated` | credentials rejected, or a token that cannot be renewed |
 | `:decode` | the response was not what this driver expects |
 | `:encode` | an Elixir term has no TypeDB representation. Raised, not returned |
-| `:config` | the connection is misconfigured. Raised at start-up |
+| `:config` | the connection is misconfigured, or not running. Returned by `start_link/1`, raised by every other call |
 
 Codes worth knowing, all verified against a live server:
 
@@ -200,6 +200,27 @@ Requests that were merely *in flight* need no such handling: they fail as
 the server is up is indistinguishable from one that never noticed.
 `TypeDB.RestartIntegrationTest` stops a real server mid-traffic and starts it
 again on every adapter, which is where those claims come from.
+
+### When the connection restarts
+
+The other direction: the connection process dies and its supervisor restarts it.
+The configuration lives in an ETS table that process owns — that is what lets
+requests run in the caller's process — so during the restart there is nothing to
+read, and a call made in that window **raises** `%TypeDB.Error{kind: :config}`
+rather than returning it.
+
+That is deliberate, and it is the one place a `:kind` is raised for something
+transient. A name that is not running is nearly always a typo or a child spec
+that was never added, and returning an error for that would have every caller
+handle a case that means "this code cannot work"; it is also what the ecosystem
+does — calling a `GenServer` that is not running exits, and `Ecto` raises. The
+message names both possibilities so that the transient one is not mistaken for
+the permanent one.
+
+The window is small. A thousand reads across a killed and restarted connection,
+measured, produced one raise and 999 successes, and the name worked again
+immediately. If your callers must not crash for it, wrap them — but under a
+supervisor, letting them crash is usually right.
 
 ## Failing loudly
 

@@ -482,6 +482,30 @@ defmodule TypeDB.ConnectionTest do
       Supervisor.stop(supervisor)
     end
 
+    test "a call made while the connection is down raises, and says the outage may be transient", %{
+      stub: stub
+    } do
+      # The config lives in an ETS table the connection owns — that is what lets
+      # requests run in the caller's process — so it goes down with it, and a
+      # call in the restart window has nothing to read. Measured on a supervised
+      # connection killed under load: one raise in a thousand reads, and the
+      # name worked again immediately after. The behaviour is fine; the message
+      # was not, because it only offered "add it to your supervision tree" to
+      # someone whose supervision tree already had it.
+      name = :"down_conn_#{System.unique_integer([:positive])}"
+      {:ok, pid} = TypeDB.start_link(name: name, url: Stub.url(stub), username: "admin", password: "password")
+
+      assert {:ok, _} = TypeDB.Database.list(name)
+      TypeDB.stop(pid)
+
+      error = assert_raise(Error, fn -> TypeDB.Database.list(name) end)
+
+      assert error.kind == :config
+      assert error.message =~ "is not running"
+      assert error.message =~ "never started"
+      assert error.message =~ "transient"
+    end
+
     test "the connection goes down with its transport, so a supervisor can rebuild both", %{stub: stub} do
       # trap_exit is on so terminate/2 can clean up, which means a dead pool would
       # otherwise be swallowed and every later request would raise out of the

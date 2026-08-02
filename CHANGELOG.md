@@ -32,6 +32,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and committed from another, used by twenty at once, and committed after the
   opening process was killed.
 
+### Changed
+
+- **"TypeDB connection :x is not running" now says the outage may be
+  transient.** The configuration lives in an ETS table the connection process
+  owns — which is what lets requests run in the caller's process — so it goes
+  down with it, and a call made while a supervisor is restarting the connection
+  raises `%TypeDB.Error{kind: :config}`. The message only offered "add
+  `{TypeDB, name: :x, ...}` to your supervision tree", which is the right advice
+  for a typo and the wrong place to look for someone whose supervision tree
+  already has it. It now names both possibilities. Measured: a thousand reads
+  across a supervised connection killed under load gave one raise and 999
+  successes, with the name usable again immediately.
+- **`guides/errors-and-retries.md` described `:config` as "raised at
+  start-up".** It is *returned* by `start_link/1` and raised by every other
+  call, including transiently while the connection is down. The table row and a
+  new section say so.
+
 ## [0.5.0] - 2026-08-02
 
 The driver has checked option *names* since 0.3.0 and their *values* not at all,

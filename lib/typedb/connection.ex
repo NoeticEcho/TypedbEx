@@ -114,11 +114,19 @@ defmodule TypeDB.Connection do
     ArgumentError -> reraise not_running(conn), __STACKTRACE__
   end
 
+  # Two different situations reach here and the driver cannot tell them apart:
+  # the name was never started — a typo or a missing child spec, which is what
+  # this used to be the whole message about — or the connection went down and
+  # its supervisor has not brought it back yet. The second is transient, and a
+  # message that only offers "add it to your supervision tree" sends whoever
+  # reads it looking for a child spec that is already there.
   defp not_running(conn) do
     Error.new(
       :config,
-      "TypeDB connection #{inspect(conn)} is not running. " <>
-        "Add {TypeDB, name: #{inspect(conn)}, ...} to your supervision tree."
+      "TypeDB connection #{inspect(conn)} is not running. Either it was never " <>
+        "started — add {TypeDB, name: #{inspect(conn)}, ...} to your supervision " <>
+        "tree — or it went down and has not been restarted yet, in which case " <>
+        "this is transient and the next call will work."
     )
   end
 
