@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-02
+
+Four claims the documentation made and nothing checked, run against a live
+server. Two held — a transaction handle really does pass between processes
+freely, and a connection really does survive its server being restarted, which
+was simply never written down. Two were wrong, and wrong in the way that
+matters: not about what the driver does, but about what it exposes you to,
+which is the kind of wrong that has readers guarding the wrong thing.
+
+The only change under `lib/` is one error message and one moduledoc;
+`test/api_snapshot.txt` is byte for byte 0.5.0's. The single caller-visible
+difference is text the guides already tell you not to branch on.
+
 ### Added
 
 - **What happens when TypeDB restarts, and what to do about it.**
@@ -627,7 +640,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...v0.4.2
