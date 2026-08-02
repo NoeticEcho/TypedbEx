@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Stopping a connection could crash it.** `TypeDB.HTTP.Finch.terminate/1`
+  stops the pool's supervisor and caught exits, and on OTP 29
+  `Supervisor.stop/3` can *raise* instead: `proc_lib:stop/3` computes the
+  remaining timeout after `sys:terminate` returns, and a value at or below zero
+  reaches `receive … after NegativeTimeout`, which raises `ErlangError
+  :timeout_value`. Seen while stopping several connections at once against
+  sockets that were not answering — a crash report from a process that had been
+  asked to stop.
+
+  The adapter now catches errors as well as exits, and `TypeDB.Connection`
+  contains anything an adapter's `terminate/1` does, since `TypeDB.HTTP` is a
+  public extension point and shutdown is the last place a third-party fault
+  should be able to matter. Covered by a test adapter that raises, throws,
+  exits and errors on the way out.
+
 ## [0.4.0] - 2026-08-02
 
 One bug, and it is the one that matters most: the driver's central claim —

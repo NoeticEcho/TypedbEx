@@ -145,6 +145,14 @@ defmodule TypeDB.HTTP.Finch do
     Supervisor.stop(pid, :normal, 5_000)
   catch
     :exit, _ -> :ok
+    # Not only exits. On OTP 29 `proc_lib:stop/3` works out how much of the
+    # timeout is left *after* `sys:terminate` returns, and if that lands at or
+    # below zero it reaches `receive ... after NegativeTimeout`, which raises
+    # `ErlangError :timeout_value` rather than exiting `:timeout`. Seen while
+    # stopping several connections at once against sockets that were not
+    # answering. Shutting down a pool is best-effort by definition; it must not
+    # be able to take the connection with it.
+    :error, _ -> :ok
   end
 
   def terminate(%__MODULE__{}), do: :ok

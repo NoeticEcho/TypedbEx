@@ -351,7 +351,20 @@ defmodule TypeDB.Connection do
   @impl true
   def terminate(_reason, state) do
     adapter = state.config.http_adapter
-    if function_exported?(adapter, :terminate, 1), do: adapter.terminate(state.http_state)
+
+    # `TypeDB.HTTP` is a public extension point, so this is somebody else's code
+    # running on the way out. The driver contains adapter faults everywhere else
+    # — see `TypeDB.Transport` — and shutdown is the place where containing them
+    # matters most: whatever the pool does, the connection is going away, and a
+    # crash report from a process that was asked to stop helps nobody.
+    if function_exported?(adapter, :terminate, 1) do
+      try do
+        adapter.terminate(state.http_state)
+      catch
+        _kind, _reason -> :ok
+      end
+    end
+
     :ok
   end
 
