@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-02
+
+A crash on the way out, and the test suite that should have found it. No public
+API change — `test/api_snapshot.txt` is byte for byte 0.4.0's.
+
 ### Added
 
 - An adapter parity suite: the same seven odd-but-legal server responses —
@@ -469,7 +474,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...v0.3.0
