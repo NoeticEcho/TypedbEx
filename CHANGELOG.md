@@ -48,6 +48,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   start-up".** It is *returned* by `start_link/1` and raised by every other
   call, including transiently while the connection is down. The table row and a
   new section say so.
+- **`TypeDB.Given`'s escape-hatch warning named the wrong danger.** `encode/1`
+  forwards any map carrying a `"kind"` key untouched, and the moduledoc called
+  that "not injection-safe". Injection is what it *is* safe against: the payload
+  is JSON, and TypeDB type-checks every column a query declares, so against a
+  `given $n: string;` a value tagged `integer` is `400 GVN7`, a concept is `400
+  PEX9`, and an invented `"kind"` is `400 HSR2`. The real exposure is narrower
+  and different in kind — a query declaring a *concept* column will bind
+  whatever entity a supplied iid names, which is an insecure direct object
+  reference. A warning that names the wrong risk has readers guarding the wrong
+  thing, so it now says what is true, and an integration test pins all four
+  behaviours against a live server.
 
 ## [0.5.0] - 2026-08-02
 

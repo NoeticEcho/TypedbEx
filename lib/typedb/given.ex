@@ -44,9 +44,21 @@ defmodule TypeDB.Given do
   you bind a `given $p: person;` column.
 
   A map that already carries a `"kind"` key is passed through untouched, as an
-  escape hatch for wire forms this module does not build. That escape hatch is
-  *not* injection-safe — it is the one input this module does not tag — so build
-  it from your own code, never from a user's value.
+  escape hatch for wire forms this module does not build — the one input this
+  module does not tag. Build it from your own code rather than from a user's
+  value, for a reason worth stating precisely, because it is not the obvious one.
+
+  Injection is not the risk. The payload is JSON, and TypeDB type-checks every
+  column the query declares, so a user-supplied map cannot subvert a value
+  column: against a `given $n: string;`, a value tagged `integer` is `400 GVN7`,
+  a concept is `400 PEX9`, and an invented `"kind"` is `400 HSR2`. The server
+  closes all three.
+
+  The risk is a query that declares a *concept* column. `given $p: person;` will
+  accept `%{"kind" => "entity", "iid" => …}`, and whoever chose that iid chose
+  which entity the query reads — an insecure direct object reference, not a
+  parse-level attack. Bind those columns with concepts your own code fetched,
+  and the question does not arise.
 
   ## Examples
 

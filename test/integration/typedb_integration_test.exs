@@ -465,6 +465,62 @@ defmodule TypeDB.IntegrationTest do
       assert ConceptRow.value(row, "n") == injection
     end
 
+    test "the server type-checks a declared column, so the escape hatch cannot subvert one", %{
+      conn: conn,
+      database: database
+    } do
+      # `TypeDB.Given.encode/1` forwards any map carrying a "kind" key untouched.
+      # Its moduledoc used to call that "not injection-safe", which is the wrong
+      # danger: TypeDB checks every column the query declares, and these three
+      # codes are what closes it. They came from a live server, not from the
+      # stub, which is the only way an assertion about TypeDB's behaviour counts.
+      by_name = """
+        given $n: string;
+        match $p isa person, has name == $n; select $p;
+      """
+
+      wrong_type = %{"kind" => "value", "value" => 1, "valueType" => "integer"}
+      a_concept = %{"kind" => "entity", "iid" => "0x1e00000000000000000000"}
+      invented = %{"kind" => "nonsense", "value" => "x"}
+
+      assert {:error, %Error{status: 400, code: "GVN7"}} =
+               given(conn, database, by_name, %{"n" => wrong_type})
+
+      assert {:error, %Error{status: 400, code: "PEX9"}} = given(conn, database, by_name, %{"n" => a_concept})
+      assert {:error, %Error{status: 400, code: "HSR2"}} = given(conn, database, by_name, %{"n" => invented})
+    end
+
+    test "a concept column does take an iid, which is the risk the escape hatch really carries", %{
+      conn: conn,
+      database: database
+    } do
+      # The other half, and the reason the warning stays: a query that declares a
+      # concept column binds whatever entity the iid names. Passing a user's map
+      # into one of these lets them choose the row — an insecure direct object
+      # reference rather than a parse-level attack.
+      assert {:ok, _} =
+               TypeDB.query(conn, database, "insert $p isa person, has name 'iid-target';",
+                 transaction_type: :write
+               )
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(conn, database, "match $p isa person, has name 'iid-target'; select $p;",
+                 transaction_type: :read
+               )
+
+      iid = ConceptRow.get(row, "p").iid
+
+      by_person = """
+        given $p: person;
+        match $p has name $n; select $n;
+      """
+
+      assert {:ok, %{rows: [named]}} =
+               given(conn, database, by_person, %{"p" => %{"kind" => "entity", "iid" => iid}})
+
+      assert ConceptRow.value(named, "n") == "iid-target"
+    end
+
     test "given also works inside an explicit transaction", %{conn: conn, database: database} do
       assert :ok =
                TypeDB.transaction(conn, database, :write, fn tx ->
@@ -770,5 +826,10 @@ defmodule TypeDB.IntegrationTest do
 
       TypeDB.stop(pid)
     end
+  end
+
+  # One `given` row, which is all the escape-hatch tests need.
+  defp given(conn, database, query, row) do
+    TypeDB.query(conn, database, query, transaction_type: :read, given_rows: [row])
   end
 end
