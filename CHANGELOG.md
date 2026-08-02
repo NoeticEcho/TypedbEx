@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **What happens when TypeDB restarts, and what to do about it.**
+  `TypeDB.Connection` named "a restarted server" as one of the three reasons
+  reactive token renewal exists, and nothing said what an application sees while
+  the server is away or whether it recovers on its own. It does, on every
+  adapter: calls during the outage fail as `kind: :transport` carrying the
+  adapter's own reason, and the first call after the port reopens succeeds — no
+  reconnect, no restart, nothing to signal. A transaction that was open does
+  *not* survive: `query/3` and `commit/2` on it answer `404 TSV12` and the
+  writes it held are gone, which is the case worth designing around.
+  [Errors and retries](https://hexdocs.pm/typedb/errors-and-retries.html#when-the-server-restarts)
+  now says all of it.
+- **A server stopped mid-traffic and started again.**
+  `TypeDB.RestartIntegrationTest` warms the adapter's pool, takes the server
+  down, asserts what callers get while it is gone, brings it back and asserts
+  recovery — sequentially and under a concurrent burst, since a pool that kept
+  its dead sockets shows there and not in a single call. A CI job runs it
+  against a real server on all three adapters.
+- **The cross-process transaction promise.** `TypeDB.Transaction`'s moduledoc
+  opens by saying a handle "can be passed between processes freely", and the
+  unit suite could not check it: every transaction there runs in the process
+  that opened it. Now covered against a live server — queried from one process
+  and committed from another, used by twenty at once, and committed after the
+  opening process was killed.
+
 ## [0.5.0] - 2026-08-02
 
 The driver has checked option *names* since 0.3.0 and their *values* not at all,
@@ -122,7 +148,7 @@ API change — `test/api_snapshot.txt` is byte for byte 0.4.0's.
 
 ### Fixed
 
-- **Stopping a connection could crash it.** `TypeDB.HTTP.Finch.terminate/1`
+- **Stopping a connection could crash it.** `TypeDB.HTTP.Finch`'s `terminate/1`
   stops the pool's supervisor and caught exits, and on OTP 29
   `Supervisor.stop/3` can *raise* instead: `proc_lib:stop/3` computes the
   remaining timeout after `sys:terminate` returns, and a value at or below zero

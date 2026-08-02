@@ -295,6 +295,59 @@ jobs:
             fi
           done
 
+  restart:
+    name: Server restart
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      # Its own server, on its own port, because this job stops it mid-run and
+      # the integration job's service container is shared.
+      - name: Start a TypeDB this job is allowed to kill
+        run: |
+          docker run -d --name typedb-restart -p 8002:8000 typedb/typedb:3.12.1
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8002/health; then exit 0; fi
+            sleep 2
+          done
+
+          echo "TypeDB did not become healthy in time" >&2
+          docker logs typedb-restart
+          exit 1
+
+      # Every adapter, because what a dead pool does is the adapter's business:
+      # Finch, Req and httpc pool connections differently and only running all
+      # three shows that a restart costs the caller nothing on any of them.
+      - name: Run the restart suite through every adapter
+        env:
+          TYPEDB_RESTART_URL: http://localhost:8002
+          TYPEDB_RESTART_STOP: docker stop typedb-restart
+          TYPEDB_RESTART_START: docker start typedb-restart
+        run: |
+          set -o pipefail
+
+          for adapter in finch req httpc; do
+            echo "--- $adapter ---"
+            TYPEDB_TEST_ADAPTER=$adapter mix test --include integration \
+              test/integration/restart_integration_test.exs | tee /tmp/restart.log
+
+            # Without its environment this suite skips itself, and a skip that
+            # reports success is the failure the token-renewal job also guards.
+            if grep -q "skipped" /tmp/restart.log; then
+              echo "the restart suite skipped itself — check TYPEDB_RESTART_* for $adapter" >&2
+              exit 1
+            fi
+          done
+
   windows:
     name: Windows (compile and unit tests)
     runs-on: windows-latest

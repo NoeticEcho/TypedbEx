@@ -155,6 +155,52 @@ for the driver to tell that apart from a network blip — so a bulk load that
 reproducibly "times out" is a batch that is too big. See
 [Recipes](recipes.html#load-a-lot-of-rows) for batching by payload size.
 
+## When the server restarts
+
+An upgrade, a crash, a rolling deploy. Three things fail at the same instant:
+the port stops answering, every socket the adapter had pooled is dead, and the
+token the connection is holding may not be honoured by the process that comes
+back.
+
+The connection recovers by itself. You do not restart it, reopen it, or tell it
+the server is back — and there is no supervision trick to add, because the
+connection process does not hold the sockets. What callers see:
+
+| while it is down | `{:error, %TypeDB.Error{kind: :transport}}`, `:reason` carrying the adapter's own — `:econnrefused` and friends |
+| the first call after the port reopens | succeeds |
+| a transaction that was open | gone, uncommitted work included |
+
+The last row is the one to design around. A transaction lives on the server, so
+a restart takes it: both `query/3` and `commit/2` on a handle from before answer
+`404 TSV12` — "no open transaction" — and the writes it held are not in the
+database. That is the same code you get for using a transaction you already
+committed, which is why `retryable?/1` says `false` for it: the driver cannot
+tell "the server restarted under you" from "you kept a handle too long", and
+re-running the second forever is worse than surfacing the first.
+
+So a worker that must survive a restart re-runs the block rather than the
+request — the loop in [What it does not, and
+cannot](#what-it-does-not-and-cannot) — and treats `TSV12` as a reason to start
+over, once:
+
+```elixir
+case TypeDB.transaction(conn, "social", :write, &steps/1) do
+  {:error, %TypeDB.Error{code: "TSV12"}} when attempts > 1 ->
+    # The transaction went away mid-flight. Nothing was committed, so this is
+    # a fresh attempt rather than a re-send.
+    with_retry(conn, attempts - 1)
+
+  result ->
+    result
+end
+```
+
+Requests that were merely *in flight* need no such handling: they fail as
+`:transport`, `:max_retries` re-sends the safe ones, and a read that lands after
+the server is up is indistinguishable from one that never noticed.
+`TypeDB.RestartIntegrationTest` stops a real server mid-traffic and starts it
+again on every adapter, which is where those claims come from.
+
 ## Failing loudly
 
 Every fallible function has a `!` twin that raises instead of returning:

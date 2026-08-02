@@ -636,7 +636,7 @@ server that speaks the TypeDB API — so transport, encoding and error mapping a
 exercised without a database. The integration suite runs the same paths against a
 real TypeDB server.
 
-Two further opt-in suites cover things an ordinary run never reaches. Both live
+Three further opt-in suites cover things an ordinary run never reaches. They live
 in the [repository](https://github.com/NoeticEcho/TypedbEx/tree/main/test/integration)
 rather than in the published package, and each module's doc carries the exact
 command to stand up the server it needs:
@@ -649,6 +649,13 @@ command to stand up the server it needs:
   token expiry, against a server started with
   `--server.authentication.token-expiration-seconds 5`. Set
   `TYPEDB_SHORT_TOKEN_URL` to run it; without that it reports as skipped.
+- [`TypeDB.RestartIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/restart_integration_test.exs)
+  — a server stopped mid-traffic and started again, on every adapter: what
+  callers see during the outage and that the connection recovers with no help
+  from them. Set `TYPEDB_RESTART_URL`, `TYPEDB_RESTART_STOP` and
+  `TYPEDB_RESTART_START`; see
+  [Errors and retries](https://hexdocs.pm/typedb/errors-and-retries.html#when-the-server-restarts)
+  for what it pins.
 
 `TYPEDB_SLOW_TESTS=1` additionally runs the tests that wait out real timeouts,
 and `TYPEDB_TEST_ADAPTER=finch|req|httpc` runs the whole suite through one
