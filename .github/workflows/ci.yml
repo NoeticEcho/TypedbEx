@@ -204,11 +204,22 @@ jobs:
           docker logs typedb-short-token
           exit 1
 
+      # `--include integration` and both env vars, or the suite skips itself and
+      # the job goes green having run nothing — which is the exact failure this
+      # job exists to end, so it is asserted rather than assumed.
       - name: Run the token renewal suite
         env:
           TYPEDB_SHORT_TOKEN_URL: http://localhost:8001
           TYPEDB_SHORT_TOKEN_SECONDS: "5"
-        run: mix test test/integration/token_renewal_integration_test.exs --include integration
+        run: |
+          set -o pipefail
+          mix test test/integration/token_renewal_integration_test.exs --include integration \
+            | tee /tmp/token-renewal.log
+
+          if grep -q "skipped" /tmp/token-renewal.log; then
+            echo "the token renewal suite skipped itself — check TYPEDB_SHORT_TOKEN_URL" >&2
+            exit 1
+          fi
 
   tls:
     name: TLS defaults
@@ -267,9 +278,21 @@ jobs:
           TYPEDB_TLS_CACERTFILE: certs/ca.pem
           TYPEDB_TLS_WRONG_HOST_URL: https://wronghost.test:8443
         run: |
+          set -o pipefail
+
           for adapter in finch req httpc; do
             echo "--- $adapter ---"
-            TYPEDB_TEST_ADAPTER=$adapter mix test --include tls test/integration/tls_integration_test.exs
+            TYPEDB_TEST_ADAPTER=$adapter \
+              mix test --include tls test/integration/tls_integration_test.exs | tee /tmp/tls.log
+
+            # Same reasoning as the token-renewal job: this suite skips itself
+            # without its environment, and a skip that reports success is worse
+            # than no job at all. The hostname-mismatch test skips on its own
+            # too, when TYPEDB_TLS_WRONG_HOST_URL is unset.
+            if grep -q "skipped" /tmp/tls.log; then
+              echo "the TLS suite skipped a test — check TYPEDB_TLS_* for $adapter" >&2
+              exit 1
+            fi
           done
 
   windows:
