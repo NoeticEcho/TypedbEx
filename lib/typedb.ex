@@ -271,7 +271,7 @@ defmodule TypeDB do
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
-      Answer.decode(payload)
+      payload |> Answer.decode() |> TypeDB.Log.answer_warning(conn)
     end
   end
 

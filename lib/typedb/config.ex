@@ -32,11 +32,13 @@ defmodule TypeDB.Config do
       token and retry after a `401`. Defaults to `2`; more than one matters only
       when a burst of requests is wide enough for the freshly minted token to
       expire before every one of them has used it.
-    * `:answer_count_limit` — a default cap on answers per query, applied unless
-      the query passes its own. Unset by default. The HTTP API is not streaming
-      and TypeDB does not cap results itself, so an unbounded `match` really does
-      materialise the whole match set on the server and ship it; setting this
-      once per connection is the cheap guard against that.
+    * `:answer_count_limit` — how many answers a query may materialise, applied
+      unless the query passes its own. Unset by default, which means TypeDB's
+      own default of **10,000 answers per read** applies: a bigger `match` comes
+      back truncated with a warning attached rather than failing. Set this to
+      raise that ceiling for every query on the connection, or to lower it —
+      the HTTP API is not streaming, so an unbounded `match` is materialised
+      whole at both ends.
     * `:retry_backoff` — either `{:exponential, base_ms}` or a
       `(attempt -> ms)` function. Defaults to `{:exponential, 100}`.
       The `{:exponential, _}` form is **jittered**: the delay before retry `n`

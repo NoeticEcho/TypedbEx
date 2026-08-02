@@ -16,6 +16,36 @@ defmodule TypeDB.Log do
   @spec levels() :: [atom()]
   def levels, do: [:debug, :info, :warning, :error, :none]
 
+  # TypeDB truncates a read at 10,000 answers unless the query asks for more,
+  # and says so in a warning on the answer rather than by failing. A caller who
+  # counts what came back is then quietly wrong, which is the worst way to be
+  # wrong — so the driver says it out loud once, and `TypeDB.Answer.warning/1`
+  # is still there for handling it properly.
+  #
+  # The text is not interpreted: warnings are prose, not error codes, and
+  # deciding what one *means* by matching on it would break the first time the
+  # server rephrased it.
+  @spec answer_warning({:ok, term()} | {:error, term()}, TypeDB.Connection.t()) ::
+          {:ok, term()} | {:error, term()}
+  def answer_warning({:ok, answer} = result, conn) do
+    case TypeDB.Answer.warning(answer) do
+      nil ->
+        result
+
+      warning ->
+        log(
+          TypeDB.Connection.config(conn),
+          :warning,
+          fn -> "TypeDB: the server attached a warning to this answer: " <> warning end,
+          typedb_connection: conn
+        )
+
+        result
+    end
+  end
+
+  def answer_warning(other, _conn), do: other
+
   @spec log(Config.t(), atom(), (-> IO.chardata()) | IO.chardata(), keyword()) :: :ok
   def log(%Config{log_level: floor}, level, message, metadata) do
     if @order[level] >= @order[floor] do

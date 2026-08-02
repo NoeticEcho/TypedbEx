@@ -172,8 +172,23 @@ defmodule TypeDB.Answer do
   @doc """
   Returns the server-side warning attached to an answer, if any.
 
-  TypeDB uses warnings for things like an answer set truncated by
-  `answer_count_limit`.
+  **A read that returns exactly 10,000 rows has probably been truncated.** That
+  is TypeDB's own default cap on a read over the HTTP API, and it is not an
+  error: the answer arrives with the rows it did produce and this warning
+  attached. Raise it — or lower it — with `:answer_count_limit`, per query or
+  per connection.
+
+      {:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;",
+        transaction_type: :read, answer_count_limit: 50_000)
+
+      case TypeDB.Answer.warning(answer) do
+        nil -> :ok
+        warning -> Logger.warning("partial answer: " <> warning)
+      end
+
+  The driver logs the warning for you at `:warning` level, so a truncated answer
+  is never silent — but a log line is not a decision, and only you know whether
+  a partial answer is one your code can use.
   """
   @spec warning(t()) :: String.t() | nil
   def warning(%Ok{warning: warning}), do: warning

@@ -27,10 +27,12 @@ defmodule TypeDB.Options do
     * `:include_instance_types` — attach the type to every returned instance.
       Costs an extra type lookup per concept; turn it off for hot read paths
       where you already know the shape.
-    * `:answer_count_limit` — cap the number of answers TypeDB materialises. The
-      HTTP API is not streaming, so this is your protection against a `match`
-      that matches the whole database. Exceeding it produces a `warning` on the
-      answer rather than an error.
+    * `:answer_count_limit` — how many answers TypeDB materialises. **This
+      raises TypeDB's own default of 10,000 as well as lowering it**: a read
+      that matches more than that is truncated whether or not you set this, and
+      the option is the only control — there is no server flag. Exceeding the
+      limit produces a `warning` on the answer rather than an error, which the
+      driver logs; see `TypeDB.Answer.warning/1`.
     * `:include_query_structure` — return the analysed pipeline structure
       alongside the rows, and populate `involved_blocks` on each row.
 

@@ -6,8 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The driver now logs a `:warning` when TypeDB attaches a warning to an answer,
+  which in practice means "your read was truncated". It honours `:log_level`
+  like every other line, and the text is passed through rather than
+  interpreted — a warning is prose, not an error code.
+- `bench/answer_size.exs`, so "answers arrive whole" has a number: for rows of
+  two attributes, 488 bytes on the wire and 897 decoded, per row.
+- A README section on where credentials live: the password and a pre-issued
+  token stay in the connection process and reach no log line, crash report or
+  telemetry event; the bearer token TypeDB issues is in the connection's
+  `:protected` ETS table by design, because requests run in the caller's
+  process. A new test asserts no telemetry event carries either.
+
 ### Fixed
 
+- **The README said "TypeDB applies no cap of its own" on answer counts. It
+  caps at 10,000.** A `match` over 20,000 entities returns exactly 10,000 rows
+  and a warning; `reduce $n = count` over the same data says 20,000. There is no
+  server flag for it, so `:answer_count_limit` is the only control — and nothing
+  said that it *raises* the ceiling as well as lowering it. Anyone who read that
+  sentence, ran an unbounded `match` and counted the result was silently missing
+  every row past the ten-thousandth. Corrected in the README, `TypeDB.Config`
+  and `TypeDB.Options`, and pinned by an integration test that inserts 12,000
+  entities and checks all three behaviours against a live server.
 - The retry example in [Testing an application](guides/testing.md) did not
   retry. Its adapter fails the first two requests and the text claimed that
   "two failures then a success exercises the retry path end to end", but

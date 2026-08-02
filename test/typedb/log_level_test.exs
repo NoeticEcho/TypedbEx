@@ -33,6 +33,61 @@ defmodule TypeDB.LogLevelTest do
     name
   end
 
+  describe "a truncated answer" do
+    @warned %{
+      queryType: "read",
+      answerType: "conceptRows",
+      answers: [],
+      warning: "Read query results limit (10000) exceeded. Not all answers are returned."
+    }
+
+    setup do
+      {:ok, stub} = Stub.start_link(databases: ["social"], answers: %{"warned" => @warned})
+      on_exit(fn -> stop_quietly(fn -> Stub.stop(stub) end) end)
+      {:ok, warned: stub}
+    end
+
+    # The stub checks credentials, so these cannot use `connection_to/2`'s
+    # pre-issued token the way the failing-stub tests do.
+    defp signed_in(stub, opts) do
+      name = :"log_warning_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link([name: name, url: Stub.url(stub), username: "admin", password: "password"] ++ opts)
+
+      on_exit(fn -> stop_quietly(fn -> TypeDB.stop(pid) end) end)
+      name
+    end
+
+    # TypeDB truncates a read at 10,000 answers and says so in a warning rather
+    # than by failing, so a caller who only counts rows is quietly wrong. The
+    # driver says it out loud once.
+    test "is logged rather than left on the struct", %{warned: stub} do
+      conn = signed_in(stub, [])
+
+      log = capture_log(fn -> assert {:ok, _} = TypeDB.query(conn, "social", "warned") end)
+
+      assert log =~ "the server attached a warning"
+      assert log =~ "Not all answers are returned"
+    end
+
+    test "obeys :log_level like everything else", %{warned: stub} do
+      conn = signed_in(stub, log_level: :error)
+
+      log = capture_log(fn -> assert {:ok, _} = TypeDB.query(conn, "social", "warned") end)
+
+      refute log =~ "the server attached a warning"
+    end
+
+    test "an answer with no warning says nothing", %{warned: stub} do
+      conn = signed_in(stub, [])
+
+      log = capture_log(fn -> assert {:ok, _} = TypeDB.query(conn, "social", "match $p isa person;") end)
+
+      refute log =~ "TypeDB:"
+    end
+  end
+
   test "the default level says what it is doing", %{failing: failing} do
     conn = connection_to(failing, max_retries: 1, retry_backoff: fn _ -> 1 end)
 

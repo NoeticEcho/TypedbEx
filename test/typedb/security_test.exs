@@ -78,6 +78,55 @@ defmodule TypeDB.SecurityTest do
       refute rendered =~ @tls_secret, "the TLS key passphrase renders in crash reports"
     end
 
+    # The README says the issued bearer token stays on the node: readable from
+    # the connection's ETS table by design, and carried by nothing that leaves.
+    # Telemetry is the thing most likely to break that, since metadata is
+    # forwarded verbatim to whatever an application attached.
+    test "no telemetry event carries the issued token", %{conn: conn} do
+      test = self()
+      handler = "secrets-#{System.unique_integer([:positive])}"
+
+      events =
+        for level <- [:operation, :request, :sign_in], phase <- [:start, :stop] do
+          [:typedb, level, phase]
+        end
+
+      :telemetry.attach_many(
+        handler,
+        events,
+        fn event, measurements, metadata, _config ->
+          send(test, {:telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      assert {:ok, _} = TypeDB.Database.list(conn)
+
+      [{:token, token, _issued_at}] = :ets.lookup(conn, :token)
+      assert is_binary(token) and token != ""
+
+      collected = collect_telemetry([])
+      assert collected != [], "no telemetry arrived, so this asserts nothing"
+
+      for {event, measurements, metadata} <- collected do
+        rendered = inspect({measurements, metadata}, limit: :infinity, printable_limit: :infinity)
+
+        refute rendered =~ token, "#{inspect(event)} carries the bearer token"
+        refute rendered =~ @secret, "#{inspect(event)} carries the password"
+      end
+    end
+
+    defp collect_telemetry(acc) do
+      receive do
+        {:telemetry, event, measurements, metadata} ->
+          collect_telemetry([{event, measurements, metadata} | acc])
+      after
+        100 -> acc
+      end
+    end
+
     test "the adapter state renders no TLS material", %{conn: conn} do
       assert [{:http_state, http_state}] = :ets.lookup(conn, :http_state)
 

@@ -177,6 +177,49 @@ defmodule TypeDB.IntegrationTest do
       assert is_binary(Answer.warning(answer))
     end
 
+    @tag timeout: 300_000
+    test "TypeDB truncates a read at 10,000 answers", %{conn: conn, database: database} do
+      # The README told people for three releases that "TypeDB applies no cap of
+      # its own". It caps at 10,000, silently apart from a warning, and there is
+      # no server flag — the request option is the only control. This is the
+      # test that keeps the corrected version honest, and it has to insert more
+      # than ten thousand things to do it.
+      total = 12_000
+
+      for chunk <- Enum.chunk_every(1..total, 1_000) do
+        statements =
+          Enum.map_join(chunk, " ", fn i -> ~s($p#{i} isa person, has name "cap-#{i}";) end)
+
+        assert {:ok, _} = TypeDB.query(conn, database, "insert #{statements}", transaction_type: :write)
+      end
+
+      assert {:ok, capped} =
+               TypeDB.query(conn, database, ~s|match $p isa person, has name $n; select $n;|,
+                 transaction_type: :read
+               )
+
+      assert length(Answer.rows(capped)) == 10_000
+      assert Answer.warning(capped) =~ "Not all answers are returned"
+
+      # The rows are all there; only the answer was cut short.
+      assert {:ok, counted} =
+               TypeDB.query(conn, database, "match $p isa person; reduce $n = count;",
+                 transaction_type: :read
+               )
+
+      assert counted |> Answer.rows() |> hd() |> ConceptRow.typed_value("n") == total
+
+      # And the option raises the cap as well as lowering it.
+      assert {:ok, whole} =
+               TypeDB.query(conn, database, ~s|match $p isa person, has name $n; select $n;|,
+                 transaction_type: :read,
+                 answer_count_limit: 50_000
+               )
+
+      assert length(Answer.rows(whole)) == total
+      assert Answer.warning(whole) == nil
+    end
+
     test "typed values come back as native Elixir terms", %{conn: conn, database: database} do
       assert {:ok, _} = TypeDB.query(conn, database, ~s(insert $p isa person, has name "Alice", has age 30;))
 

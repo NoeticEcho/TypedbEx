@@ -307,16 +307,32 @@ paths; leave it on if you are building query tooling. The field is raw decoded
 JSON, passed through exactly as TypeDB sent it, and its shape is TypeDB's to
 change.
 
-`answer_count_limit` matters. The HTTP API is not streaming and TypeDB applies no
-cap of its own, so an unbounded `match` against a large database really does
-materialise the whole match set on the server and ship it. Exceeding the limit
-sets a warning on the answer rather than failing — check it with
-`TypeDB.Answer.warning/1`.
+**`answer_count_limit` raises a cap as well as lowering one.** TypeDB truncates
+a read at **10,000 answers** by default. That is not a driver default and there
+is no server flag for it: the request option is the only control. Measured
+against 3.12.1 — a `match` over 20,000 entities returns exactly 10,000 rows,
+while `reduce $n = count` over the same data says 20,000.
 
-Set it once per connection to guard every query that does not override it:
+Truncation is not an error. The answer arrives with the rows it did produce and
+a warning attached, so code that counts what came back is quietly wrong:
 
 ```elixir
-{TypeDB, url: "...", username: "...", password: "...", answer_count_limit: 10_000}
+# All 20,000, because the cap was raised.
+{:ok, answer} = TypeDB.query(conn, "social", "match $p isa person;",
+  transaction_type: :read, answer_count_limit: 50_000)
+
+TypeDB.Answer.warning(answer)
+#=> nil, or "Read query results limit (10000) exceeded. Not all answers are returned."
+```
+
+The driver logs that warning at `:warning` level so a truncated answer is never
+silent, but the decision is yours: raise the limit, page the query yourself with
+`offset`/`limit` in TypeQL, or aggregate server-side with `reduce`.
+
+Set it once per connection to apply to every query that does not override it:
+
+```elixir
+{TypeDB, url: "...", username: "...", password: "...", answer_count_limit: 50_000}
 ```
 
 ## Telemetry
@@ -505,17 +521,43 @@ Then four guides, for the things a reference page cannot teach:
 - **[Testing an application](guides/testing.md)** — a database per test, when a
   stub is worth it, and how to make the failure paths happen on purpose.
 
+## Where your credentials live
+
+Worth stating plainly, since the driver is the thing holding them.
+
+The **password**, and a pre-issued `:token`, are kept in the connection process
+and nowhere else. They are stripped from the copy published to the connection's
+ETS table, hidden by `TypeDB.Config`'s `Inspect`, and therefore absent from
+crash reports, `:sys.get_state/1`, `:observer`, log lines and telemetry
+metadata. `test/typedb/security_test.exs` asserts each of those, and a
+`:passphrase` on a TLS key gets the same treatment.
+
+The **bearer token TypeDB issues** is a different matter: it lives in the
+connection's ETS table, which is `:protected` — every process on the node can
+read it. That is not an oversight, it is the design. Requests run in the calling
+process, which means the calling process has to be able to read the token, which
+means it cannot be a secret from the rest of the VM. Any process that can read
+it could have called `TypeDB.query/4` anyway, so nothing is gained by hiding it;
+what matters is that it does not escape the node, and it does not — no log line
+or telemetry event carries it.
+
 ## Limitations
 
 None of these are bugs. All of them are surprises if you meet them for the
 first time in production.
 
-**Answers arrive whole.** The HTTP API does not stream, so a `match` that
-selects a million rows materialises a million rows on the server, ships them,
-and decodes them into one term in your process. There is no cursor to page
-through and none can be built on this API. Set `:answer_count_limit` — per
-connection, per query, or both — and treat an unbounded `match` the way you
-would treat `SELECT *` without a `LIMIT`.
+**Answers arrive whole.** The HTTP API does not stream, so an answer is
+materialised on the server, shipped, and decoded into one term in your process.
+There is no cursor to page through and none can be built on this API.
+`bench/answer_size.exs` measures the cost: for rows of two attributes,
+**488 bytes per row on the wire and 897 bytes decoded** — so a million rows
+would be about 0.8 GiB of term memory, in one process, at once.
+
+TypeDB caps a read at 10,000 answers by default rather than letting you find
+that out, and attaches a warning saying so. Raise the cap with
+`:answer_count_limit` when you need more, and treat an unbounded `match` the way
+you would treat `SELECT *` without a `LIMIT` — see
+[Query options](#query-options).
 
 **A connection points at one server.** `TypeDB.Server.servers/1` will tell you
 what the cluster looks like, and nothing in the driver acts on it: there is no
