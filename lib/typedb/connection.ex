@@ -96,6 +96,39 @@ defmodule TypeDB.Connection do
   def stop(conn, reason \\ :normal, timeout \\ :infinity), do: GenServer.stop(conn, reason, timeout)
 
   @doc """
+  Returns `true` when `conn` can serve a request.
+
+  Every other function in this driver raises `%TypeDB.Error{kind: :config}`
+  against a connection that is not running — deliberately, since the name is
+  nearly always a typo or a missing child spec. This is for the callers who
+  cannot let that happen: a health endpoint, a supervisor deciding whether to
+  start work, a module that maps driver failures onto its own error type and
+  has nowhere to put an exception.
+
+  **`Process.whereis/1` is not the same question.** `GenServer.start_link/3`
+  registers the name *before* `init/1` runs, so a pid exists under the name
+  before the connection can do anything with it — and a call in that window
+  raises. This checks what a request actually needs.
+
+      if TypeDB.running?(conn), do: TypeDB.query(conn, "social", query)
+
+  It answers about *this node's connection process*, not about TypeDB: a
+  connection whose server is unreachable is still running. `TypeDB.Server.health/2`
+  is the question about the server, and it needs a running connection to ask.
+
+  Inherently racy, as any such predicate is — the connection can stop between
+  this call and the next one. It narrows the window; it does not remove it.
+  """
+  @spec running?(t()) :: boolean()
+  def running?(conn) do
+    match?([{@config_key, _config}], :ets.lookup(conn, @config_key))
+  rescue
+    # No table under that name: never started, already stopped, or `conn` is not
+    # a registered name at all. All three are "cannot serve a request".
+    ArgumentError -> false
+  end
+
+  @doc """
   Returns the validated configuration of a running connection.
   """
   @spec config(t()) :: Config.t()

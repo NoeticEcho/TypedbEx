@@ -65,6 +65,8 @@ defmodule TypeDB.CallOptionsTest do
        fn opts -> TypeDB.create_database(conn, "social", opts) end},
       {"TypeDB.delete_database/3", CallOptions.request(),
        fn opts -> TypeDB.delete_database(conn, "social", opts) end},
+      {"TypeDB.create_database_if_not_exists/3", CallOptions.request(),
+       fn opts -> TypeDB.create_database_if_not_exists(conn, "social", opts) end},
       {"TypeDB.health/2", CallOptions.request(), fn opts -> TypeDB.health(conn, opts) end},
       {"TypeDB.version/2", CallOptions.request(), fn opts -> TypeDB.version(conn, opts) end}
     ]
@@ -78,6 +80,7 @@ defmodule TypeDB.CallOptionsTest do
     "TypeDB.databases/2" => "TypeDB.Database.list/2",
     "TypeDB.create_database/3" => "TypeDB.Database.create/3",
     "TypeDB.delete_database/3" => "TypeDB.Database.delete/3",
+    "TypeDB.create_database_if_not_exists/3" => "TypeDB.Database.create_if_not_exists/3",
     "TypeDB.health/2" => "TypeDB.Server.health/2",
     "TypeDB.version/2" => "TypeDB.Server.version/2"
   }

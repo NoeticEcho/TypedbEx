@@ -4,6 +4,30 @@ defmodule TypeDB.ConnectionTest do
   alias TypeDB.{Connection, Stub}
   alias TypeDB.HTTP.Finch, as: FinchAdapter
 
+  # An adapter that holds `init/2` open until told to finish, so a test can look
+  # at the connection while its name is registered and its table is not there.
+  defmodule SlowInit do
+    @moduledoc false
+    @behaviour TypeDB.HTTP
+
+    @impl true
+    def init(_name, opts) do
+      send(Keyword.fetch!(opts, :test), :init_started)
+      receive do: (:finish_init -> :ok), after: (5_000 -> :ok)
+      {:ok, %{}}
+    end
+
+    @impl true
+    def request(_state, _method, url, _headers, _body, _opts) do
+      body =
+        if String.ends_with?(url, "/signin"),
+          do: ~s|{"token":"t"}|,
+          else: ~s|{"databases":[]}|
+
+      {:ok, %{status: 200, headers: [], body: body}}
+    end
+  end
+
   describe "authentication" do
     test "signs in lazily on the first request", %{conn: conn, stub: stub} do
       assert requests(stub, "/signin") == []
@@ -448,6 +472,71 @@ defmodule TypeDB.ConnectionTest do
       TypeDB.stop(pid)
       Stub.stop(broken)
       Stub.stop(stub)
+    end
+  end
+
+  describe "running?/1" do
+    # Written because a real application needed this and the driver did not have
+    # it: NoeticEcho/newgen-elixir guards six public functions with
+    # `is_pid(Process.whereis(@conn))`, because it maps driver failures onto its
+    # own error type and has nowhere to put an exception. That guard is wrong —
+    # the third test here is the one it gets wrong — and the application could
+    # not have known, because the fact lives in this file's own comments.
+    test "false for a name that was never started" do
+      refute Connection.running?(:never_started_at_all)
+      refute TypeDB.running?(:never_started_at_all)
+    end
+
+    test "true while it is running, false once it stops", %{stub: stub} do
+      name = :"running_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(name: name, url: Stub.url(stub), username: "admin", password: "password")
+
+      assert Connection.running?(name)
+      assert {:ok, _} = TypeDB.Database.list(name)
+
+      TypeDB.stop(pid)
+      refute Connection.running?(name)
+    end
+
+    test "false during the window where Process.whereis is already true", %{stub: stub} do
+      # `GenServer.start_link(name: ...)` registers the name before `init/1`
+      # returns, so a pid exists under it before the config table does — and a
+      # call in that window raises. This is the whole reason the predicate has
+      # to exist rather than being spelled `Process.whereis/1` at each call site.
+      name = :"slow_init_#{System.unique_integer([:positive])}"
+      test = self()
+
+      # The spawned process is the connection's *parent*, and a `gen_server`
+      # terminates when its parent exits however it is trapping — so this one has
+      # to outlive the connection, not merely start it.
+      parent =
+        spawn(fn ->
+          TypeDB.start_link(
+            name: name,
+            url: Stub.url(stub),
+            username: "admin",
+            password: "password",
+            http: {SlowInit, [test: test]}
+          )
+
+          Process.sleep(:infinity)
+        end)
+
+      on_exit(fn -> Process.exit(parent, :kill) end)
+
+      assert_receive :init_started, 5_000
+
+      assert is_pid(Process.whereis(name)), "the premise of this test no longer holds"
+      refute Connection.running?(name), "running?/1 must not answer true before init/1 finishes"
+
+      # And it agrees with what a call actually does in that window.
+      assert_raise Error, ~r/is not running/, fn -> TypeDB.Database.list(name) end
+
+      send(Process.whereis(name), :finish_init)
+      wait_until(fn -> Connection.running?(name) end)
+      assert {:ok, _} = TypeDB.Database.list(name)
     end
   end
 

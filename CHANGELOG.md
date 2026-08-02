@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Two additions, both asked for by a real application rather than by a reading of
+the code — see Audit III in `AUDIT.md`, which was conducted through
+`NoeticEcho/newgen-elixir`.
+
+### Added
+
+- **`TypeDB.running?/1` and `TypeDB.Connection.running?/1`** — whether a
+  connection can serve a request. Every other function raises
+  `%TypeDB.Error{kind: :config}` against a connection that is not running, which
+  is right for the common case of a typo and wrong for a caller that maps driver
+  failures onto its own error type and has nowhere to put an exception. That
+  caller had built `is_pid(Process.whereis(conn))` instead — and **that does not
+  work**: `GenServer.start_link/3` registers the name before `init/1` returns, so
+  a pid exists under it before the connection can serve anything, and a call in
+  that window raises anyway. `running?/1` checks what a request actually needs.
+  A test holds `init/2` open and asserts the difference; substituting the
+  `Process.whereis/1` version fails it.
+- **`TypeDB.create_database_if_not_exists/3` and its `!` twin** on the facade,
+  delegating to `TypeDB.Database.create_if_not_exists/3`. The function existed
+  and the delegate did not, so an application working through `TypeDB` alone
+  never met it and reimplemented it as "list every database on the server, then
+  check membership" — two round trips to answer a question about one database.
+
+
 ## [0.6.0] - 2026-08-02
 
 A second full audit, at `367a393`, and the refactor it produced. Eight findings,

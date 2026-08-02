@@ -4,7 +4,7 @@ Three audits of this driver, newest first.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
-| [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | open |
+| [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | both fixed |
 | [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | all fixed, shipped in 0.6.0 |
 | [Audit I](#audit-i--010) | `b96ae98` (0.1.0) | 31: 2 critical, 9 major, 20 minor | all fixed |
 
@@ -98,6 +98,21 @@ Two round trips instead of one, and a list of every database on the server to
 answer a question about one. The reimplementation is *correct* — `create` is
 idempotent on TypeDB 3.x, so the race is benign — which is exactly why nobody
 would notice it was unnecessary.
+
+## Status
+
+Both findings are fixed, and — because this audit had a real caller — the fixes
+were checked in the place the problem was found. `apps/lingua_nkr/client.ex` was
+rewritten onto `TypeDB.running?/1` and
+`TypeDB.create_database_if_not_exists/3`, deleting its `Process.whereis` guard
+and its list-then-check, and the application's 31 graph tests still pass against
+a live TypeDB. That edit was made in a scratch clone and not pushed; it is the
+patch the application would apply, offered as evidence rather than as a change
+to somebody else's repository.
+
+R1's test is the one worth keeping honest: it holds an adapter's `init/2` open,
+asserts that `Process.whereis/1` already answers true, and that `running?/1`
+does not. Substituting the application's own implementation fails it.
 
 ## Not a driver defect, but worth saying
 

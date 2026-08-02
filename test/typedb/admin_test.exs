@@ -43,6 +43,22 @@ defmodule TypeDB.AdminTest do
       assert {:ok, ["social"]} = Database.list(conn)
     end
 
+    # Audit III, from a real caller: an application that works through the
+    # `TypeDB` facade alone never met `Database.create_if_not_exists/3` — there
+    # was no delegate for it — and reimplemented it as "list every database on
+    # the server, then check membership". Correct, because `create` is
+    # idempotent on TypeDB 3.x, and two round trips to answer a question about
+    # one database.
+    test "the TypeDB facade can do it in one call", %{conn: conn, stub: stub} do
+      assert :ok = TypeDB.create_database_if_not_exists(conn, "brand_new")
+      assert :ok = TypeDB.create_database_if_not_exists!(conn, "brand_new")
+
+      assert requests(stub, "/databases/brand_new") != []
+
+      listings = Enum.filter(requests(stub, "/databases"), &(&1.path == "/v1/databases"))
+      assert listings == [], "it should not have to list every database to create one"
+    end
+
     @tag stub_opts: [databases: ["social"]]
     test "get/2 and exists?/2", %{conn: conn} do
       assert {:ok, "social"} = Database.get(conn, "social")

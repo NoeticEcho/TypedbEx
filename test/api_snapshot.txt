@@ -10,6 +10,10 @@ create_database!(conn(), String.t(), keyword()) :: :ok
 create_database!/2
 create_database(conn(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
 create_database/2
+create_database_if_not_exists!(conn(), String.t(), keyword()) :: :ok
+create_database_if_not_exists!/2
+create_database_if_not_exists(conn(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}
+create_database_if_not_exists/2
 databases!(
   conn(),
   keyword()
@@ -40,6 +44,7 @@ query(conn(), String.t(), String.t(), keyword()) ::
   {:ok, TypeDB.Answer.t()} | {:error, TypeDB.Error.t()}
 query/3
 query_defaults(conn()) :: keyword()
+running?(conn()) :: boolean()
 start_link(keyword()) :: GenServer.on_start()
 stop(conn() | pid(), term(), timeout()) :: :ok
 stop/1
@@ -228,6 +233,7 @@ renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, TypeDB.Error.
 request(t(), TypeDB.HTTP.method(), String.t(), request_opts()) ::
   {:ok, term()} | {:error, TypeDB.Error.t()}
 request/3
+running?(t()) :: boolean()
 start_link(keyword()) :: GenServer.on_start()
 stop(t() | pid(), term(), timeout()) :: :ok
 stop/1

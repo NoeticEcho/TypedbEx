@@ -417,6 +417,22 @@ defmodule TypeDB do
   # ----------------------------------------------------------------------------
 
   @doc """
+  Returns `true` when `conn` can serve a request.
+
+  For callers who cannot let a missing connection raise — a health endpoint, a
+  module that maps driver failures onto its own error type. Note that
+  `Process.whereis/1` is *not* the same question: the name is registered before
+  the connection finishes starting. See `TypeDB.Connection.running?/1`.
+
+      if TypeDB.running?(conn), do: TypeDB.query(conn, "social", query)
+
+  This is about the connection process on this node. `health/2` is the question
+  about the server, and it needs a running connection to ask it.
+  """
+  @spec running?(conn()) :: boolean()
+  defdelegate running?(conn), to: Connection
+
+  @doc """
   Returns `:ok` when the server is reachable. See `TypeDB.Server.health/1`.
   """
   @spec health(conn(), keyword()) :: :ok | {:error, Error.t()}
@@ -477,6 +493,29 @@ defmodule TypeDB do
   """
   @spec delete_database!(conn(), String.t(), keyword()) :: :ok
   defdelegate delete_database!(conn, name, opts \\ []), to: Database, as: :delete!
+
+  @doc """
+  Creates a database unless it already exists.
+  See `TypeDB.Database.create_if_not_exists/3`.
+
+  This is what a migration wants at boot. Without it on the facade, an
+  application that works through `TypeDB` alone reaches for `databases/2` and a
+  membership test — two round trips, and a list of every database on the server
+  to answer a question about one.
+  """
+  @spec create_database_if_not_exists(conn(), String.t(), keyword()) :: :ok | {:error, Error.t()}
+  defdelegate create_database_if_not_exists(conn, name, opts \\ []),
+    to: Database,
+    as: :create_if_not_exists
+
+  @doc """
+  Creates a database unless it already exists, raising on failure.
+  See `TypeDB.Database.create_if_not_exists!/3`.
+  """
+  @spec create_database_if_not_exists!(conn(), String.t(), keyword()) :: :ok
+  defdelegate create_database_if_not_exists!(conn, name, opts \\ []),
+    to: Database,
+    as: :create_if_not_exists!
 
   @doc false
   @spec query_defaults(conn()) :: keyword()
