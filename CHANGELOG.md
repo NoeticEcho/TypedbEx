@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+A second full audit, at `367a393`, and the refactor it produced. Eight findings,
+none critical; all eight fixed in seven commits, each verified by reintroducing
+the defect and watching the new test fail. `AUDIT.md` carries the findings and
+what closed them.
+
+This is a **minor** rather than a patch, on two counts: `%TypeDB.HTTP.Httpc{}`
+gains a field, and the administrative modules gain optional arguments. Nothing is
+removed and nothing changes shape, so existing code compiles and behaves as
+before.
+
+### Added
+
+- **`:timeout` and `:deadline` on every administrative call.** None of
+  `TypeDB.Database`, `TypeDB.User` or `TypeDB.Server` took options, so none could
+  be given a budget — although every one of them makes an HTTP request.
+  `Database.schema/3` over a large database, and `Server.health/2` used as a
+  readiness probe that should give up in half a second, were stuck with the
+  connection's default sixty. All 32 now take them, as do the five convenience
+  delegates on `TypeDB`. The old arities remain.
+- **`TypeDB.JSON.Jason` is now executed by the suite**, directly and end to end
+  as the configured codec. It is documented in the README, ships in the package,
+  and had 0.00% coverage. `:jason` is declared `optional: true` for the same
+  reason `:decimal` is: used only if the host application has it, never fetched
+  on its own.
+
+### Fixed
+
+- **A successful answer could be destroyed by the code that logs its warning.**
+  `Log.answer_warning/2` looked the connection up after the response had arrived,
+  and that lookup raises when the connection is gone — so a query that had fully
+  succeeded returned `%TypeDB.Error{kind: :config}` instead of its answer. Both
+  halves of the trigger are ordinary: a supervisor restarting the connection
+  mid-request, and a read TypeDB truncated at its 10,000-answer cap.
+- **`TypeDB.HTTP.Httpc` stopped an `:httpc` profile it did not start.** Pointing
+  a connection at your own profile — to share sockets, or for its proxy settings
+  — lost that profile when the connection stopped. It now tracks `owned?` exactly
+  as `TypeDB.HTTP.Finch` has since 0.1.x, and names its own profile per instance,
+  so two connections can no longer share one and take each other down.
+- **`:http` naming a module that does not exist, or is not an adapter, started
+  a connection that failed every request.** `nil` passed too, because `nil` is an
+  atom. All three now fail at `TypeDB.start_link/1` as
+  `%TypeDB.Error{kind: :config}` naming the option and the module, instead of
+  `{:error, {:undef, …}}` naming neither.
+- **Fifteen public functions answered a non-binary name or query with a bare
+  `FunctionClauseError`**, which CONTRIBUTING forbids by name. They now raise
+  `ArgumentError` saying what was expected — `invalid database name :social,
+  expected a string`.
+- **`TypeDB.JSON`'s documentation described a fallback that cannot happen.** The
+  `Jason` branch is unreachable on every Elixir this driver supports, since the
+  built-in `JSON` module always wins. The branch is kept — it is unreachable
+  because of a version floor, not because it is wrong — and both moduledocs now
+  say so.
+
+
 ## [0.5.1] - 2026-08-02
 
 Four claims the documentation made and nothing checked, run against a live
