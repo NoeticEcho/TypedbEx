@@ -15,6 +15,18 @@ defmodule TypeDB.Wire do
   def path_segment(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 
   @doc """
+  Connection-level defaults for a query's options.
+
+  Takes the config rather than the connection, so that a caller which already
+  holds one does not read the connection's table twice — and so that nothing on
+  the path *after* a response has arrived has to look the connection up again.
+  See `TypeDB.Log.answer_warning/2`.
+  """
+  @spec query_defaults(TypeDB.Config.t()) :: keyword()
+  def query_defaults(%TypeDB.Config{answer_count_limit: nil}), do: []
+  def query_defaults(%TypeDB.Config{answer_count_limit: limit}), do: [answer_count_limit: limit]
+
+  @doc """
   Puts `value` under `key` unless it is `nil`.
 
   `false` is a value, not an absence, so this tests for `nil` rather than

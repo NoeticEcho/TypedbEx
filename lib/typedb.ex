@@ -247,6 +247,10 @@ defmodule TypeDB do
   @spec query(conn(), String.t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(conn, database, query, opts \\ []) when is_binary(database) and is_binary(query) do
     CallOptions.validate!(opts, CallOptions.query(), "TypeDB.query/4")
+    # Read once, before the request, and carried through to the warning log at
+    # the end: looking the connection up again after the answer is in hand is
+    # what used to lose a successful answer when the connection had gone away.
+    config = Connection.config(conn)
     transaction_type = Keyword.get(opts, :transaction_type, :schema)
 
     unless transaction_type in [:read, :write, :schema] do
@@ -261,7 +265,7 @@ defmodule TypeDB do
         "transactionType" => Atom.to_string(transaction_type)
       }
       |> Wire.put_unless_nil("commit", Keyword.get(opts, :commit))
-      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, query_defaults(conn)))
+      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, Wire.query_defaults(config)))
       |> Wire.put_unless_nil("transactionOptions", Options.transaction_payload(opts))
       |> Wire.put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
@@ -275,7 +279,7 @@ defmodule TypeDB do
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
-      payload |> Answer.decode() |> TypeDB.Log.answer_warning(conn)
+      payload |> Answer.decode() |> TypeDB.Log.answer_warning(config)
     end
   end
 
@@ -473,10 +477,5 @@ defmodule TypeDB do
 
   @doc false
   @spec query_defaults(conn()) :: keyword()
-  def query_defaults(conn) do
-    case Connection.config(conn).answer_count_limit do
-      nil -> []
-      limit -> [answer_count_limit: limit]
-    end
-  end
+  def query_defaults(conn), do: conn |> Connection.config() |> Wire.query_defaults()
 end

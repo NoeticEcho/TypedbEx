@@ -25,26 +25,33 @@ defmodule TypeDB.Log do
   # The text is not interpreted: warnings are prose, not error codes, and
   # deciding what one *means* by matching on it would break the first time the
   # server rephrased it.
-  @spec answer_warning({:ok, term()} | {:error, term()}, TypeDB.Connection.t()) ::
+  # Takes the config, not the connection. It used to take the connection and
+  # look it up — and `TypeDB.Connection.config/1` *raises* when the connection is
+  # gone, so a query that had already succeeded, whose answer was decoded and in
+  # hand, died here instead of returning `{:ok, answer}`. Both triggers are
+  # ordinary on their own: a supervisor restarting the connection mid-request,
+  # and a read TypeDB truncated at 10,000 rows. Logging must not be able to
+  # destroy a result, and every caller holds the config already.
+  @spec answer_warning({:ok, term()} | {:error, term()}, Config.t()) ::
           {:ok, term()} | {:error, term()}
-  def answer_warning({:ok, answer} = result, conn) do
+  def answer_warning({:ok, answer} = result, %Config{} = config) do
     case TypeDB.Answer.warning(answer) do
       nil ->
         result
 
       warning ->
         log(
-          TypeDB.Connection.config(conn),
+          config,
           :warning,
           fn -> "TypeDB: the server attached a warning to this answer: " <> warning end,
-          typedb_connection: conn
+          typedb_connection: config.name
         )
 
         result
     end
   end
 
-  def answer_warning(other, _conn), do: other
+  def answer_warning(other, %Config{}), do: other
 
   @spec log(Config.t(), atom(), (-> IO.chardata()) | IO.chardata(), keyword()) :: :ok
   def log(%Config{log_level: floor}, level, message, metadata) do

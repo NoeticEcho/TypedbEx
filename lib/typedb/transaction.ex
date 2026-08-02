@@ -191,10 +191,13 @@ defmodule TypeDB.Transaction do
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     CallOptions.validate!(opts, CallOptions.transaction_query(), "TypeDB.Transaction.query/3")
+    # Read once here rather than again after the answer arrives — see
+    # `TypeDB.Log.answer_warning/2` for what the second lookup used to cost.
+    config = Connection.config(tx.conn)
 
     body =
       %{"query" => query}
-      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, TypeDB.query_defaults(tx.conn)))
+      |> Wire.put_unless_nil("queryOptions", Options.query_payload(opts, Wire.query_defaults(config)))
       |> Wire.put_unless_nil("givenRows", Given.encode_rows(Keyword.get(opts, :given_rows)))
 
     with {:ok, payload} <-
@@ -207,7 +210,7 @@ defmodule TypeDB.Transaction do
              timeout: opts[:timeout],
              deadline: opts[:deadline]
            ) do
-      payload |> Answer.decode() |> TypeDB.Log.answer_warning(tx.conn)
+      payload |> Answer.decode() |> TypeDB.Log.answer_warning(config)
     end
   end
 
