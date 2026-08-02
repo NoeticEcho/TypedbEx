@@ -1,5 +1,238 @@
 # Refactor plan
 
+| | From | Steps | Status |
+| --- | --- | --- | --- |
+| [Plan II](#refactor-plan-ii--051) | Audit II, `367a393` | 7 | awaiting approval |
+| [Plan I](#refactor-plan-i--010-executed) | Audit I, `b96ae98` | 15 | executed, `0e5b005` … `babcbe3` |
+
+---
+
+# Refactor plan II — 0.5.1
+
+Derived from Audit II in `AUDIT.md`, at `367a393`. Ordered by severity, then by
+what unblocks what. Every step is atomic: it compiles, the whole suite passes,
+and the driver is shippable at the end of it. **One step, one commit.**
+
+## Gate applied after every step
+
+```shell
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix test                                          # 482 unit tests
+for a in finch req httpc; do TYPEDB_TEST_ADAPTER=$a mix test; done
+mix credo --strict
+mix dialyzer
+```
+
+Steps touching the transport, an adapter or the wire additionally run against the
+live TypeDB 3.12.1 on `:8000`:
+
+```shell
+TYPEDB_INTEGRATION_URL=http://127.0.0.1:8000 mix test        # 551
+```
+
+Step 7 additionally regenerates and commits `test/api_snapshot.txt`.
+
+**Rollback rule.** If a step breaks the suite and is not fixed within two or
+three attempts, it is reverted, marked `blocked` here with the failure, and the
+next step proceeds. Steps are ordered so that nothing later depends on anything
+earlier except where stated.
+
+---
+
+## Step 1 — Stop losing a good answer to the warning logger (finding A)
+
+**Severity: major. Fixes a bug that turns success into an exception.**
+
+*What changes.* `TypeDB.Log.answer_warning/2` takes the `%TypeDB.Config{}` it
+needs instead of a connection it has to look up. Both call sites already hold a
+config on the path that produced the answer, so the second ETS read — the one
+that raises when the connection is gone — disappears rather than being rescued.
+
+*Files.* `lib/typedb/log.ex`, `lib/typedb.ex` (:278),
+`lib/typedb/transaction.ex` (:210), `test/typedb/log_test.exs`.
+
+*How to check.* A new test reproducing the audit's probe: an adapter that holds
+the response while the connection is stopped, on an answer carrying a `warning`.
+It must return `{:ok, answer}` where today the caller's process dies in
+`Connection.lookup!/2`. Verified non-vacuous by reverting the fix and watching it
+fail. Public API unchanged — `TypeDB.Log` is `@moduledoc false`.
+
+## Step 2 — Give the httpc adapter the ownership Finch already has (findings B, H)
+
+**Severity: major. Fixes an adapter that stops another application's `:httpc` profile.**
+
+*What changes.* `TypeDB.HTTP.Httpc`'s struct gains `owned?`, set exactly as
+Finch sets it: `false` when the caller passed `:profile`, `true` when the adapter
+started the profile itself. `terminate/1` stops the profile only when it owns it.
+The generated profile name becomes unique per instance
+(`:"#{name}.HTTP.#{System.unique_integer([:positive])}"`), matching
+`finch.ex:90`, so two connections can never share one by accident.
+
+That is finding H's fix as well: after this the two adapters answer the
+ownership question the same way, which matters because they are the worked
+examples for anyone implementing `TypeDB.HTTP`.
+
+*Files.* `lib/typedb/http/httpc.ex`, `test/typedb/http_test.exs`.
+
+*How to check.* Two tests from the audit's probes: a pre-started profile must
+still be alive after `terminate/1`, and a profile the adapter started must be
+gone. Plus the existing supervisor-restart test, which already passes and must
+keep passing — the profile name change is the risky half of this step. Full
+three-adapter matrix and the integration suite, since this changes the transport.
+
+## Step 3 — Reject an `:http` option that does not name an adapter (finding C)
+
+**Severity: major. Restores the documented `:config` contract.**
+
+*What changes.* `TypeDB.Config.parse_http/1` checks that the module is loadable
+and exports `init/2`, `request/6` — rejecting `nil`, a module that does not
+exist, and a module that is not an adapter — with a `%TypeDB.Error{kind:
+:config}` that names the option and the module. `Code.ensure_loaded?/1` is the
+check, so a module that exists but is not yet loaded still passes.
+
+`owner/1` and `terminate/1` are deliberately **not** required: both are optional
+callbacks and `TypeDB.Connection` already probes them with
+`function_exported?/3`.
+
+*Files.* `lib/typedb/config.ex`, `test/typedb/config_test.exs`.
+
+*How to check.* The audit's table becomes three test cases — `{NoSuchAdapter,
+[]}`, `{Enum, []}` and `nil` must each be `{:error, %TypeDB.Error{kind:
+:config}}` from `Config.new/1`, not `{:error, {:undef, …}}` from `start_link/1`.
+A fourth asserts the bare-module form `http: TypeDB.HTTP.Finch` still works, so
+the fix does not tighten past what is documented. The three-adapter matrix
+covers the regression risk: all three real adapters must still be accepted.
+
+## Step 4 — Replace the forbidden `FunctionClauseError`s (finding D)
+
+**Severity: major. CONTRIBUTING's own rule, applied mechanically.**
+
+*What changes.* Each of the fifteen public functions guarding on `is_binary/1`
+gets a fallback clause raising `ArgumentError` that names the argument and what
+it must be — the shape `Transaction.open/4` already uses at
+`transaction.ex:82` for `:transaction_type`.
+
+To keep this from rotting, the fallbacks are generated from one private helper
+rather than hand-written fifteen times, and a test walks the public surface via
+`Code.Typespec.fetch_specs/1` — the technique
+`test/typedb/api_convention_test.exs` already uses for `!` pairing — asserting
+that no public function with a `String.t()` parameter answers a non-binary with
+`FunctionClauseError`.
+
+*Files.* `lib/typedb.ex`, `lib/typedb/database.ex`, `lib/typedb/user.ex`,
+`lib/typedb/transaction.ex`, `test/typedb/api_convention_test.exs`.
+
+*How to check.* The new convention test is the check, and it fails today. Note
+this **changes what these functions raise** — from `FunctionClauseError` to
+`ArgumentError`. Under CONTRIBUTING's versioning that is not a covered surface
+(neither is in `test/api_snapshot.txt`, and both are exceptions for a value the
+caller should not have passed), so it is a patch. Called out here because it is
+a behaviour change and the rule says nothing changes without being in the plan.
+
+## Step 5 — Run the Jason codec (finding E)
+
+**Severity: major. A documented extension point with 0% execution coverage.**
+
+*What changes.* Tests only; no `lib/` change. `test/typedb/json_test.exs` gains
+a case driving `TypeDB.JSON.Jason` through encode, decode and a decode failure,
+and one that configures it as `:json_codec` and runs a real query through the
+stub with it — which is the configuration README.md documents.
+
+`:jason` is already resolvable in `dev`/`test` transitively through `:req`.
+The step adds it explicitly as `{:jason, "~> 1.4", only: [:dev, :test], runtime:
+false}` so the tests do not depend on another package's dependency tree, which
+would break silently the day Req drops it.
+
+*Files.* `test/typedb/json_test.exs`, `mix.exs`.
+
+*How to check.* Coverage for `TypeDB.JSON.Jason` goes 0.00% → 100%. The
+optional-dependency CI jobs must both still pass: `jason` is `only: [:dev,
+:test]`, so a consumer without it is unaffected — and the "Optional dependencies
+(none)" job is what proves that.
+
+## Step 6 — Say that the Jason fallback cannot happen (finding G)
+
+**Severity: minor. Dead branch, and two moduledocs describing it as live.**
+
+*What changes.* `TypeDB.JSON.resolve!/0` keeps the `Jason` branch — it costs
+nothing and is the correct answer if the Elixir floor ever moves down — but the
+moduledocs stop describing it as automatic. `TypeDB.JSON`'s resolution list and
+`TypeDB.JSON.Jason`'s "used automatically when `JSON` is unavailable" both say
+what is true: on every supported Elixir the built-in codec wins, and `Jason` is
+reached by configuring it.
+
+Deliberately *not* deleting the branch: it is unreachable because of a floor, not
+because it is wrong, and deleting it would make a future floor change a silent
+behaviour change.
+
+*Files.* `lib/typedb/json.ex` (moduledocs only).
+
+*How to check.* `mix docs` clean; the existing `json_test.exs` unchanged and
+passing. Documentation-only, so no API impact.
+
+## Step 7 — `:timeout` and `:deadline` on the administrative calls (finding F)
+
+**Severity: minor. NEEDS YOUR DECISION — this one changes the public API.**
+
+*What changes.* All 32 public functions on `TypeDB.Database`, `TypeDB.User` and
+`TypeDB.Server` gain a trailing `opts \\ []`, validated by
+`TypeDB.CallOptions.request/0` — the same `[:timeout, :deadline]` set the
+transaction calls already accept — and forwarded to `Connection.request/4`.
+
+*Why it needs a decision, not just a commit.*
+
+- It rewrites `test/api_snapshot.txt`, which under this project's 0.x rule makes
+  it a **minor** version bump, not a patch. Everything else in this plan is a
+  patch.
+- CONTRIBUTING says the API is meant to be frozen at 1.0 and that `1.0.0` will
+  be cut "once the API has survived real use". Widening 32 signatures is the
+  opposite direction of travel, and no user has asked for it — I found it by
+  reading, not by hitting it.
+- The alternative is to do nothing: the connection-level `:timeout` already
+  bounds these calls, and the gap is convenience.
+
+**My recommendation: defer it.** Take steps 1–6, which are all patches and all
+fix something real, cut 0.5.2, and let this one wait for a user who needs it.
+I have written it up as a full step so it is ready if you disagree.
+
+*Files if taken.* `lib/typedb/database.ex`, `lib/typedb/user.ex`,
+`lib/typedb/server.ex`, `lib/typedb/call_options.ex`, `test/api_snapshot.txt`,
+`test/typedb/call_options_test.exs`, `CHANGELOG.md`, `mix.exs`.
+
+*How to check.* `call_options_test.exs` already walks `TypeDB` and
+`TypeDB.Transaction` asserting that every function taking options validates
+them; the three admin modules get added to that walk. Then
+`TYPEDB_UPDATE_API_SNAPSHOT=1 mix test test/typedb/api_snapshot_test.exs` and
+read the diff before committing it.
+
+---
+
+## Order and dependencies
+
+Steps 1–6 are independent of each other; any can be dropped without affecting
+the rest. Step 2 is the one with real regression risk (it renames the httpc
+profile), which is why it runs the integration suite and the full adapter matrix
+rather than the unit suite alone. Step 7 is last because it is the only one that
+moves the version number.
+
+| Step | Finding | Severity | Version impact |
+| --- | --- | --- | --- |
+| 1 | A | major | patch |
+| 2 | B, H | major | patch |
+| 3 | C | major | patch |
+| 4 | D | major | patch — but changes which exception is raised |
+| 5 | E | major | patch (test + dev dependency) |
+| 6 | G | minor | patch (docs) |
+| 7 | F | minor | **minor — needs your decision** |
+
+After 1–6: `CHANGELOG.md` gets an `Unreleased` entry per step and 0.5.2 is
+cuttable.
+
+---
+
+# Refactor plan I — 0.1.0 (executed)
+
 Derived from `AUDIT.md` at `b96ae98`. Ordered critical → major → minor. Each step is atomic: it
 compiles, the suite passes, and the driver is shippable at the end of it. Each step is one commit.
 

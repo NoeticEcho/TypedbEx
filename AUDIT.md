@@ -1,5 +1,291 @@
 # Audit — TypeDB Elixir driver
 
+Two audits of this driver, newest first.
+
+| | At | Findings | Status |
+| --- | --- | --- | --- |
+| [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | see `REFACTOR_PLAN.md` |
+| [Audit I](#audit-i--010) | `b96ae98` (0.1.0) | 31: 2 critical, 9 major, 20 minor | all fixed |
+
+Audit I is kept in full, in its original wording, because it records *why*
+several things are the way they are — read it before proposing to change one of
+them.
+
+---
+
+# Audit II — 0.5.1
+
+Audited at `367a393` (main), the 0.5.1 release commit. This is the second audit of
+this driver; the first, at `b96ae98`, is below in the same file and all 31 of its
+findings were fixed.
+
+**Method.** The reference below was rebuilt from README.md, CONTRIBUTING.md,
+CLAUDE.md and the moduledocs, then the whole of `lib/` was read against it.
+Nothing here is a reading of the code alone: **every finding was reproduced by
+running it**, and the reproduction is quoted under the finding. Three hypotheses
+that looked like findings on the page did *not* reproduce and are recorded under
+[Not findings](#not-findings) so nobody spends the afternoon on them again.
+
+**Scale.** 6,134 lines under `lib/`, 482 unit tests × 3 HTTP adapters, 551 with
+integration, 88.05% line coverage. Eight findings: 0 critical, 5 major, 3 minor.
+That is a lower yield than Audit I's 31, which is what a second audit of a
+codebase that took the first one seriously should look like.
+
+## Reference: what the driver must do
+
+1. Connect to TypeDB 3.12+ over HTTP API v1; config is URL plus username/password
+   or a pre-issued token; supervised; several named connections at once.
+2. Auth: lazy sign-in, proactive renewal from the JWT's own lifetime, reactive
+   renewal on `401` bounded by `:max_auth_renewals`, concurrent renewals
+   collapsed into one sign-in, credentials never published.
+3. Full API v1 coverage: signin, health, version, servers, databases, users,
+   transactions, one-shot `/query`, analyze.
+4. Requests run in the caller's process; the connection process is not a
+   throughput bottleneck.
+5. Answers decode into `Ok` / `ConceptRows` / `ConceptDocuments`; concepts into
+   structs; rows implement `Access`; answers implement `Enumerable`; values
+   convert to native Elixir terms.
+6. `given_rows` are encoded in TypeDB's tagged wire form, so no input can be
+   parsed as TypeQL.
+7. Every failure is a `%TypeDB.Error{}` with a `:kind` and TypeDB's stable
+   `:code`; every fallible operation has a `!` twin; CONTRIBUTING's "return or
+   raise" rule is followed, including its ban on a bare `FunctionClauseError`
+   from a public function.
+8. Pluggable transport: Finch default, Req and httpc alternatives, TLS verified
+   by default in all three, and the choice invisible to the caller.
+9. Pluggable JSON codec; telemetry spans for requests, transactions and sign-ins.
+10. `TypeDB.transaction/5` commits on success, rolls back on error, raise, throw
+    or exit, and closes a `:read`.
+
+---
+
+## Major
+
+### A — A successful answer can be destroyed by the code that logs its warning
+`lib/typedb/log.ex:37`, reached from `lib/typedb.ex:278` and `lib/typedb/transaction.ex:210`
+**Category: bug.**
+
+`Log.answer_warning/2` runs after the answer is decoded, and looks the connection
+up again to find its `:log_level`:
+
+```elixir
+log(TypeDB.Connection.config(conn), :warning, ...)
+```
+
+`Connection.config/1` reads the connection's ETS table and **raises** when it is
+gone (`connection.ex:109`). So when the connection dies between the response
+arriving and the warning being logged, a query that fully succeeded raises
+instead of returning `{:ok, answer}`.
+
+Reproduced with an adapter that holds the response while the connection is
+stopped, on an answer carrying a `warning` — the caller's process died with:
+
+```
+(stdlib) :ets.lookup(:warn_race, :config)
+(typedb) lib/typedb/connection.ex:109: TypeDB.Connection.lookup!/2
+(typedb) lib/typedb/log.ex:37: TypeDB.Log.answer_warning/2
+```
+
+The trigger is narrow — the connection must go away mid-request *and* the answer
+must carry a warning — but both halves are ordinary: a supervisor restarting the
+connection during a deploy, and a read TypeDB truncated at 10,000 rows. Logging
+must not be able to turn a success into an exception, and the config it needs is
+already in hand at both call sites.
+
+### B — The httpc adapter stops an `:httpc` profile it did not start
+`lib/typedb/http/httpc.ex:88`, with `:76` and `:179`
+**Category: bug — resource lifecycle.**
+
+`TypeDB.HTTP.Finch` tracks `owned?` (`finch.ex:77`, `:139`) precisely so that an
+adapter handed an existing instance neither owns nor stops it — that was finding
+m3 of Audit I. The httpc adapter has no such notion. `start_profile/1` treats
+`{:error, {:already_started, _pid}}` as success, and `terminate/1` stops the
+profile unconditionally.
+
+Reproduced:
+
+```
+A. before adapter init, profile manager: #PID<0.202.0>
+A. after adapter terminate,   profile manager: nil
+   ^ nil means the adapter stopped a profile it did not start
+```
+
+`:profile` is a documented option. An application that runs its own `:httpc`
+profile and points a TypeDB connection at it — to share sockets, or because the
+profile carries proxy settings — loses that profile when the connection stops,
+and the breakage lands somewhere else entirely.
+
+The second half of the same gap: the profile name is `:"#{name}.HTTP"`, derived
+from the *connection* name rather than being unique per instance the way Finch's
+pool name is (`finch.ex:90`). Two connections pointed at one profile share it,
+and the first to terminate takes the other's transport down — reproduced, the
+survivor's profile manager was `nil`.
+
+### C — `:http` is the one option naming code, and it is not checked
+`lib/typedb/config.ex:492-500`, surfacing at `lib/typedb/connection.ex:294`
+**Category: gap — missing validation.**
+
+`parse_http/1` accepts any atom as an adapter module. `TypeDB.Config` exists to
+reject bad configuration at start-up — its own comment for `parse_timeout/3`
+explains why, having watched a string from `System.get_env/1` boot "a green
+application that then failed every single request, deep inside the HTTP adapter".
+`:http` is the option most able to do exactly that, and it is unchecked.
+
+Reproduced:
+
+| `:http` | `Config.new/1` | `TypeDB.start_link/1` |
+| --- | --- | --- |
+| `{NoSuchAdapter, []}` | `{:ok, config}` | `{:error, {:undef, …}}` |
+| `{Enum, []}` | `{:ok, config}` | `{:error, {:undef, …}}` |
+| `nil` | `{:ok, config}`, `http_adapter: nil` | `{:error, {:undef, …}}` |
+
+`nil` passes because `nil` is an atom. All three break the contract stated in
+README.md:416 and `guides/errors-and-retries.md` — that a misconfigured
+connection is `%TypeDB.Error{kind: :config}` — and `{:error, {:undef, …}}` names
+neither the option nor the module.
+
+`init_adapter/1` (`connection.ex:294`) calls `adapter.init/2` bare, outside the
+`Transport.contain/3` that guards every other adapter call, so there is no second
+line of defence either.
+
+### D — A non-binary name or query raises a bare `FunctionClauseError`
+`lib/typedb.ex:248`, `lib/typedb/database.ex:45,70,87,112,140,160,168`,
+`lib/typedb/user.ex:45,82,106,128`, `lib/typedb/transaction.ex:82,192,240`
+**Category: gap — CONTRIBUTING violated mechanically.**
+
+Fifteen public functions guard on `is_binary/1` with no clause for anything else.
+CONTRIBUTING.md:147 forbids this in as many words:
+
+> **Never a bare `FunctionClauseError` from a public function** for a value a
+> caller could plausibly pass. […] Add a clause that raises `ArgumentError` with
+> the accepted values.
+
+Reproduced, five of the fifteen:
+
+```
+TypeDB.query/4 database: nil        no function clause matching in TypeDB.query/4
+Database.create/2 name: :social     no function clause matching in TypeDB.Database.create/2
+Database.delete/2 name: nil         no function clause matching in TypeDB.Database.delete/2
+User.create/3 username: nil         no function clause matching in TypeDB.User.create/3
+Transaction.open/4 database: :d     no function clause matching in TypeDB.Transaction.open/4
+```
+
+A database name is the single most likely thing to arrive from configuration as
+`nil` or as an atom. `Transaction.open/4` shows the intended shape one line
+away: `transaction.ex:82` already has a clause that raises `ArgumentError`
+naming the three valid transaction types — but only when the database is
+already a binary.
+
+### E — `TypeDB.JSON.Jason` is documented, shipped, and never executed
+`lib/typedb/json.ex`, `TypeDB.JSON.Jason`
+**Category: gap — untested public extension point.**
+
+Coverage: **0.00%**. No test in the suite calls it, and `:jason` is present in
+`deps/` (transitively, through `req`), so the absence is not a missing
+dependency — nothing was ever written.
+
+README.md documents `config :typedb, :json_codec, TypeDB.JSON.Jason` as a
+supported configuration. The codec does work — checked by hand:
+
+```
+Jason codec encode:       {"a":[1,true,null]}
+Jason codec decode:       {:ok, %{"a" => [1, true, nil]}}
+Jason codec on bad input: {:error, %Jason.DecodeError{position: 1, ...}}
+```
+
+So this is a gap rather than a defect today. It is the same shape as the bug in
+`guides/testing.md` that Audit I's `TypeDB.GuideTest` was written for: published
+code that nothing runs is published code nobody has checked.
+
+---
+
+## Minor
+
+### F — Administrative calls cannot be given a timeout
+`lib/typedb/database.ex`, `lib/typedb/user.ex`, `lib/typedb/server.ex` — 32 public functions
+**Category: gap — missing functionality.**
+
+Not one of `TypeDB.Database.*`, `TypeDB.User.*` or `TypeDB.Server.*` accepts
+options, so none can take `:timeout` or `:deadline`. Every one of them makes an
+HTTP request.
+
+The documentation is careful — `guides/errors-and-retries.md` says both are
+per call "on every function that takes `:timeout`" — so nothing here is *false*.
+But `Database.schema/2` on a large schema, and `Server.health/1` used as a
+readiness probe that should give up in 500ms, are exactly the calls that want
+their own budget, and they are stuck with the connection default.
+
+Filed as minor because it is missing convenience rather than broken behaviour.
+It is the one finding in this audit whose fix **changes the public API**
+(32 new optional arguments, a new `test/api_snapshot.txt`, a minor version under
+this project's 0.x rule), so it needs a decision rather than a patch.
+
+### G — The Jason fallback branch cannot execute on any supported Elixir
+`lib/typedb/json.ex:72`
+**Category: dead code + documentation contradicting it.**
+
+```elixir
+Code.ensure_loaded?(JSON)  -> TypeDB.JSON.Native
+Code.ensure_loaded?(Jason) -> TypeDB.JSON.Jason   # unreachable
+```
+
+`mix.exs:11` declares `elixir: "~> 1.18"`, and the built-in `JSON` module exists
+on every Elixir from 1.18. The clause above it therefore always matches, so the
+`Jason` branch — and the `raise` below it — are unreachable by construction.
+
+Both moduledocs describe the unreachable path as if it happens: `TypeDB.JSON`
+lists it as resolution step 3, and `TypeDB.JSON.Jason` says it is "used
+automatically when `JSON` is unavailable". `Jason` is reachable only by
+configuring it explicitly, which is worth saying plainly.
+
+### H — Two adapters express the same lifecycle two different ways
+`lib/typedb/http/finch.ex:56,77,135,139` against `lib/typedb/http/httpc.ex:70,85,88`
+**Category: quality — inconsistent pattern between modules.**
+
+The root of finding B, recorded separately because the fix is a shape, not a
+patch. For the same three questions the two shipped adapters answer differently:
+
+| | Finch | httpc |
+| --- | --- | --- |
+| instance name | unique per instance (`.Finch.<int>`) | derived from the connection name |
+| ownership | tracked in `owned?`, honoured by `terminate/1` | not represented |
+| `owner/1` | the supervisor pid, so the connection links to it | always `nil` |
+
+`TypeDB.HTTP` is a public behaviour, so these two are also the worked examples
+anyone writing a third adapter will copy. They should not disagree about what
+`terminate/1` is allowed to stop.
+
+---
+
+## Not findings
+
+Reproduced as *working*, and recorded so they are not re-raised:
+
+- **A supervisor-restarted httpc connection recovers.** This was the obvious
+  corollary of finding B — the Finch pool name was made unique per instance in
+  Audit I (C1) for exactly this reason. It does not reproduce for httpc: three
+  consecutive kill-and-restart rounds all answered `:ok`, because `terminate/2`
+  stops the profile before `init/1` starts it again.
+- **The `TypeDB.Duration` component scanner is faithful.** The hand-written
+  scanner that replaced a regex for speed was differentially tested over 200,000
+  generated inputs: `from_iso8601 -> to_iso8601 -> from_iso8601` disagreed **0**
+  times.
+- **Answer warnings are logged on both query paths.** One-shot `TypeDB.query/4`
+  and `TypeDB.Transaction.query/3` both funnel through `Log.answer_warning/2`,
+  so a truncated answer is never silent inside an explicit transaction either.
+
+Also checked and clean: no `TODO`, `FIXME`, `HACK` or `XXX` anywhere in `lib/`
+or `test/`; no stubs, mock data or hardcoded values that should be configurable;
+no dead private functions (`--warnings-as-errors` makes them impossible); no
+duplicated helper left after Audit I moved them into `TypeDB.Wire` and
+`TypeDB.Bang`. `http: TypeDB.HTTP.Finch` as a bare module is accepted
+deliberately and resolves correctly to `{TypeDB.HTTP.Finch, []}` — that one
+looked like a silent fallback and is not.
+
+---
+
+# Audit I — 0.1.0
+
 Audited at `b96ae98` (main). Method: seven parallel auditors, one per category, each finding then
 handed to an independent reviewer whose job was to refute it; 46 raw findings, 18 refuted, 28
 confirmed. Every finding below was additionally **reproduced by running code** or by reading the cited
