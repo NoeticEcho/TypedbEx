@@ -15,6 +15,25 @@ defmodule TypeDB.Wire do
   def path_segment(segment), do: URI.encode(segment, &URI.char_unreserved?/1)
 
   @doc """
+  Returns `value` when it is a string, raising `ArgumentError` otherwise.
+
+  A database name, a username or a query is data the caller wrote down, and the
+  likeliest way for one to be wrong is to arrive from configuration as `nil` or
+  as an atom. Guarding with `is_binary/1` alone answers that with
+  `FunctionClauseError`, which names an internal clause and helps nobody —
+  CONTRIBUTING's "Failing: return or raise" forbids it in as many words. One
+  helper rather than fifteen hand-written clauses, so the message cannot drift.
+
+  `what` names the argument as its documentation does, e.g. `"database name"`.
+  """
+  @spec string!(term(), String.t()) :: String.t()
+  def string!(value, _what) when is_binary(value), do: value
+
+  def string!(value, what) do
+    raise ArgumentError, "invalid #{what} #{inspect(value)}, expected a string"
+  end
+
+  @doc """
   Connection-level defaults for a query's options.
 
   Takes the config rather than the connection, so that a caller which already

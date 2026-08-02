@@ -245,7 +245,10 @@ defmodule TypeDB do
       \""", given_rows: [%{"n" => user_supplied_name}])
   """
   @spec query(conn(), String.t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
-  def query(conn, database, query, opts \\ []) when is_binary(database) and is_binary(query) do
+  def query(conn, database, query, opts \\ []) do
+    database = Wire.string!(database, "database name")
+    query = Wire.string!(query, "query")
+
     CallOptions.validate!(opts, CallOptions.query(), "TypeDB.query/4")
     # Read once, before the request, and carried through to the warning log at
     # the end: looking the connection up again after the answer is in hand is

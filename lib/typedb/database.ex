@@ -42,7 +42,9 @@ defmodule TypeDB.Database do
   does not exist.
   """
   @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
-  def get(conn, name) when is_binary(name) do
+  def get(conn, name) do
+    name = Wire.string!(name, "database name")
+
     case Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}") do
       {:ok, %{"name" => name}} -> {:ok, name}
       {:ok, other} -> {:error, Error.new(:decode, "unexpected database response", body: other)}
@@ -67,7 +69,7 @@ defmodule TypeDB.Database do
   on the error yourself.
   """
   @spec exists?(Connection.t(), String.t()) :: boolean()
-  def exists?(conn, name) when is_binary(name) do
+  def exists?(conn, name) do
     case get(conn, name) do
       {:ok, _} -> true
       {:error, %Error{status: 404}} -> false
@@ -84,7 +86,9 @@ defmodule TypeDB.Database do
   duplicate.
   """
   @spec create(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
-  def create(conn, name) when is_binary(name) do
+  def create(conn, name) do
+    name = Wire.string!(name, "database name")
+
     case Connection.request(conn, :post, "/databases/#{Wire.path_segment(name)}",
            expect: :empty,
            # Creating a database that already exists is a no-op on TypeDB 3.x,
@@ -109,7 +113,9 @@ defmodule TypeDB.Database do
   present and returns `:ok`.
   """
   @spec create_if_not_exists(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
-  def create_if_not_exists(conn, name) when is_binary(name) do
+  def create_if_not_exists(conn, name) do
+    name = Wire.string!(name, "database name")
+
     case create(conn, name) do
       :ok ->
         :ok
@@ -137,7 +143,9 @@ defmodule TypeDB.Database do
   `create/2` — the asymmetry is TypeDB's, not this driver's.
   """
   @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
-  def delete(conn, name) when is_binary(name) do
+  def delete(conn, name) do
+    name = Wire.string!(name, "database name")
+
     case Connection.request(conn, :delete, "/databases/#{Wire.path_segment(name)}", expect: :empty) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}
@@ -157,7 +165,9 @@ defmodule TypeDB.Database do
   reproduces the schema.
   """
   @spec schema(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
-  def schema(conn, name) when is_binary(name) do
+  def schema(conn, name) do
+    name = Wire.string!(name, "database name")
+
     Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}/schema", expect: :text)
   end
 
@@ -165,7 +175,9 @@ defmodule TypeDB.Database do
   Returns only the type definitions of a database's schema, without functions.
   """
   @spec type_schema(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
-  def type_schema(conn, name) when is_binary(name) do
+  def type_schema(conn, name) do
+    name = Wire.string!(name, "database name")
+
     Connection.request(conn, :get, "/databases/#{Wire.path_segment(name)}/type-schema", expect: :text)
   end
 

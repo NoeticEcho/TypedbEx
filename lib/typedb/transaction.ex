@@ -79,13 +79,13 @@ defmodule TypeDB.Transaction do
   # the guard alone produced: the type is a literal in the caller's source, so
   # the failure should say which literal is wrong. Same treatment as
   # `TypeDB.query/4`'s `:transaction_type`.
-  def open(_conn, database, type, _opts) when is_binary(database) and type not in [:read, :write, :schema] do
+  def open(_conn, _database, type, _opts) when type not in [:read, :write, :schema] do
     raise ArgumentError,
           "invalid transaction type #{inspect(type)}, expected :read, :write or :schema"
   end
 
-  def open(conn, database, type, opts)
-      when is_binary(database) and type in [:read, :write, :schema] do
+  def open(conn, database, type, opts) when type in [:read, :write, :schema] do
+    database = Wire.string!(database, "database name")
     CallOptions.validate!(opts, CallOptions.open(), "TypeDB.Transaction.open/4")
 
     body =
@@ -189,7 +189,9 @@ defmodule TypeDB.Transaction do
   *server* rejects comes back as `{:error, %TypeDB.Error{}}` as usual.
   """
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
-  def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
+  def query(%__MODULE__{} = tx, query, opts \\ []) do
+    query = Wire.string!(query, "query")
+
     CallOptions.validate!(opts, CallOptions.transaction_query(), "TypeDB.Transaction.query/3")
     # Read once here rather than again after the answer arrives — see
     # `TypeDB.Log.answer_warning/2` for what the second lookup used to cost.
@@ -240,7 +242,9 @@ defmodule TypeDB.Transaction do
   > Match defensively, and do not build anything load-bearing on the shape.
   """
   @spec analyze(t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
-  def analyze(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
+  def analyze(%__MODULE__{} = tx, query, opts \\ []) do
+    query = Wire.string!(query, "query")
+
     CallOptions.validate!(opts, CallOptions.request(), "TypeDB.Transaction.analyze/3")
 
     case Connection.request(tx.conn, :post, "/transactions/#{tx.id}/analyze",

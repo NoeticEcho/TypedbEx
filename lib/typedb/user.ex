@@ -42,7 +42,9 @@ defmodule TypeDB.User do
   Returns a username, or an error when the user does not exist.
   """
   @spec get(Connection.t(), String.t()) :: {:ok, String.t()} | {:error, Error.t()}
-  def get(conn, username) when is_binary(username) do
+  def get(conn, username) do
+    username = Wire.string!(username, "username")
+
     case Connection.request(conn, :get, "/users/#{Wire.path_segment(username)}") do
       {:ok, %{"username" => username}} -> {:ok, username}
       {:ok, other} -> {:error, Error.new(:decode, "unexpected user response", body: other)}
@@ -79,7 +81,10 @@ defmodule TypeDB.User do
   Creates a user with the given password.
   """
   @spec create(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
-  def create(conn, username, password) when is_binary(username) and is_binary(password) do
+  def create(conn, username, password) do
+    username = Wire.string!(username, "username")
+    password = Wire.string!(password, "password")
+
     case Connection.request(conn, :post, "/users/#{Wire.path_segment(username)}",
            body: %{"password" => password},
            expect: :empty,
@@ -103,7 +108,10 @@ defmodule TypeDB.User do
   on their own schedule.
   """
   @spec set_password(Connection.t(), String.t(), String.t()) :: :ok | {:error, Error.t()}
-  def set_password(conn, username, password) when is_binary(username) and is_binary(password) do
+  def set_password(conn, username, password) do
+    username = Wire.string!(username, "username")
+    password = Wire.string!(password, "password")
+
     case Connection.request(conn, :put, "/users/#{Wire.path_segment(username)}",
            body: %{"password" => password},
            expect: :empty,
@@ -125,7 +133,9 @@ defmodule TypeDB.User do
   Deletes a user.
   """
   @spec delete(Connection.t(), String.t()) :: :ok | {:error, Error.t()}
-  def delete(conn, username) when is_binary(username) do
+  def delete(conn, username) do
+    username = Wire.string!(username, "username")
+
     case Connection.request(conn, :delete, "/users/#{Wire.path_segment(username)}", expect: :empty) do
       {:ok, _} -> :ok
       {:error, error} -> {:error, error}

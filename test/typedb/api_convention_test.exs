@@ -64,6 +64,138 @@ defmodule TypeDB.APIConventionTest do
     end
   end
 
+  describe "a value the caller could plausibly pass" do
+    # CONTRIBUTING's "Failing: return or raise" ends with a rule this driver was
+    # breaking fifteen times over:
+    #
+    #   Never a bare FunctionClauseError from a public function for a value a
+    #   caller could plausibly pass. […] Add a clause that raises ArgumentError
+    #   with the accepted values.
+    #
+    # A database name is the likeliest thing in this API to arrive from
+    # configuration as nil or as an atom, and every function taking one answered
+    # with `no function clause matching in TypeDB.Database.create/2` — which
+    # names an internal clause and helps nobody.
+    #
+    # Derived from the specs, not from a list, so a new function joins by
+    # existing. Every probe passes a bad value in a `String.t()` position and
+    # valid values everywhere else, so each call raises in the guard and no
+    # request is ever made.
+    setup do
+      Enum.each(@modules, &Code.ensure_loaded!/1)
+      :ok
+    end
+
+    test "is rejected with ArgumentError, never FunctionClauseError", %{conn: conn} do
+      {probes, unbuildable} = string_probes(conn)
+
+      # A probe list that silently shrank would make this test pass by testing
+      # nothing, so what could not be built is named rather than dropped.
+      assert unbuildable == [],
+             "could not build arguments for: #{Enum.join(unbuildable, ", ")}"
+
+      assert length(probes) >= 15,
+             "expected at least the fifteen known String.t() positions, got #{length(probes)}"
+
+      bad =
+        for {label, call} <- probes,
+            error = raised_by(call),
+            not is_struct(error, ArgumentError),
+            do: "#{label} raised #{inspect(error.__struct__)}: #{Exception.message(error)}"
+
+      assert bad == [], Enum.join(bad, "\n")
+    end
+
+    test "and the message says what was expected", %{conn: conn} do
+      {probes, _} = string_probes(conn)
+
+      for {label, call} <- probes do
+        message = Exception.message(raised_by(call))
+
+        assert message =~ "expected a string",
+               "#{label} raised ArgumentError without saying what it wanted: #{message}"
+      end
+    end
+
+    defp raised_by(call) do
+      call.()
+      flunk("the call did not raise")
+    rescue
+      error -> error
+    end
+
+    # Every `String.t()` parameter of every public function in @modules, each
+    # paired with a call that puts a non-binary there.
+    defp string_probes(conn) do
+      tx = %TypeDB.Transaction{conn: conn, id: "probe", database: "social", type: :read}
+
+      Enum.reduce(@modules, {[], []}, fn module, acc ->
+        {:ok, specs} = Code.Typespec.fetch_specs(module)
+        Enum.reduce(specs, acc, &probes_for(module, &1, conn, tx, &2))
+      end)
+    end
+
+    defp probes_for(module, {{name, arity}, [definition | _]}, conn, tx, acc) do
+      params = spec_params(name, definition)
+
+      params
+      |> Enum.with_index()
+      |> Enum.filter(fn {param, _index} -> param == "String.t()" end)
+      |> Enum.reduce(acc, fn {_param, index}, {probes, unbuildable} ->
+        label = "#{inspect(module)}.#{name}/#{arity} argument #{index + 1}"
+
+        case build_args(params, index, conn, tx) do
+          {:ok, args} -> {[{label, fn -> apply(module, name, args) end} | probes], unbuildable}
+          :error -> {probes, [label | unbuildable]}
+        end
+      end)
+    end
+
+    defp build_args(params, probe_index, conn, tx) do
+      params
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, []}, fn {param, index}, {:ok, args} ->
+        case argument(param, index == probe_index, conn, tx) do
+          {:ok, value} -> {:cont, {:ok, [value | args]}}
+          :error -> {:halt, :error}
+        end
+      end)
+      |> case do
+        {:ok, args} -> {:ok, Enum.reverse(args)}
+        :error -> :error
+      end
+    end
+
+    # `:not_a_string` rather than nil: an atom is what a database name read from
+    # application config actually looks like when someone forgot to stringify it.
+    defp argument("String.t()", true, _conn, _tx), do: {:ok, :not_a_string}
+    defp argument("String.t()", false, _conn, _tx), do: {:ok, "probe"}
+    defp argument("conn()", _probe?, conn, _tx), do: {:ok, conn}
+    defp argument("TypeDB.Connection.t()", _probe?, conn, _tx), do: {:ok, conn}
+    defp argument("t()", _probe?, _conn, tx), do: {:ok, tx}
+    defp argument("TypeDB.Transaction.t()", _probe?, _conn, tx), do: {:ok, tx}
+    defp argument("keyword()", _probe?, _conn, _tx), do: {:ok, []}
+    defp argument("type()", _probe?, _conn, _tx), do: {:ok, :read}
+    defp argument("TypeDB.Transaction.type()", _probe?, _conn, _tx), do: {:ok, :read}
+    defp argument("(TypeDB.Transaction.t() -> result)", _probe?, _conn, _tx), do: {:ok, fn _tx -> :ok end}
+    defp argument(_other, _probe?, _conn, _tx), do: :error
+
+    # `transaction/5` carries a `when result: term()`, so its quoted spec is
+    # wrapped in a `:when` the others do not have.
+    defp spec_params(name, definition) do
+      name
+      |> Code.Typespec.spec_to_quoted(definition)
+      |> unwrap_when()
+      |> case do
+        {:"::", _meta, [{^name, _m, args}, _return]} -> Enum.map(args || [], &Macro.to_string/1)
+        _other -> []
+      end
+    end
+
+    defp unwrap_when({:when, _meta, [spec, _guards]}), do: spec
+    defp unwrap_when(spec), do: spec
+  end
+
   describe "the TypeDB delegates" do
     # `TypeDB.version/1` was specced `{:ok, map()}` while `TypeDB.Server.version/1`
     # promised a concrete two-key map — so the convenience delegate was strictly
