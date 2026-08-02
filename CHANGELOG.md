@@ -14,6 +14,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carries 2,000 `insert` statements, 8830ms for 2,000 requests. The middle one
   is the honest competitor, since it is also one round trip — so the 15×
   between them is query compilation, and it widens with the row count.
+- An integration test for the `:schema` default's exclusive lock — the likeliest
+  performance mistake a new user makes, warned about in two places and checked
+  in none. Holding a `:schema` transaction open makes a one-shot query on the
+  default wait for it, while a one-shot `:read` does not notice.
 
 ## [0.3.1] - 2026-08-02
 

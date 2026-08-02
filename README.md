@@ -157,8 +157,13 @@ Reads never commit. Writes and schema changes commit by default; pass
 `:transaction_type` defaults to `:schema`, because that is the only type that
 accepts every kind of query — including `define`. It is also the type that takes
 an exclusive, database-wide lock (see the table below), so **pass `:read` or
-`:write` explicitly** for anything that is not a schema change. Left on the
-default, one-shot queries serialise against each other.
+`:write` explicitly** for anything that is not a schema change.
+
+That lock is not theoretical. Hold a `:schema` transaction open for a second,
+and a one-shot query left on the default waits the whole second for it, while
+the same query with `transaction_type: :read` returns in a millisecond. An
+integration test pins both halves. Left on the default, your queries queue
+behind each other and behind every schema change in the system.
 
 ### Multi-statement transactions
 

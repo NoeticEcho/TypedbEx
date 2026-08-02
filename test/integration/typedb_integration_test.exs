@@ -177,6 +177,52 @@ defmodule TypeDB.IntegrationTest do
       assert is_binary(Answer.warning(answer))
     end
 
+    test "the :schema default serialises one-shot queries, and :read does not", %{
+      conn: conn,
+      database: database
+    } do
+      # `:transaction_type` defaults to `:schema` because that is the only type
+      # that accepts every query, and a `:schema` transaction takes an
+      # exclusive, database-wide lock. The README and the `TypeDB` moduledoc
+      # both warn about it; nothing checked it. It is the likeliest performance
+      # mistake a new user makes, and it would be silent.
+      hold = 500
+
+      {:ok, holder} = Transaction.open(conn, database, :schema)
+      {:ok, _} = Transaction.query(holder, "match $p isa person; limit 1;")
+
+      blocked =
+        Task.async(fn ->
+          :timer.tc(fn -> TypeDB.query(conn, database, "match $p isa person; limit 1;") end)
+        end)
+
+      unblocked =
+        Task.async(fn ->
+          :timer.tc(fn ->
+            TypeDB.query(conn, database, "match $p isa person; limit 1;", transaction_type: :read)
+          end)
+        end)
+
+      Process.sleep(hold)
+      :ok = Transaction.close(holder)
+
+      {blocked_us, blocked_result} = Task.await(blocked, 30_000)
+      {unblocked_us, unblocked_result} = Task.await(unblocked, 30_000)
+
+      assert {:ok, _} = blocked_result
+      assert {:ok, _} = unblocked_result
+
+      # Generous margins on both sides: the point is the order of magnitude
+      # between them, not the exact wait.
+      assert blocked_us > hold * 600,
+             "a one-shot query on the default finished in #{div(blocked_us, 1000)}ms " <>
+               "while a :schema transaction was held for #{hold}ms — it should have waited"
+
+      assert unblocked_us < hold * 400,
+             "a one-shot :read took #{div(unblocked_us, 1000)}ms behind a held :schema " <>
+               "transaction — it should not have waited at all"
+    end
+
     @tag timeout: 300_000
     test "TypeDB truncates a read at 10,000 answers", %{conn: conn, database: database} do
       # The README told people for three releases that "TypeDB applies no cap of
