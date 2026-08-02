@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-02
+
+The driver has checked option *names* since 0.3.0 and their *values* not at all,
+while `TypeDB.Config` had been checking the same values at start-up since 0.1.0.
+The two levels now agree. No public API changed — `test/api_snapshot.txt` is
+byte for byte 0.4.3's — but code that passes a value the driver's own typespecs
+forbid will now hear about it, so this is a minor.
+
+### Upgrading from 0.4.3
+
+One change can be noticed by working code. `answer_count_limit: 0`,
+`timeout: "5000"`, `commit: "true"` — anything whose *value* the option cannot
+take — now raises `ArgumentError` where it used to reach the server and come
+back as `400 HSR2`, or worse, quietly succeed. `nil` still means "unset" and is
+accepted everywhere, so `answer_count_limit: maybe_a_limit` is unaffected. Run
+your tests.
+
 ### Changed
 
 - **A per-call option *value* the option cannot take now raises
@@ -556,7 +573,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.0...v0.4.1
