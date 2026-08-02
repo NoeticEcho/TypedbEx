@@ -134,6 +134,7 @@ defmodule TypeDB.MixProject do
       extras: [
         "README.md",
         "guides/transactions.md",
+        "guides/recipes.md",
         "guides/errors-and-retries.md",
         "guides/observability.md",
         "guides/testing.md",

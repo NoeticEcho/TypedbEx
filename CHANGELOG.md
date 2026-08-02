@@ -8,6 +8,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A fifth guide, [Recipes](guides/recipes.md): paging a `match` bigger than
+  TypeDB's 10,000-answer cap (and why `sort` is not optional there), streaming
+  a whole result set, bulk loading, upsert and why `put` is not one, counting
+  without fetching, deleting in batches, mapping rows onto your own structs,
+  and a schema migration that can run on every boot. The other four guides
+  explain how the driver behaves; this one is what an application has to work
+  out for itself.
+
+  Every recipe was run against a live TypeDB 3.12.1 and carries that run's
+  numbers — 20,000 rows loaded in 2468ms, streamed back in pages of 1,000 in
+  1019ms, deleted in 1447ms. A new integration test executes the same queries,
+  because parsing a guide is not running it and a `sort` clause that stops
+  being accepted parses perfectly.
 - CI runs the token-renewal and TLS suites. Both verify headline claims —
   tokens renewed before they expire, and TLS verification on by default — and
   neither had ever run outside somebody's terminal, because a GitHub Actions

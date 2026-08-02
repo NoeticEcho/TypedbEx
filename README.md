@@ -528,10 +528,14 @@ database, a schema, reads and writes, a parameterised query that survives a
 hostile value, and a transaction — against a TypeDB you start with one `docker
 run`.
 
-Then four guides, for the things a reference page cannot teach:
+Then five guides, for the things a reference page cannot teach:
 
 - **[Transactions](guides/transactions.md)** — the three types, why the default
   is the expensive one, what a commit promises and what it does not.
+- **[Recipes](guides/recipes.md)** — paging a `match` bigger than TypeDB's
+  10,000-answer cap, bulk loading, upsert, counting without fetching, mapping
+  rows onto your own structs, and getting a schema in place at boot. Every one
+  of them run against a live server, with the numbers from that run.
 - **[Errors and retries](guides/errors-and-retries.md)** — what the driver
   retries for you, what it cannot, and how to bound what a call can cost.
 - **[Telemetry and logging](guides/observability.md)** — three levels of span,
