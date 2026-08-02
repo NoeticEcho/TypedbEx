@@ -6,10 +6,18 @@ defmodule TypeDB.JSON do
   order:
 
     1. the module configured as `config :typedb, :json_codec, MyCodec`
-    2. `TypeDB.JSON.Native`, backed by the built-in `JSON` module — this is what
-       every supported Elixir version (1.18+) resolves to
-    3. `TypeDB.JSON.Jason`, when the host application depends on `:jason`
-    4. otherwise an error is raised, asking you to pick one
+    2. `TypeDB.JSON.Native`, backed by the built-in `JSON` module
+
+  In practice the list ends there. This driver requires Elixir 1.18, every
+  version of which has the built-in `JSON`, so step 2 always matches and
+  **`TypeDB.JSON.Jason` is only ever reached by configuring it**:
+
+      config :typedb, :json_codec, TypeDB.JSON.Jason
+
+  `resolve!/0` still falls back to `Jason` and then to an error below step 2.
+  Neither can execute while the Elixir floor is 1.18, and both are kept because
+  they are unreachable owing to that floor rather than to being wrong — deleting
+  them would turn a future change of floor into a silent change of behaviour.
 
   A codec is any module implementing this behaviour.
   """
@@ -112,8 +120,17 @@ defmodule TypeDB.JSON.Jason do
   @moduledoc """
   `TypeDB.JSON` codec backed by [Jason](https://hex.pm/packages/jason).
 
-  Used automatically when `JSON` is unavailable and the host application depends
-  on `:jason`. `:jason` is *not* a dependency of this library.
+  Select it explicitly:
+
+      config :typedb, :json_codec, TypeDB.JSON.Jason
+
+  It is never selected automatically. `TypeDB.JSON` prefers the built-in `JSON`
+  module, which exists on every Elixir this driver supports, so the fallback to
+  this codec cannot be reached — see `TypeDB.JSON` for why the branch is kept
+  anyway.
+
+  `:jason` is an *optional* dependency: declared so the version this codec is
+  written against is resolvable, never installed on its own.
   """
   @behaviour TypeDB.JSON
 
