@@ -79,6 +79,77 @@ defmodule TypeDB.CallOptionsTest do
     assert error.message =~ "expects a keyword list"
   end
 
+  describe "option values" do
+    # The name of an option has been checked since 0.3.0 and its value was not,
+    # so `answer_count_limit: 0` reached the server and came back as an empty
+    # answer, while `-1` and `"10"` came back as `400 HSR2` — the request-parse
+    # code, naming no option. `TypeDB.Config` had rejected all three since
+    # 0.1.0. The two levels now agree.
+    # `nil` is deliberately absent from every row: it means "unset" throughout
+    # the driver, so `answer_count_limit: maybe_a_limit` keeps working. The
+    # cross-check below is what noticed — `TypeDB.Config` accepts it too.
+    @bad %{
+      answer_count_limit: [0, -1, "10", 1.5],
+      transaction_timeout_millis: [0, -1, "x"],
+      schema_lock_acquire_timeout_millis: [0, -1, "x"],
+      timeout: [0, -1, "x"],
+      deadline: [0, -1, "x"],
+      commit: [0, "true"],
+      include_instance_types: [0, "true"],
+      include_query_structure: [0, "true"]
+    }
+
+    @good %{
+      answer_count_limit: [1, 10_000, nil],
+      transaction_timeout_millis: [1, 60_000],
+      schema_lock_acquire_timeout_millis: [1, 60_000],
+      timeout: [1, 60_000, :infinity],
+      deadline: [1, 60_000, :infinity],
+      commit: [true, false],
+      include_instance_types: [true, false],
+      include_query_structure: [true, false]
+    }
+
+    test "a value the option cannot take raises, naming the option and the call", %{
+      conn: conn,
+      tx: tx
+    } do
+      for {name, accepted, call} <- calls(conn, tx),
+          {option, values} <- @bad,
+          option in accepted,
+          value <- values do
+        error = assert_raise(ArgumentError, fn -> call.([{option, value}]) end)
+
+        assert error.message =~ "invalid #{inspect(option)} #{inspect(value)}"
+        assert error.message =~ name
+      end
+    end
+
+    test "the values it can take are accepted", %{conn: conn, tx: tx} do
+      for {name, accepted, call} <- calls(conn, tx),
+          {option, values} <- @good,
+          option in accepted,
+          value <- values do
+        try do
+          call.([{option, value}])
+        rescue
+          error in ArgumentError ->
+            flunk("#{name} rejected #{inspect(option)}: #{inspect(value)} — #{error.message}")
+        end
+      end
+    end
+
+    test "every constrained option is checked the same way TypeDB.Config checks it" do
+      # The two live in different modules and would otherwise drift. Anything
+      # `Config` rejects at start-up, a call rejects too.
+      for {option, values} <- @bad, option in TypeDB.Config.known_options(), value <- values do
+        assert {:error, %TypeDB.Error{kind: :config}} =
+                 TypeDB.Config.new([{:url, "http://example.com"}, {:token, "t"}, {option, value}]),
+               "TypeDB.Config accepts #{inspect(option)}: #{inspect(value)}, a call does not"
+      end
+    end
+  end
+
   test "the accepted sets are the union of the driver's own keys and TypeDB.Options'" do
     # `TypeDB.Options` is where a new query or transaction option gets added,
     # and it is one module away from the lists here. This is the line that

@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A per-call option *value* the option cannot take now raises
+  `ArgumentError`.** Since 0.3.0 the driver has checked option *names* per
+  call; their values still travelled to the server unchecked, while
+  `TypeDB.Config` had rejected the same values at start-up since 0.1.0. So
+  `answer_count_limit: 0` came back as an empty answer, and `-1`, `"10"` and
+  `1.5` came back as `400 HSR2` — the request-parse code, the same one an
+  oversized body gets, naming no option at all. `transaction_timeout_millis: 0`
+  opened a transaction.
+
+  `:answer_count_limit`, `:transaction_timeout_millis`,
+  `:schema_lock_acquire_timeout_millis`, `:timeout`, `:deadline`, `:commit`,
+  `:include_instance_types` and `:include_query_structure` are now checked
+  against the same rules `TypeDB.Config` uses, and a test drives both levels
+  through the same values so they cannot drift apart again. `nil` means "unset"
+  everywhere and is accepted — `answer_count_limit: maybe_a_limit` keeps
+  working.
+
+  Code passing a value the driver's own typespecs already forbade will now hear
+  about it, which is why this is a minor rather than a patch.
+
 ## [0.4.3] - 2026-08-02
 
 0.4.2's new recipes guide told people to bulk load in batches of 2,000 rows.

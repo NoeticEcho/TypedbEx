@@ -220,6 +220,10 @@ defmodule TypeDB do
       key would otherwise be dropped and its default applied, so `commmit:
       false` would commit and a misspelled `:given_rows` would run the query
       with no rows at all.
+    * `ArgumentError` for an option value the option cannot take —
+      `answer_count_limit: 0`, `timeout: "5000"` — checked against the same
+      rules `TypeDB.Config` applies to the connection. `nil` means "unset"
+      throughout and is always accepted.
     * `TypeDB.Error` with kind `:encode` for a `:given_rows` value the driver
       cannot turn into a TypeDB wire value, including a negative
       `TypeDB.Duration`.

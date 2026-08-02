@@ -48,7 +48,7 @@ defmodule TypeDB.CallOptions do
 
     case Keyword.keys(opts) -- accepted do
       [] ->
-        :ok
+        Enum.each(opts, fn {key, value} -> validate_value!(key, value, call) end)
 
       unknown ->
         raise ArgumentError,
@@ -56,5 +56,56 @@ defmodule TypeDB.CallOptions do
                 "#{Enum.map_join(unknown, ", ", &inspect/1)} passed to #{call}. " <>
                 "Accepted: #{accepted |> Enum.sort() |> Enum.map_join(", ", &inspect/1)}."
     end
+  end
+
+  # `TypeDB.Config` has checked these values since 0.1.0 — `answer_count_limit:
+  # 0` there is "invalid :answer_count_limit 0, expected a positive integer, or
+  # unset". Passed per call, the same value used to travel to the server, which
+  # answers `400 HSR2`: the request-parse code, the same one an oversized body
+  # gets, naming no option at all. `0` was worse still, arriving as an empty
+  # answer.
+  #
+  # Only the options whose values are constrained. `:transaction_type` is
+  # checked where it is read, and `:given_rows` by `TypeDB.Given`, both with
+  # better messages than a table could give.
+  @values %{
+    answer_count_limit: {&__MODULE__.positive_integer?/1, "a positive integer"},
+    transaction_timeout_millis: {&__MODULE__.positive_integer?/1, "a positive integer in milliseconds"},
+    schema_lock_acquire_timeout_millis:
+      {&__MODULE__.positive_integer?/1, "a positive integer in milliseconds"},
+    timeout: {&__MODULE__.timeout?/1, "a positive integer in milliseconds, or :infinity"},
+    deadline: {&__MODULE__.timeout?/1, "a positive integer in milliseconds, or :infinity"},
+    commit: {&is_boolean/1, "true or false"},
+    include_instance_types: {&is_boolean/1, "true or false"},
+    include_query_structure: {&is_boolean/1, "true or false"}
+  }
+
+  @doc false
+  def positive_integer?(value), do: is_integer(value) and value > 0
+
+  @doc false
+  def timeout?(:infinity), do: true
+  def timeout?(value), do: positive_integer?(value)
+
+  # `nil` is "unset" everywhere in the driver — `TypeDB.Config` stores it for an
+  # absent `:answer_count_limit`, and `Wire.put_unless_nil/3` drops it from the
+  # request — so `answer_count_limit: user_supplied_limit` keeps working when
+  # that limit is nil. Rejecting it here would be the two levels disagreeing
+  # again, in the other direction.
+  defp validate_value!(_key, nil, _call), do: :ok
+
+  defp validate_value!(key, value, call) do
+    case Map.fetch(@values, key) do
+      {:ok, {valid?, expected}} ->
+        unless valid?.(value) do
+          raise ArgumentError,
+                "invalid #{inspect(key)} #{inspect(value)} passed to #{call}, expected #{expected}"
+        end
+
+      :error ->
+        :ok
+    end
+
+    :ok
   end
 end
