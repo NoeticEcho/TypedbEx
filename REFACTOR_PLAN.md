@@ -75,6 +75,13 @@ examples for anyone implementing `TypeDB.HTTP`.
 
 *Files.* `lib/typedb/http/httpc.ex`, `test/typedb/http_test.exs`.
 
+*Version impact, corrected while executing.* The plan called this a patch. It
+is not: `owned?` is a new field on the public `%TypeDB.HTTP.Httpc{}` struct, so
+`test/api_snapshot.txt` moves, and under this project's 0.x rule that is a minor.
+The field is kept rather than worked around — `TypeDB.HTTP.Finch` has carried
+`owned?: boolean()` in the same snapshot since 0.1.x, and making the two adapters
+answer the ownership question the same way is finding H itself.
+
 *How to check.* Two tests from the audit's probes: a pre-started profile must
 still be alive after `terminate/1`, and a profile the adapter started must be
 gone. Plus the existing supervisor-restart test, which already passes and must
@@ -219,7 +226,7 @@ moves the version number.
 | Step | Finding | Severity | Version impact |
 | --- | --- | --- | --- |
 | 1 | A | major | patch |
-| 2 | B, H | major | patch |
+| 2 | B, H | major | **minor** — adds `owned?` to the `TypeDB.HTTP.Httpc` struct, so the API snapshot moves. Found while executing; the plan said patch. |
 | 3 | C | major | patch |
 | 4 | D | major | patch — but changes which exception is raised |
 | 5 | E | major | patch (test + dev dependency) |

@@ -327,8 +327,8 @@ terminate/1
 
 ## TypeDB.HTTP.Httpc
 
-struct [:profile, :ssl_opts]
-@type t() :: %TypeDB.HTTP.Httpc{profile: atom(), ssl_opts: keyword()}
+struct [:owned?, :profile, :ssl_opts]
+@type t() :: %TypeDB.HTTP.Httpc{owned?: boolean(), profile: atom(), ssl_opts: keyword()}
 init/2
 owner/1
 request/6

@@ -13,7 +13,11 @@ defmodule TypeDB.HTTP.Httpc do
 
   ## Options
 
-    * `:profile` — profile name. Defaults to one derived from the connection name.
+    * `:profile` — an existing or new `:httpc` profile to use instead of the
+      adapter's own. Naming one makes it **yours**: the adapter starts it if it
+      is not running and applies the options below to it, but never stops it.
+      Left unset, the adapter starts a profile of its own, named after the
+      connection, and stops it with the connection.
     * `:max_sessions` — max simultaneous sockets per host. Defaults to `50`.
     * `:max_keep_alive_length` — how many requests `:httpc` may queue onto a
       socket that is already busy. **Defaults to `0`, and raising it is a
@@ -67,17 +71,43 @@ defmodule TypeDB.HTTP.Httpc do
   # so it renders in every crash report. Redacting it also keeps the OS trust
   # store's several hundred kilobytes of `:cacerts` out of those reports.
   @derive {Inspect, except: [:ssl_opts]}
-  defstruct [:profile, :ssl_opts]
+  defstruct [:profile, :ssl_opts, :owned?]
 
-  @type t :: %__MODULE__{profile: atom(), ssl_opts: keyword()}
+  @type t :: %__MODULE__{profile: atom(), ssl_opts: keyword(), owned?: boolean()}
 
   @impl true
   def init(name, opts) do
-    profile = Keyword.get(opts, :profile) || :"#{name}.HTTP"
+    case Keyword.get(opts, :profile) do
+      nil -> start_owned(generated_profile(name), opts)
+      given -> adopt(given, opts)
+    end
+  end
 
+  # Unique per *instance*, exactly as `TypeDB.HTTP.Finch` names its pool, so that
+  # two connections can never end up sharing one profile — where the first to
+  # terminate would take the other's transport down with it. The connection name
+  # stays as the prefix so profiles remain identifiable from the outside.
+  defp generated_profile(name), do: :"#{name}.HTTP.#{System.unique_integer([:positive])}"
+
+  defp start_owned(profile, opts) do
     with :ok <- start_profile(profile),
          :ok <- set_profile_options(profile, opts) do
-      {:ok, %__MODULE__{profile: profile, ssl_opts: ssl_opts(opts)}}
+      {:ok, %__MODULE__{profile: profile, ssl_opts: ssl_opts(opts), owned?: true}}
+    end
+  end
+
+  # A profile the caller named is the caller's. `:profile` is documented as
+  # "profile name", not as "a profile to take over", and an application that
+  # points a connection at its own `:httpc` profile — to share sockets, or
+  # because that profile carries proxy settings — must not lose it when the
+  # connection stops. `TypeDB.HTTP.Finch` draws the same line for its `:name`.
+  #
+  # Its options are still applied: naming a profile says which one to use, not
+  # that the driver should run on settings it cannot see.
+  defp adopt(profile, opts) do
+    with :ok <- start_profile(profile),
+         :ok <- set_profile_options(profile, opts) do
+      {:ok, %__MODULE__{profile: profile, ssl_opts: ssl_opts(opts), owned?: false}}
     end
   end
 
@@ -85,10 +115,12 @@ defmodule TypeDB.HTTP.Httpc do
   def owner(%__MODULE__{}), do: nil
 
   @impl true
-  def terminate(%__MODULE__{profile: profile}) do
+  def terminate(%__MODULE__{owned?: true, profile: profile}) do
     _ = :inets.stop(:httpc, profile)
     :ok
   end
+
+  def terminate(%__MODULE__{}), do: :ok
 
   @impl true
   def request(%__MODULE__{} = state, method, url, headers, body, opts) do

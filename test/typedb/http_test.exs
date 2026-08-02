@@ -54,14 +54,48 @@ defmodule TypeDB.HTTPTest do
   end
 
   describe "Httpc lifecycle" do
-    test "init/1 starts an isolated profile and terminate/1 stops it" do
-      profile = :"typedb_http_test_#{System.unique_integer([:positive])}"
+    # `:inets` registers a profile's manager under this name, which is the only
+    # answer to "is it still there" that does not start one by asking.
+    defp profile_alive?(profile), do: Process.whereis(:"httpc_#{profile}") != nil
 
-      assert {:ok, state} = Httpc.init(:test_conn, profile: profile)
-      assert state.profile == profile
-      assert is_pid(:httpc.which_sessions(profile) |> elem(0) |> then(fn _ -> self() end))
+    test "a profile the adapter started is stopped with it" do
+      assert {:ok, state} = Httpc.init(:test_conn, [])
+      assert state.owned?
+      assert profile_alive?(state.profile)
 
       assert :ok = Httpc.terminate(state)
+      refute profile_alive?(state.profile)
+    end
+
+    test "a profile the caller named is left alone" do
+      # `:profile` names a profile to *use*, not one to take over. An
+      # application that runs its own — to share sockets, or because it carries
+      # proxy settings — used to lose it when the TypeDB connection stopped, and
+      # the breakage landed somewhere else entirely. `TypeDB.HTTP.Finch` has
+      # drawn this line with `owned?` since 0.1.x; this adapter had no notion of
+      # ownership at all.
+      profile = :"typedb_borrowed_#{System.unique_integer([:positive])}"
+      {:ok, _pid} = :inets.start(:httpc, [{:profile, profile}])
+      on_exit(fn -> :inets.stop(:httpc, profile) end)
+
+      assert {:ok, state} = Httpc.init(:test_conn, profile: profile)
+      refute state.owned?
+
+      assert :ok = Httpc.terminate(state)
+      assert profile_alive?(profile), "the adapter stopped a profile it did not start"
+    end
+
+    test "each connection gets its own profile" do
+      # Named per instance, as `TypeDB.HTTP.Finch` names its pool. Sharing one
+      # meant the first connection to terminate took the other's transport down.
+      assert {:ok, first} = Httpc.init(:same_name, [])
+      assert {:ok, second} = Httpc.init(:same_name, [])
+      on_exit(fn -> Enum.each([first, second], &Httpc.terminate/1) end)
+
+      refute first.profile == second.profile
+
+      assert :ok = Httpc.terminate(first)
+      assert profile_alive?(second.profile), "one connection's shutdown broke a live sibling"
     end
 
     test "init/1 tolerates an already-started profile" do
@@ -69,9 +103,11 @@ defmodule TypeDB.HTTPTest do
 
       assert {:ok, first} = Httpc.init(:test_conn, profile: profile)
       assert {:ok, second} = Httpc.init(:test_conn, profile: profile)
+      on_exit(fn -> :inets.stop(:httpc, profile) end)
 
       Httpc.terminate(first)
       assert second.profile == profile
+      assert profile_alive?(profile)
     end
   end
 
