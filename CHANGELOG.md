@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `TypeDB.ConceptRow.to_typed_map/1`, and `typed: true` on
+  `TypeDB.ConceptRow.to_struct/3`. `typed_value/2` returned a `Decimal`, a
+  `TypeDB.Duration` or a `NaiveDateTime` one variable at a time; the two
+  functions that convert a whole row returned the wire string, so the same row
+  read natively or not depending on which you reached for. `to_map/1` is
+  unchanged — it is the wire form on purpose, and now says so.
+
 ### Changed
 
 - **A per-call option the driver does not accept now raises `ArgumentError`.**

@@ -147,7 +147,9 @@ get/2
 get_and_update/3
 pop/2
 to_map(t()) :: %{optional(String.t()) => term()}
-to_struct(t(), module()) :: struct()
+to_struct(t(), module(), keyword()) :: struct()
+to_struct/2
+to_typed_map(t()) :: %{optional(String.t()) => term()}
 typed_value(t(), String.t()) :: term()
 value(t(), String.t()) :: term()
 variables(t()) :: [String.t()]

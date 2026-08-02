@@ -225,6 +225,44 @@ defmodule TypeDB.ConceptTest do
       assert %Concept.Entity{} = map["p"]
     end
 
+    test "to_typed_map/1 casts every value, where to_map/1 hands back the wire form" do
+      # The gap this closes: `typed_value/2` gave a native term one variable at
+      # a time, and the two functions that convert a whole row did not, so the
+      # same row read as %TypeDB.Duration{} or as "P1Y2M3DT4H5M6S" depending on
+      # which one you reached for.
+      row =
+        %TypeDB.ConceptRow{
+          data: %{
+            "name" => %Concept.Value{value: "Alice", value_type: "string"},
+            "balance" => %Concept.Value{value: "12.345dec", value_type: "decimal"},
+            "worked" => %Concept.Value{value: "P1Y2M3DT4H5M6S", value_type: "duration"},
+            "born" => %Concept.Value{value: "1990-03-01T10:30:00", value_type: "datetime"},
+            "p" => %Concept.Entity{iid: "0x1"},
+            "missing" => nil
+          }
+        }
+
+      wire = ConceptRow.to_map(row)
+      typed = ConceptRow.to_typed_map(row)
+
+      assert wire["worked"] == "P1Y2M3DT4H5M6S"
+      assert %TypeDB.Duration{months: 14, days: 3} = typed["worked"]
+
+      assert wire["born"] == "1990-03-01T10:30:00"
+      assert typed["born"] == ~N[1990-03-01 10:30:00]
+
+      assert wire["balance"] == "12.345dec"
+      # A Decimal when that dependency is loaded, the string without it — and
+      # the suffix is gone either way. Named as a value, never as a struct
+      # pattern: `%Decimal{}` in a pattern would not compile without the dep.
+      assert typed["balance"] == Concept.cast("12.345dec", "decimal")
+
+      # Unchanged by either: a string is already native, an entity has no value.
+      assert wire["name"] == typed["name"]
+      assert %Concept.Entity{} = typed["p"]
+      assert typed["missing"] == nil
+    end
+
     test "carries involved_blocks", %{row: row} do
       assert row.involved_blocks == [0, 1]
     end
@@ -283,6 +321,24 @@ defmodule TypeDB.ConceptTest do
 
     test "an empty row yields the struct's defaults" do
       assert %Person{} == TypeDB.ConceptRow.to_struct(row(%{}), Person)
+    end
+
+    test "typed: true casts the values on the way in" do
+      built =
+        row(%{"name" => attribute("P1Y", "duration")})
+        |> TypeDB.ConceptRow.to_struct(Person, typed: true)
+
+      assert %Person{name: %TypeDB.Duration{months: 12}} = built
+    end
+
+    test "an option it does not accept is rejected rather than ignored" do
+      error =
+        assert_raise ArgumentError, fn ->
+          TypeDB.ConceptRow.to_struct(row(%{}), Person, tpyed: true)
+        end
+
+      assert error.message =~ "unknown option :tpyed"
+      assert error.message =~ "to_struct/3"
     end
   end
 

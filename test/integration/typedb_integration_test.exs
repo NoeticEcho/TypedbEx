@@ -189,6 +189,66 @@ defmodule TypeDB.IntegrationTest do
       assert %Concept.Attribute{value_type: "integer"} = row["age"]
     end
 
+    test "a whole row of every value type reads natively in one call", %{conn: conn, database: database} do
+      # to_typed_map/1 against the server rather than against a hand-built row:
+      # the strings TypeDB actually sends are the input the casts have to
+      # handle, and the stub has been wrong about those before.
+      assert {:ok, _} =
+               TypeDB.query(conn, database, """
+                 define
+                   attribute flag, value boolean;
+                   attribute score, value double;
+                   attribute balance, value decimal;
+                   attribute born, value date;
+                   attribute seen, value datetime;
+                   attribute seen_tz, value datetime-tz;
+                   attribute worked, value duration;
+                   person owns flag, owns score, owns balance, owns born,
+                          owns seen, owns seen_tz, owns worked;
+               """)
+
+      assert {:ok, _} =
+               TypeDB.query(conn, database, """
+                 insert $p isa person,
+                   has name "Alice", has age 30, has flag true, has score 1.5,
+                   has balance 12.345dec, has born 1994-03-01,
+                   has seen 2024-03-01T10:30:00, has seen_tz 2024-03-01T10:30:00 Europe/London,
+                   has worked P1Y2M3DT4H5M6S;
+               """)
+
+      assert {:ok, %{rows: [row]}} =
+               TypeDB.query(
+                 conn,
+                 database,
+                 """
+                   match $p isa person, has name $name, has age $age, has flag $flag,
+                     has score $score, has balance $balance, has born $born,
+                     has seen $seen, has seen_tz $seen_tz, has worked $worked;
+                 """,
+                 transaction_type: :read
+               )
+
+      typed = ConceptRow.to_typed_map(row)
+
+      assert typed["name"] == "Alice"
+      assert typed["age"] == 30
+      assert typed["flag"] == true
+      assert typed["score"] == 1.5
+      assert typed["born"] == ~D[1994-03-01]
+      # TypeDB pads the datetime to microseconds on the way back out, so this is
+      # ~N[2024-03-01 10:30:00.000000] and not what was inserted. The stub said
+      # otherwise; the server is the authority.
+      assert typed["seen"] == ~N[2024-03-01 10:30:00.000000]
+      assert %TypeDB.DateTimeTZ{} = typed["seen_tz"]
+      assert %TypeDB.Duration{months: 14, days: 3} = typed["worked"]
+      assert typed["balance"] == Concept.cast("12.345dec", "decimal")
+
+      # The wire form is still the wire form, which is the reason both exist.
+      wire = ConceptRow.to_map(row)
+      assert wire["worked"] == "P1Y2M3DT4H5M6S"
+      assert wire["born"] == "1994-03-01"
+    end
+
     test "relations and role types", %{conn: conn, database: database} do
       assert {:ok, _} =
                TypeDB.query(conn, database, """

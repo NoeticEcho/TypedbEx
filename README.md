@@ -253,7 +253,19 @@ row["name"]    #=> %TypeDB.Concept.Attribute{value: "Alice", value_type: "string
 
 TypeDB.ConceptRow.value(row, "name")        #=> "Alice"
 TypeDB.ConceptRow.typed_value(row, "born")  #=> ~D[1994-03-01]
-TypeDB.ConceptRow.to_map(row)               #=> %{"name" => "Alice", "age" => 30}
+```
+
+A whole row at once, either as TypeDB sent it or converted:
+
+```elixir
+TypeDB.ConceptRow.to_map(row)
+#=> %{"name" => "Alice", "born" => "1994-03-01", "worked" => "P1Y2M3DT4H5M6S"}
+
+TypeDB.ConceptRow.to_typed_map(row)
+#=> %{"name" => "Alice", "born" => ~D[1994-03-01], "worked" => %TypeDB.Duration{months: 14, ...}}
+
+TypeDB.ConceptRow.to_struct(row, Person, typed: true)
+#=> %Person{name: "Alice", born: ~D[1994-03-01]}
 ```
 
 ### Values
