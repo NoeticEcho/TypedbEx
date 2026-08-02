@@ -256,6 +256,14 @@ defmodule TypeDB.CallOptionsTest do
       assert elapsed_ms(fn -> TypeDB.databases(conn, deadline: 600) end) in 500..2_000
       assert elapsed_ms(fn -> TypeDB.health(conn, deadline: 600) end) in 500..2_000
     end
+
+    test "and bounds the one function that makes two requests", %{silent: conn} do
+      # `create_if_not_exists/3` sends a create and, if that fails, a get. Both
+      # used to be given the caller's full budget, so `deadline: 600` could cost
+      # 1200ms — the option meaning something different here than everywhere
+      # else. The second request now gets what the first did not spend.
+      assert elapsed_ms(fn -> TypeDB.Database.create_if_not_exists(conn, "social", deadline: 600) end) in 500..1_100
+    end
   end
 
   test "the accepted sets are the union of the driver's own keys and TypeDB.Options'" do

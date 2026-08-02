@@ -75,6 +75,15 @@ defmodule TypeDB.Config do
       timeout or the budget that is left, and a retry that could not finish
       inside the budget is not started.
 
+      **It cannot cut short a connect that is already blocking.** The budget is
+      enforced between attempts and by shortening each attempt's `:timeout`,
+      which is the *receive* timeout; opening the socket is bounded by
+      `:connect_timeout` alone. So a call to a host that accepts nothing —
+      a black-holed address, a dropped route — can outlive its `:deadline` by up
+      to one `:connect_timeout`. Size the two together. Making this exact would
+      mean deriving the connect timeout per request, which `TypeDB.HTTP.Finch`
+      cannot do: Mint reads it from the pool, and the pool is built once.
+
   ## Reading configuration from the environment
 
       TypeDB.start_link(

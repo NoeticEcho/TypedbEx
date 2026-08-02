@@ -38,7 +38,7 @@ rather than a patch.
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.5.1"},
+    {:typedb, "~> 0.6.0"},
     # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
     {:finch, "~> 0.23"}
   ]

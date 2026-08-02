@@ -135,6 +135,8 @@ defmodule TypeDB.Database do
     # function the caller actually wrote.
     CallOptions.validate!(opts, CallOptions.request(), "TypeDB.Database.create_if_not_exists/3")
 
+    started_at = System.monotonic_time(:millisecond)
+
     case create(conn, name, opts) do
       :ok ->
         :ok
@@ -142,16 +144,36 @@ defmodule TypeDB.Database do
       {:error, error} ->
         # `get/3` rather than `exists?/3`: this function's contract is to return
         # the error, and `exists?/3` raises on anything but a clean 404.
-        #
-        # Both calls get the caller's `:timeout` and `:deadline`, so the pair
-        # can cost twice the budget. `:deadline` bounds a call, not a function
-        # that makes two of them; the alternative is to give the second call
-        # what the first did not spend, which is arithmetic this driver does not
-        # do anywhere else.
-        case get(conn, name, opts) do
+        case get(conn, name, remaining_budget(opts, started_at)) do
           {:ok, _} -> :ok
           {:error, _} -> {:error, error}
         end
+    end
+  end
+
+  # This is the one function in the driver that makes two requests for one call,
+  # and `:deadline` is documented as the budget for *the whole call*. Handing the
+  # second request the same number the first already spent would let
+  # `deadline: 5_000` take ten seconds, which is the option meaning something
+  # different here than everywhere else.
+  #
+  # `:timeout` is deliberately not adjusted: it bounds one attempt, and these are
+  # two attempts.
+  defp remaining_budget(opts, started_at) do
+    case opts[:deadline] do
+      nil ->
+        opts
+
+      :infinity ->
+        opts
+
+      budget ->
+        # At least 1ms: a budget that has already run out should produce the
+        # deadline error from `TypeDB.Transport`, which names what was asked for,
+        # rather than a `:timeout` of zero meaning something different to each
+        # adapter.
+        spent = System.monotonic_time(:millisecond) - started_at
+        Keyword.put(opts, :deadline, max(1, budget - spent))
     end
   end
 

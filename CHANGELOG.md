@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-02
+
 A second full audit, at `367a393`, and the refactor it produced. Eight findings,
 none critical; all eight fixed in seven commits, each verified by reintroducing
 the defect and watching the new test fail. `AUDIT.md` carries the findings and
@@ -58,6 +60,23 @@ before.
   built-in `JSON` module always wins. The branch is kept — it is unreachable
   because of a version floor, not because it is wrong — and both moduledocs now
   say so.
+- **`Database.create_if_not_exists/3` could spend its `:deadline` twice.** It is
+  the one function in the driver that makes two requests for one call, and both
+  were given the caller's full budget, so `deadline: 5_000` could take ten
+  seconds. The second request now gets what the first did not spend. `:timeout`
+  is deliberately unchanged: it bounds one attempt, and these are two.
+
+### Known limits
+
+- **`:deadline` cannot cut short a connect that is already blocking.** It is
+  enforced between attempts and by shortening each attempt's receive timeout;
+  opening the socket is bounded by `:connect_timeout` alone, so a call to a host
+  that accepts nothing can outlive its deadline by up to one `:connect_timeout`.
+  Size the two together. This is documented rather than fixed on purpose:
+  deriving the connect timeout per request is impossible under the default
+  adapter — Mint reads it from a pool built once — and doing it for the other two
+  would make the same option mean different things depending on your transport.
+  Now stated in `TypeDB.Config` and in the errors guide.
 
 
 ## [0.5.1] - 2026-08-02
@@ -694,7 +713,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.2...v0.4.3

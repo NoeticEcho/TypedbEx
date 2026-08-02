@@ -110,6 +110,17 @@ A readiness probe is the clearest case for the last one: waiting the
 connection's default sixty seconds to learn that a server is down is not a
 probe.
 
+One limit worth knowing before you rely on it: **`:deadline` cannot cut short a
+connect that is already blocking.** It is enforced between attempts and by
+shortening each attempt's receive timeout; opening the socket is bounded by
+`:connect_timeout` alone. A call to a host that accepts nothing — a black-holed
+address, a dropped route — can therefore outlive its deadline by up to one
+`:connect_timeout`, so size the two together. This is not an oversight that a
+patch will remove: making it exact would mean deriving the connect timeout per
+request, and Finch reads it from a pool that is built once. Doing it for the
+other two adapters and not for the default would make the same option mean
+different things depending on your transport, which this driver does not do.
+
 Backoff is jittered — drawn uniformly from `0..base × 2ⁿ⁻¹` — so that callers who
 failed together do not retry together. Pass a function to `:retry_backoff` when
 you need a delay you can predict.
