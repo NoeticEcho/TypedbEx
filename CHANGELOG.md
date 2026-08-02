@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-02
+
+A correctness fix in the documentation, which is where this one lived: the
+README told people TypeDB does not cap answer counts, and it caps at 10,000.
+No public API changed — `test/api_snapshot.txt` is byte for byte 0.3.0's — so
+this is a patch, with one new log line as the only behaviour change.
+
 ### Added
 
 - The driver now logs a `:warning` when TypeDB attaches a warning to an answer,
@@ -386,7 +393,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.2.0...v0.2.1
