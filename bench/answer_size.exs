@@ -44,9 +44,10 @@ end)
 query = "match $p isa person, has name $name, has age $age;"
 
 # The raw response, straight from the adapter: what crossed the network, before
-# any of it became an Elixir term. The connection publishes its adapter state and token in its ETS table, which
-# is what lets requests run in the caller's process — and what lets this script
-# borrow both rather than re-implementing sign-in.
+# any of it became an Elixir term. The connection publishes its adapter state
+# and its token in its ETS table — which is what lets requests run in the
+# caller's process, and what lets this script borrow both rather than
+# re-implementing sign-in.
 [{:http_state, adapter_state}] = :ets.lookup(conn, :http_state)
 [{:token, token, _issued_at}] = :ets.lookup(conn, :token)
 

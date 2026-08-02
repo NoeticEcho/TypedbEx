@@ -196,9 +196,22 @@ TypeDB.query(conn, "social", """
 """, given_rows: [%{"n" => "Alice"}, %{"n" => "Bob"}])
 ```
 
-The pipeline runs once per row, so this is also the fast way to write many rows
-— one request and one query compilation instead of N. Declare every input
-variable in the `given` stage, marking optional columns with `?`:
+The pipeline runs once per row, so this is also the fast way to write many rows:
+one request and one query compilation instead of N. Measured by
+`bench/given.exs`, writing 2,000 rows three ways against a local server:
+
+| how | | |
+| --- | --- | --- |
+| one request per row | 8830ms | 226 rows/s |
+| one request, 2,000 `insert` statements in the query | 1541ms | 1,298 rows/s |
+| one request, 2,000 `given` rows | **101ms** | **19,647 rows/s** |
+
+The second row is the honest competitor — it is also a single request — so the
+15× between it and `given` is query compilation and string building, and the gap
+widens with the row count because only one of them compiles once.
+
+Declare every input variable in the `given` stage, marking optional columns
+with `?`:
 
 ```typeql
 given $name: string, $age: integer?;

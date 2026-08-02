@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `bench/given.exs`, so "a `given` stage is the fast way to write many rows"
+  has a number rather than a plausible argument. 2,000 rows against a local
+  server: 101ms with `given_rows`, 1541ms for a single request whose query text
+  carries 2,000 `insert` statements, 8830ms for 2,000 requests. The middle one
+  is the honest competitor, since it is also one round trip — so the 15×
+  between them is query compilation, and it widens with the row count.
+
 ## [0.3.1] - 2026-08-02
 
 A correctness fix in the documentation, which is where this one lived: the

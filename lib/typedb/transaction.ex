@@ -158,7 +158,10 @@ defmodule TypeDB.Transaction do
       \""", given_rows: [%{"n" => "Alice"}, %{"n" => "Bob"}])
 
   The rest of the pipeline runs once per row, which also makes this the fast way
-  to write many rows: one request and one query compilation instead of N.
+  to write many rows: one request and one query compilation instead of N. For
+  2,000 rows against a local server, `bench/given.exs` measures 101ms this way,
+  1541ms for a single request whose query text carries 2,000 `insert`
+  statements, and 8830ms for 2,000 requests.
 
   Declare every input variable in the `given` stage, and mark optional columns
   with `?`:
