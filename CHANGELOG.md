@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- An adapter parity suite: the same seven odd-but-legal server responses —
+  a redirect, a `204`, a mis-cased header, a duplicated one, JSON under the
+  wrong content type, a `503` with a TypeDB error body, an empty `200` — put
+  through all three adapters, asserting they answer identically. The head-of-
+  line bug in 0.4.0 survived three releases because each adapter was only ever
+  exercised against a well-behaved server. Verified to catch a real divergence
+  by turning Req's redirect following back on.
+
 ### Fixed
 
 - **Stopping a connection could crash it.** `TypeDB.HTTP.Finch.terminate/1`
