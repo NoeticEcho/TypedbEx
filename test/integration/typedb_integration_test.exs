@@ -193,7 +193,16 @@ defmodule TypeDB.IntegrationTest do
 
       blocked =
         Task.async(fn ->
-          :timer.tc(fn -> TypeDB.query(conn, database, "match $p isa person; limit 1;") end)
+          :timer.tc(fn ->
+            TypeDB.query(conn, database, "match $p isa person; limit 1;",
+              # Without this the waiter races TypeDB's own lock-acquire
+              # timeout, and a slow runner loses: CI failed with
+              # "[TXN1] Transaction timeout: timed out waiting on channel",
+              # which is the lock working and the test being wrong about how
+              # long it is allowed to take.
+              schema_lock_acquire_timeout_millis: 60_000
+            )
+          end)
         end)
 
       unblocked =

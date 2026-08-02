@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Under `:httpc`, one slow query stalled every other request on the
+  connection.** The adapter let `:httpc` queue up to 100 requests onto a socket
+  that was already busy, and `:httpc` prefers an existing session to opening
+  another *even while it is in flight* — so a query TypeDB was slow to answer
+  held up everything behind it. Measured against 3.12.1 with a `:schema`
+  transaction held for 500ms: under Finch the waiting one-shot took 503ms and a
+  concurrent `:read` took 2ms, while under `:httpc` both sat until the request
+  timeout and the waiting one failed outright. That made "N processes issue N
+  concurrent requests" true of two adapters out of three.
+
+  `:max_keep_alive_length` now defaults to `0`, so a busy socket is never
+  queued behind: `:httpc` opens another, bounded by `:max_sessions`. It costs
+  nothing — sequential throughput is unchanged and concurrent throughput
+  improved, 437 req/s against 368 at 64-way with less than half the p99 — and
+  the suite now runs a slow-request-beside-a-fast-one test against all three
+  adapters. Raising the option above `0` is now documented as a decision about
+  head-of-line blocking rather than a tuning knob.
+
 ### Added
 
 - `bench/given.exs`, so "a `given` stage is the fast way to write many rows"

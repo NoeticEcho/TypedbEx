@@ -6,7 +6,7 @@
 
 An Elixir driver for [TypeDB](https://typedb.com), built on the TypeDB HTTP API.
 
-- **Fast under load.** Finch-backed by default: ~1800 req/s at 200-way concurrency, where OTP's `:httpc` manages 375 with a p99 six times longer. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone. The script is in `bench/`.
+- **Fast under load.** Finch-backed by default: ~1840 req/s at 200-way concurrency, where OTP's `:httpc` manages 408 with a p99 five times longer. A swappable transport keeps `:httpc` available for deployments that must run on OTP alone. The script is in `bench/`.
 - **Concurrent by construction.** Requests run in the calling process. The connection process only mints and renews the auth token, so it is never a bottleneck.
 - **Tokens handled for you.** The driver reads the token's own lifetime and renews it *before* it expires, so ordinary traffic never spends a round trip on a `401` — with reactive renewal still there as the safety net. Verified with 200-way bursts against a server issuing one-second tokens.
 - **Typed answers.** Concept rows and documents decode into structs, with TypeDB's temporal and decimal types available as native Elixir terms.
@@ -484,12 +484,12 @@ with a warm pool:
 
 | Concurrency | `:httpc` | Req | Finch |
 | --- | --- | --- | --- |
-| 16 | 465 req/s, p50 30ms | 1604 req/s, p50 10ms | 1900 req/s, p50 8ms |
-| 64 | 368 req/s, p50 152ms | 1553 req/s, p50 39ms | 1747 req/s, p50 35ms |
-| 200 | 375 req/s, p50 270ms | 1637 req/s, p50 110ms | 1824 req/s, p50 103ms |
+| 16 | 569 req/s, p50 28ms | 1656 req/s, p50 9ms | 2052 req/s, p50 7ms |
+| 64 | 437 req/s, p50 146ms | 1628 req/s, p50 38ms | 1830 req/s, p50 32ms |
+| 200 | 408 req/s, p50 336ms | 1675 req/s, p50 101ms | 1840 req/s, p50 100ms |
 
-`:httpc` does not scale with concurrency: four to five times slower throughout,
-with a p99 that reaches 685ms where Finch's is 116ms. Pick it deliberately, not
+`:httpc` does not scale with concurrency: three to four times slower throughout,
+with a p99 that reaches 553ms where Finch's is 112ms. Pick it deliberately, not
 by default. Run the script yourself — the ratio is the point, the absolute
 numbers belong to whatever machine produced them.
 

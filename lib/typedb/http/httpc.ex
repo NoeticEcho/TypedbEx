@@ -15,8 +15,15 @@ defmodule TypeDB.HTTP.Httpc do
 
     * `:profile` — profile name. Defaults to one derived from the connection name.
     * `:max_sessions` — max simultaneous sockets per host. Defaults to `50`.
-    * `:max_keep_alive_length` — max requests queued per keep-alive socket.
-      Defaults to `100`.
+    * `:max_keep_alive_length` — how many requests `:httpc` may queue onto a
+      socket that is already busy. **Defaults to `0`, and raising it is a
+      decision about head-of-line blocking**, not about throughput: anything
+      above `0` means a request TypeDB is slow to answer — one waiting on the
+      schema lock, a long analytical read — delays every request queued behind
+      it on the same socket. At `100`, which this adapter used to default to, a
+      500ms wait on one query made a concurrent one wait the same 500ms and
+      then some. `0` opens another socket instead, bounded by `:max_sessions`,
+      and measured faster at every concurrency above one.
     * `:keep_alive_timeout` — idle keep-alive socket lifetime, ms. Defaults to
       `120_000`.
     * `:ssl` — TLS options passed to `:ssl`. Merged over the secure defaults
@@ -40,7 +47,19 @@ defmodule TypeDB.HTTP.Httpc do
   require Logger
 
   @default_max_sessions 50
-  @default_max_keep_alive_length 100
+  # Zero, so that `:httpc` never queues a request behind one already in flight.
+  # This is not a tuning choice. At the old default of 100, a request TypeDB
+  # held for 500ms — a one-shot query waiting on the schema lock — delayed every
+  # other request on the connection behind it, and under load they timed out
+  # rather than merely arriving late. Finch, which has a real pool, does not do
+  # this, so the driver's "N processes issue N concurrent requests" was true of
+  # two adapters out of three.
+  #
+  # It costs nothing: sequential keep-alive reuse is unaffected (1-way
+  # throughput is identical), and bench/transport.exs measures 0 as *faster*
+  # under concurrency — 419 req/s against 315 at 64-way, with less than half
+  # the p99.
+  @default_max_keep_alive_length 0
   @default_keep_alive_timeout :timer.minutes(2)
 
   # `:ssl_opts` is where a mutual-TLS deployment's client key and its passphrase
