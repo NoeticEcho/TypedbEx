@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **A per-call option the driver does not accept now raises `ArgumentError`.**
+  It used to be dropped in silence and the default applied, so `commmit: false`
+  committed and `given: [...]` — for `given_rows: [...]` — ran the query with no
+  rows at all, which surfaces as a server-side complaint about a variable being
+  both an attribute and a value and names nothing that leads you to the typo.
+  `TypeDB.Config` has rejected unknown *connection* options since 0.1.0 with
+  this exact reasoning; this is the rest of the surface: `TypeDB.query/4`,
+  `TypeDB.transaction/5`, and `TypeDB.Transaction.open/4`, `query/3`,
+  `analyze/3`, `commit/2`, `rollback/2` and `close/2`. Found by running the
+  published 0.2.2 package from an application that is not this repository.
+
+  Code passing a stray option starts failing, which is the point — but it is a
+  behaviour change, so it lands in a minor rather than a patch.
+
+### Fixed
+
+- `TypeDB.Transaction.query/3`'s docs said an unencodable `:given_rows` value
+  raises kind `:config`. It has raised `:encode` since 0.2.0.
+
 ## [0.2.2] - 2026-08-01
 
 Evidence. Every number this file publishes is now produced by a script in the

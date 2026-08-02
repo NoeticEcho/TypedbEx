@@ -146,7 +146,19 @@ defmodule TypeDB do
   connection means one HTTP pool.
   """
 
-  alias TypeDB.{Answer, Connection, Database, Error, Given, Options, Server, Telemetry, Transaction, Wire}
+  alias TypeDB.{
+    Answer,
+    CallOptions,
+    Connection,
+    Database,
+    Error,
+    Given,
+    Options,
+    Server,
+    Telemetry,
+    Transaction,
+    Wire
+  }
 
   @typedoc "A connection: the registered name of a `TypeDB.Connection` process."
   @type conn :: Connection.t()
@@ -204,6 +216,10 @@ defmodule TypeDB do
 
     * `ArgumentError` for an invalid `:transaction_type` — that is a literal in
       your source, not data.
+    * `ArgumentError` for an option this function does not accept. A misspelled
+      key would otherwise be dropped and its default applied, so `commmit:
+      false` would commit and a misspelled `:given_rows` would run the query
+      with no rows at all.
     * `TypeDB.Error` with kind `:encode` for a `:given_rows` value the driver
       cannot turn into a TypeDB wire value, including a negative
       `TypeDB.Duration`.
@@ -226,6 +242,7 @@ defmodule TypeDB do
   """
   @spec query(conn(), String.t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(conn, database, query, opts \\ []) when is_binary(database) and is_binary(query) do
+    CallOptions.validate!(opts, CallOptions.query(), "TypeDB.query/4")
     transaction_type = Keyword.get(opts, :transaction_type, :schema)
 
     unless transaction_type in [:read, :write, :schema] do
@@ -283,7 +300,9 @@ defmodule TypeDB do
   ## Options
 
   Transaction options from `TypeDB.Options`, plus `:timeout` and `:deadline`,
-  which are forwarded to the request that opens the transaction.
+  which are forwarded to the request that opens the transaction. Anything else
+  raises `ArgumentError` rather than being ignored — query options belong on the
+  queries inside the block, not here.
 
   ## Examples
 
@@ -307,6 +326,7 @@ defmodule TypeDB do
           result | {:error, Error.t()}
         when result: term()
   def transaction(conn, database, type, fun, opts \\ []) when is_function(fun, 1) do
+    CallOptions.validate!(opts, CallOptions.open(), "TypeDB.transaction/5")
     metadata = %{connection: conn, database: database, type: type}
 
     # The one span that covers more than a single request: open, the block's
