@@ -6,9 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Two additions, both asked for by a real application rather than by a reading of
-the code — see Audit III in `AUDIT.md`, which was conducted through
-`NoeticEcho/newgen-elixir`.
+## [0.7.0] - 2026-08-02
+
+Three additions, and not one of them came from reading this code. Two are from
+Audit III, which was conducted *through* a real application —
+`NoeticEcho/newgen-elixir` — by reading how the driver is actually used and
+treating every workaround that application had to write as evidence of something
+missing. The third is from an issue that application's author filed.
+
+That is a different way to find things than the two audits before it, and worth
+naming: Audit I read `lib/` and found 31 things, Audit II found 8, and a third
+pass with the same eyes would have found fewer still. A caller finds different
+things, because a caller meets the API rather than the implementation.
+
+A minor under the 0.x rule: `test/api_snapshot.txt` gains three functions.
+Nothing is removed and nothing changes shape.
 
 ### Added
 
@@ -770,7 +782,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.4.3...v0.5.0
