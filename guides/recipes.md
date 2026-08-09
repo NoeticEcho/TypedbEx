@@ -117,6 +117,62 @@ For "does this exist", stop at one rather than counting everything:
 TypeDB.Answer.rows(answer) != []
 ```
 
+## Read a lot of rows by key
+
+You have 500 ids and you want the rows behind them. **One `given` row per key**,
+which makes the keys a table the server joins against:
+
+```elixir
+{:ok, answer} =
+  TypeDB.query(conn, "social", """
+    given $k: string;
+    match
+      $p isa person, has email $e;
+      $p has email == $k;
+      $p has $a;
+    select $e, $a;
+  """, transaction_type: :read, given_rows: Enum.map(emails, &%{"k" => &1}))
+```
+
+The shape to avoid is the one that reads more naturally in TypeQL: a `given`
+*column* per key, joined into a disjunction — `{ $p has email == $e0; } or
+{ $p has email == $e1; } or …`. It gives the planner an `or` with one branch per
+key, and it collapses. Measured against 3.12.1, 5,000 people of three attributes
+each:
+
+| keys | disjunction | one `given` row per key |
+| ---: | ----------: | ----------------------: |
+| 10 | 17 ms | 3 ms |
+| 100 | 324 ms | 19 ms |
+| 500 | 11 134 ms | 70 ms |
+| 1 000 | 33 371 ms | 177 ms |
+| 3 000 | — | 824 ms |
+
+Same answers, same server, 189× at a thousand keys — and the disjunction is
+still growing faster than linearly, which is why the last row was not attempted.
+A batch that "works in dev and times out in production" is usually this: the
+disjunction is fine at the ten keys a test uses.
+
+**Count the answers, not the keys.** An answer row is one *attribute*, so a
+person with three of them turns 4,000 keys into 12,000 answers — over the
+server's 10,000 default, which truncates:
+
+```elixir
+{:ok, answer} = TypeDB.query(conn, "social", by_key, transaction_type: :read,
+  given_rows: Enum.map(emails, &%{"k" => &1}))
+
+TypeDB.Answer.truncated?(answer)
+#=> true — 4,000 keys, 3 attributes each, and 10,000 rows came back
+```
+
+So batch on the answers you expect rather than on the keys you hold: 3,000 keys
+of three attributes is the practical ceiling above, and it leaves no headroom
+for a fourth attribute. `TypeDB.Answer.truncated?/1` is what tells you it
+happened — see [Read a match that is bigger than one
+answer](#read-a-match-that-is-bigger-than-one-answer), and note that the row
+count cannot substitute for it: an answer of exactly the cap with nothing beyond
+it carries no warning.
+
 ## Load a lot of rows
 
 One request with a `given` stage, in batches. Not one request per row, and not

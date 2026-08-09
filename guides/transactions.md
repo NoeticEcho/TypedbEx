@@ -110,9 +110,50 @@ end
 is what makes it safe in an `after`. Everything *else* on a finished transaction
 answers `404 TSV12`.
 
+Note that `rollback/2` does not finish a transaction: it discards the writes and
+leaves it open, so you can retry inside it. Cleanup is `close/2`.
+
 Prefer `transaction/5` unless the transaction has to outlive a single function —
 it does the `after` correctly, and it emits a `[:typedb, :transaction, …]` span
 that tells you how long the unit of work held the transaction open.
+
+## A timeout ends the transaction, not just the query
+
+A request to a transaction that fails with `:timeout` or `:transport` takes the
+transaction with it. The driver hangs up; TypeDB discards the transaction along
+with the client that vanished. Afterwards:
+
+```elixir
+{:ok, tx} = TypeDB.Transaction.open(conn, "social", :write)
+{:ok, _} = TypeDB.Transaction.query(tx, ~s(insert $p isa person, has name "Alice";))
+
+TypeDB.Transaction.query(tx, slow_query, timeout: 300)
+#=> {:error, %TypeDB.Error{kind: :timeout}}
+
+TypeDB.Transaction.commit(tx)
+#=> {:error, %TypeDB.Error{code: "TSV12", status: 404}}   # and Alice is gone
+```
+
+Nothing the transaction wrote is committed — the rollback happened server-side
+without being asked for — and that is the useful half: a timeout mid-transaction
+leaves no partial write to clean up. `close/2` still answers `:ok`.
+
+**It is the hanging up that does this, not the slowness.** Measured against
+3.12.1: the query above kills its transaction at `timeout: 300`, and the
+identical query given `timeout: 120_000` runs for 80 seconds, returns its rows,
+and commits. So a transaction that "does not survive" a long unit of work is a
+`:timeout` set too tight rather than a server limit — raise the per-call
+`:timeout`, and raise `transaction_timeout_millis` if the transaction as a whole
+is the thing running long.
+
+Cleanup is not free either: the server finishes the abandoned query before
+answering, so the `close/2` after that timeout blocked for about 3.6 s. Worth
+knowing if the `after` block runs under a deadline of its own.
+
+`transaction/5` needs none of this. It reports the error from your block rather
+than from its own cleanup, so you get the `:timeout` — which
+`TypeDB.Error.retryable?/1` calls retryable, correctly: the transaction is gone
+and nothing it did survived, so re-running the block is exactly right.
 
 ## The transaction is not a process
 

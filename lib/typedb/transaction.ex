@@ -24,10 +24,40 @@ defmodule TypeDB.Transaction do
       {:ok, _answer} = TypeDB.Transaction.query(tx, "insert $p isa person;")
       :ok = TypeDB.Transaction.commit(tx)
 
-  Always pair `open/4` with `commit/1`, `rollback/1` or `close/1`. An abandoned
-  transaction holds server-side resources until its
+  Always pair `open/4` with `commit/1` or `close/1`. **`rollback/1` is not one
+  of them** — it discards the writes and leaves the transaction open, which is
+  what makes it useful for retrying inside one transaction and useless as
+  cleanup. An abandoned transaction holds server-side resources until its
   `transaction_timeout_millis` elapses — and a `:schema` transaction holds the
   exclusive schema lock for that whole time, blocking every other schema change.
+
+  ## A transport failure ends the transaction
+
+  When a request to a transaction fails with `:timeout` or `:transport`, the
+  driver hangs up, and TypeDB discards the transaction along with the client
+  that vanished. So the failure is terminal for the whole transaction, not for
+  the one query:
+
+    * nothing the transaction wrote is committed — the rollback already
+      happened, server-side, without being asked for;
+    * `commit/1` and `rollback/1` on it now return `TSV12` — *"no open
+      transaction"* — with status `404`;
+    * `close/1` still answers `:ok`, which is why it is the cleanup that belongs
+      in an `after` block.
+
+  It is the hanging up that does this, not the slowness. Measured against
+  3.12.1: a query that fails at `timeout: 300` kills its transaction, and the
+  identical query given `timeout: 120_000` runs for 80 seconds, returns, and
+  commits normally. A transaction dying under load is a `:timeout` that is too
+  tight, and `transaction_timeout_millis` plus a per-call `:timeout` are the two
+  knobs for it.
+
+  Cleaning up is not instant either: the server finishes the abandoned query
+  before answering, so the `close/1` that follows a timeout blocked for around
+  3.6 s in the same measurement. Budget for it if it runs under a deadline.
+
+  `TypeDB.transaction/5` needs none of this — it reports the failure from the
+  body rather than from its own cleanup, so the caller sees the `:timeout`.
 
   ## Transaction types
 

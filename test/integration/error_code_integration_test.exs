@@ -133,6 +133,67 @@ defmodule TypeDB.ErrorCodeIntegrationTest do
     end
   end
 
+  describe "a transaction that is gone" do
+    # The other half of retryable_codes/0. Every route to TSV12 is provoked
+    # here rather than asserted from the stub, because the decision to call it
+    # retryable rests on it meaning "the transaction vanished" and not
+    # something else — and because 404 is otherwise the driver's word for a
+    # permanent no.
+
+    test "one the server expired answers TSV12, and it is retryable", %{
+      conn: conn,
+      database: database
+    } do
+      {:ok, tx} = Transaction.open(conn, database, :write, transaction_timeout_millis: 1_000)
+      {:ok, _} = Transaction.query(tx, ~s|insert $p isa person, has name "expired";|)
+
+      Process.sleep(3_000)
+
+      assert {:error, %Error{status: 404, code: "TSV12"} = error} =
+               Transaction.query(tx, ~s|insert $p isa person, has name "after";|)
+
+      assert Error.retryable?(error), "an expired transaction is worth re-running"
+      assert "TSV12" in Error.retryable_codes()
+
+      # The claim that makes re-running safe rather than merely allowed.
+      assert {:ok, answer} =
+               TypeDB.query(conn, database, ~s|match $p isa person, has name "expired"; select $p;|,
+                 transaction_type: :read
+               )
+
+      assert TypeDB.Answer.rows(answer) == [],
+             "nothing the expired transaction wrote may have been committed"
+
+      assert :ok = Transaction.close(tx), "close/1 is the cleanup that still works"
+    end
+
+    test "commit on an expired transaction answers the same", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :write, transaction_timeout_millis: 1_000)
+      {:ok, _} = Transaction.query(tx, ~s|insert $p isa person, has name "uncommittable";|)
+
+      Process.sleep(3_000)
+
+      assert {:error, %Error{status: 404, code: "TSV12"} = error} = Transaction.commit(tx)
+      assert Error.retryable?(error)
+    end
+
+    test "a spent handle answers TSV12 too — the cost of calling it retryable", %{
+      conn: conn,
+      database: database
+    } do
+      # Documented in retryable_codes/0 as the deliberate false positive. Pinned
+      # so that the trade stays a decision rather than becoming a surprise: if
+      # TypeDB ever distinguishes these, retryable?/1 should distinguish them.
+      {:ok, tx} = Transaction.open(conn, database, :write)
+      :ok = Transaction.close(tx)
+
+      assert {:error, %Error{status: 404, code: "TSV12"} = error} =
+               Transaction.query(tx, ~s|insert $p isa person, has name "spent";|)
+
+      assert Error.retryable?(error)
+    end
+  end
+
   describe "transactions" do
     test "opening one on a database that does not exist", %{conn: conn} do
       # 400 and SRV3 — not the 404 the request shape suggests, and not a

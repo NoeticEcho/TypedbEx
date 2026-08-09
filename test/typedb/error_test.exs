@@ -94,14 +94,40 @@ defmodule TypeDB.ErrorTest do
       # The case the function was written for, and the one it used to get wrong:
       # TypeDB rejects the loser of a concurrent write with a 400, which every
       # other time means "this will fail identically forever".
+      assert Error.retryable?(Error.new(:server, "isolation conflict", code: "STC2", status: 400))
+    end
+
+    test "a vanished transaction is retryable despite its status" do
+      # A transaction that expired, or that TypeDB discarded when a timeout made
+      # the driver hang up. Nothing it wrote was committed, so re-running it is
+      # the whole of the fix — but it arrives as a 404, which is otherwise the
+      # driver's word for "this will not be there next time either".
+      assert Error.retryable?(Error.new(:server, "no open transaction", code: "TSV12", status: 404))
+    end
+
+    test "every code on the list is retryable at the status it really arrives with" do
+      # Guards against a code being added to the list while `retryable?/1` keeps
+      # judging by status. The statuses are the ones measured against 3.12.1 in
+      # test/integration/error_code_integration_test.exs.
+      statuses = %{"STC2" => 400, "TSV12" => 404}
+
       for code <- Error.retryable_codes() do
-        error = Error.new(:server, "isolation conflict", code: code, status: 400)
-        assert Error.retryable?(error), "code #{code}"
+        status = Map.fetch!(statuses, code)
+
+        assert Error.retryable?(Error.new(:server, "nope", code: code, status: status)),
+               "#{code} at #{status}"
+
+        refute status in Error.retryable_statuses(),
+               "#{code} would be retryable on its status alone, so this proves nothing"
       end
     end
 
     test "another 400 with a code is still not retryable" do
       refute Error.retryable?(Error.new(:server, "no such type", code: "INF2", status: 400))
+    end
+
+    test "another 404 with a code is still not retryable" do
+      refute Error.retryable?(Error.new(:server, "no such database", code: "DBD1", status: 404))
     end
 
     test "the kinds that describe something permanently wrong are not" do

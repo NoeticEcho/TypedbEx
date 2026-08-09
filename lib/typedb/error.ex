@@ -93,7 +93,7 @@ defmodule TypeDB.Error do
   @spec retryable_statuses() :: [pos_integer()]
   def retryable_statuses, do: @retryable_statuses
 
-  @retryable_codes ["STC2"]
+  @retryable_codes ["STC2", "TSV12"]
 
   @doc """
   TypeDB error codes that `retryable?/1` treats as worth another attempt,
@@ -106,6 +106,24 @@ defmodule TypeDB.Error do
   committed state is the intended response, and the only one available: the
   conflict invalidates the whole transaction, so the driver cannot retry it for
   you.
+
+  `TSV12` is *"no open transaction"*, a `404`. The transaction the request named
+  is gone, and nothing it wrote was committed, so replaying it is again both the
+  right answer and the only one. It arrives when the transaction outlived its
+  `transaction_timeout_millis`, when a `:timeout` or `:transport` failure made
+  the driver hang up and TypeDB discarded the transaction with the client, or
+  when the server restarted underneath it — every one of which is an
+  operational outcome rather than a statement about the work.
+
+  The honest caveat: `TSV12` also answers a request made on a transaction the
+  caller already finished. That is a bug rather than a race, and calling it
+  retryable means the caller replays, fails the same way, and learns it from the
+  second failure instead of the first. The trade is deliberate — the cost of
+  being wrong the other way is a transaction that merely took too long being
+  reported as permanent, and its work thrown away — and it does not reach
+  `TypeDB.transaction/5`, which has no window in which to use a spent handle.
+  The one case where `true` is genuinely wrong is a request issued after a
+  *successful* commit: there the work did land, and replaying applies it twice.
 
   Note that this is not the same list as `:retry_on_status`. The driver never
   retries a request on one of these codes by itself, because the unit that has
@@ -134,15 +152,20 @@ defmodule TypeDB.Error do
   `:server` errors are judged by `retryable_statuses/0` rather than by a
   connection's `:retry_on_status`, because an error does not carry the
   connection that produced it — plus `retryable_codes/0`, which is how an
-  isolation conflict qualifies despite arriving as a `400`. That case is the
-  reason this function exists: a commit rejected because a concurrent `:write`
-  transaction won the race is exactly the failure a caller is meant to replay.
+  isolation conflict qualifies despite arriving as a `400` and a vanished
+  transaction despite arriving as a `404`. The first is the reason this function
+  exists: a commit rejected because a concurrent `:write` transaction won the
+  race is exactly the failure a caller is meant to replay.
 
       iex> TypeDB.Error.retryable?(TypeDB.Error.new(:transport, "connection refused"))
       true
 
       iex> conflict = TypeDB.Error.new(:server, "isolation conflict", code: "STC2", status: 400)
       iex> TypeDB.Error.retryable?(conflict)
+      true
+
+      iex> gone = TypeDB.Error.new(:server, "no open transaction", code: "TSV12", status: 404)
+      iex> TypeDB.Error.retryable?(gone)
       true
 
       iex> TypeDB.Error.retryable?(TypeDB.Error.new(:server, "no such database", status: 404))

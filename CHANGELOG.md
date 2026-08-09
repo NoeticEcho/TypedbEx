@@ -6,6 +6,90 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Audit IV, and the same method as Audit III: read the driver through
+`NoeticEcho/newgen-elixir`, now on 0.7.0, and treat what its authors had to
+learn the hard way as evidence about this driver. The material this time was
+their own post-mortems — four `P0`s that name TypeDB — each of which was
+re-measured here against 3.12.1 rather than taken on trust.
+
+Two of their four claims held up and became the work below. Two did not: the
+driver never re-sends a non-idempotent request (a write query is
+`idempotent: false`, so their triple execution was their own job runner), and
+`TypeDB.transaction/5` reports the failure from its body rather than from its
+own doomed rollback. Both were verified, and neither needed a change.
+
+A minor under the 0.x rule — `retryable_codes/0` gains an entry, which changes
+what `retryable?/1` answers for an existing input. `test/api_snapshot.txt` does
+not move.
+
+### Changed
+
+- **`TypeDB.Error.retryable_codes/0` now contains `TSV12` as well as `STC2`**,
+  so a transaction that is gone reads as worth re-running instead of as
+  permanent.
+
+  `TSV12` is *"no open transaction"*, and it arrives as a `404` — otherwise this
+  driver's word for a permanent no. Measured against 3.12.1, it is the answer
+  when the transaction outlived its `transaction_timeout_millis`, when a
+  `:timeout` made the driver hang up and TypeDB discarded the transaction with
+  the client, and when a caller uses a handle it already finished. In the first
+  two — which are operational outcomes, not statements about the work — nothing
+  the transaction wrote was committed, so re-running it is both the right
+  answer and the only one.
+
+  The third is a genuine false positive and is documented as a deliberate trade:
+  a stale handle now gets replayed once and fails the same way, where before an
+  expired transaction was reported as permanent and its work discarded. The
+  second cost is much the worse one, and it reaches callers through
+  `TypeDB.transaction/5` — the recommended API, with no window in which to
+  misuse a handle. It is what
+  [newgen-elixir#1](https://github.com/NoeticEcho/newgen-elixir/issues/1) was
+  about, one code over.
+
+  Every route to `TSV12` is now provoked against a live server in
+  `test/integration/error_code_integration_test.exs`, including the false
+  positive, so the trade stays a decision rather than becoming a surprise.
+
+  Callers routing errors by `retryable?/1` will see previously-terminal `TSV12`
+  failures become retried ones. Callers matching on `code: "TSV12"` themselves
+  are unaffected.
+
+### Documentation
+
+- **A recipe for reading many rows by key** in [Recipes](recipes.html), which
+  the driver did not have: `given_rows` appeared only as a *write* batch, and
+  the one read example passed a single row. The one real caller filled the gap
+  with a `given` column per key joined into a disjunction, and it was a `P0` for
+  them.
+
+  Measured here against 3.12.1 over 5,000 people of three attributes each: 500
+  keys take 11 134 ms as a disjunction and 70 ms as one `given` row per key;
+  1,000 keys take 33 371 ms against 177 ms. Same answers, 189× — and the
+  disjunction is still growing faster than linearly. The recipe also says to
+  count the *answers* rather than the keys, since an answer row is one
+  attribute: 4,000 keys of three attributes is 12,000 answers and truncates
+  against the server's default cap.
+
+- **What a timeout does to a transaction**, in `TypeDB.Transaction` and
+  [Transactions](transactions.html). A `:timeout` or `:transport` failure on a
+  transaction request is terminal for the whole transaction: the driver hangs
+  up, TypeDB discards the transaction with the client, nothing it wrote is
+  committed, and `commit/1` and `rollback/1` then answer `TSV12` while `close/1`
+  still answers `:ok`.
+
+  It is the hanging up that does it and not the slowness — measured, the
+  identical query that dies at `timeout: 300` runs 80 seconds and commits at
+  `timeout: 120_000`. So a transaction that "does not survive" long work is a
+  `:timeout` set too tight rather than a server limit. Cleanup is not free
+  either: the server finishes the abandoned query first, so the `close/1` after
+  a timeout blocked for about 3.6 s.
+
+- **`rollback/1` is no longer listed as a way to finish a transaction.** Its own
+  docstring always said it leaves the transaction open — which is correct, and
+  is why it is useful for retrying in place — but the module doc named it beside
+  `commit/1` and `close/1` as cleanup. Pairing `open/4` with it leaks a
+  transaction until the timeout collects it.
+
 ## [0.7.0] - 2026-08-02
 
 Three additions, and not one of them came from reading this code. Two are from

@@ -59,6 +59,14 @@ and it arrives as a `400`, which is otherwise the driver's signal that a request
 will fail identically forever. `TypeDB.Error.retryable_codes/0` is the list of
 codes that override the status, and `STC2` is on it:
 
+The other entry is `TSV12`, *"no open transaction"* — the transaction expired,
+or a timeout made the driver hang up and TypeDB discarded it. Nothing it wrote
+was committed, so the same re-run is again the whole of the fix, even though it
+arrives as a `404`. It has one deliberate false positive, spelled out in
+`retryable_codes/0`: a request on a transaction the caller already finished
+answers `TSV12` as well, so a stale handle is retried once before it fails the
+same way.
+
 ```elixir
 defp with_retry(conn, attempts \\ 3) do
   case TypeDB.transaction(conn, "social", :write, &steps/1) do
@@ -156,7 +164,7 @@ Codes worth knowing, all verified against a live server:
 | code | status | when |
 | --- | --- | --- |
 | `SRV3` | 400/404 | no such database |
-| `TSV12` | 404 | the transaction has finished |
+| `TSV12` | 404 | the transaction is gone — re-run it |
 | `TSV2` | 400 | commit on a `:read` transaction |
 | `TSV8` / `TSV9` | 400 | schema change in `:write`, write in `:read` |
 | `TQL0` | 400 | the query does not parse |
