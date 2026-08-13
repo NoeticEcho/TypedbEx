@@ -1,3 +1,147 @@
+# Refactor plan IV — Audit VI, both packages
+
+Nine findings: four major, five minor, no critical. Ordered by severity, then by
+how much of the codebase a step touches. Each step leaves both packages working
+and is committed on its own.
+
+## The gate, after every step
+
+From the package the step touched, and from both when it touched shared code:
+
+```sh
+mix format --check-formatted
+mix credo --strict
+mix dialyzer
+mix test                                   # typedb: once per adapter, finch|req|httpc
+TYPEDB_GRPC_ADDRESS=127.0.0.1:1729 mix test --include integration
+TYPEDB_INTEGRATION_URL=… TYPEDB_GRPC_ADDRESS=… mix test --include integration test/behaviour
+```
+
+A step that changes the export file format or its error paths also runs the
+console interop test with `TYPEDB_CONSOLE` set.
+
+## Step 1 — a failed export leaves nothing behind (VI-2, VI-3) — major
+
+**Changes.** `write_export/3` opens both files under one cleanup path instead of
+a `with` that can leak the first, and `drain_export/3` halts on a write failure
+instead of draining the rest of the export into a file that is already failing.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/database.ex`,
+`typedb_grpc/test/integration/migration_integration_test.exs`.
+
+**Verification.** A new integration test asserting what was measured in the
+audit: exporting to a data path whose directory does not exist returns a
+`:config` error **and** leaves no schema file. It fails on today's code — that is
+the point of writing it first. The existing "exporting a database that is not
+there leaves no files behind" test covers the other order.
+
+## Step 2 — a corrupt data file is refused on the first chunk (VI-4) — major
+
+**Changes.** A ceiling on the declared item length in `TypeDB.GRPC.Migration`.
+Anything above it is not a truncated export, so it is refused with `:decode`
+immediately rather than after buffering the file. The ceiling is a module
+attribute with the reasoning beside it: TypeDB's migration items are entities,
+attributes and relations, so 64 MiB is orders of magnitude above any real one
+and orders below a memory problem.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/migration.ex`,
+`typedb_grpc/test/typedb/grpc/migration_test.exs`.
+
+**Verification.** A unit test writing a delimiter that declares 32 GiB followed
+by a few megabytes, asserting the error arrives having read one chunk rather
+than the file — measured as bytes actually consumed, not as wall clock. Plus the
+existing round-trip and console-interop tests, unchanged, to prove the ceiling
+refuses nothing real.
+
+## Step 3 — the streamed-read buffer stops being quadratic (VI-7) — major
+
+**Changes.** `on_part/3` prepends decoded rows to the buffer and `serve_stream/3`
+reverses when it hands them over, which is the shape `build_answer/1` already
+uses. Order of rows as seen by the consumer must not change.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/transaction.ex`,
+`typedb_grpc/test/integration/stream_integration_test.exs`.
+
+**Verification.** Two things, because either alone is insufficient: the existing
+streaming suite proves the order is unchanged, and a new test reads 20 000 rows
+with `prefetch_size: 20_000` and asserts it is no slower than the same read at
+the default prefetch. Today that ratio is 1.76×; the assertion is written with
+enough headroom to be stable on a loaded runner but would fail on today's code.
+
+## Step 4 — say when credentials are about to cross the network in the clear (VI-8) — minor
+
+**Changes.** `TypeDB.GRPC.Connection` logs a warning, once per connection, when
+`tls: false` and the address is not loopback. The default does not change: it
+matches TypeDB CE's own, and changing it would break every working local
+configuration to fix a case the message covers.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/connection.ex`,
+`typedb_grpc/lib/typedb/grpc/config.ex` (a `loopback?/1` predicate),
+`typedb_grpc/test/typedb/grpc/config_test.exs`.
+
+**Verification.** Unit tests for the predicate over `127.0.0.1`, `localhost`,
+`::1`, a hostname and a routable address, plus an integration test asserting the
+warning is *absent* for the loopback server the suite runs against — a warning
+every local user sees is a warning nobody reads.
+
+## Step 5 — an abandoned streamed read is collected (VI-5) — minor
+
+**Changes.** When `stream_next/3` times out, tell the transaction to drop that
+request's accumulator, the way `stream_cancel/2` already does for a stream the
+consumer finished with.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/transaction.ex`,
+`typedb_grpc/test/integration/stream_integration_test.exs`.
+
+**Verification.** An integration test that starts a stream, times a `stream_next`
+out, and asserts `:sys.get_state(tx.pid).pending` no longer holds it — the same
+technique the back-pressure test uses, and for the same reason: nothing else can
+see this.
+
+## Step 6 — the documentation stops being wrong (VI-1, VI-6, VI-9) — minor
+
+**Changes.** Three corrections, no behaviour:
+
+* `TypeDB.GRPC.Transaction`'s moduledoc drops the paragraph saying constant-
+  memory streaming is not done, and points at `stream/3` instead.
+* `send_reqs/2` gains the sentence that says what it actually does — one message
+  per request, the pipelining coming from not waiting rather than from the
+  repeated field. (Batching them is a behaviour change and is **not** in this
+  plan; if it is wanted it is its own measured step.)
+* `AUDIT.md`'s index stops linking to a section that does not exist: Audit IV
+  gets the one-paragraph summary the CHANGELOG already carries, so the link
+  points at something.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/transaction.ex`, `AUDIT.md`.
+
+**Verification.** `mix docs` builds without new warnings; the audit's own link
+resolves. Nothing to test at runtime, which is why this step is last among the
+ones that are being done.
+
+## Not doing, and why
+
+**VI — the symlink case in `export_to_files/5`.** Comparing `Path.expand/1` does
+not catch the same file reached through a symlink or a hard link. Rust compares
+paths too. The failure is loud and immediate — the data file overwrites the
+schema and the import that follows cannot parse it — and closing it properly
+means `File.stat` on both paths and comparing inode and device, which is another
+system call on every export to catch a mistake nobody has made. Recorded as a
+decision rather than an oversight.
+
+**VI — batching `Transaction.Client.reqs`.** A real improvement and a real
+behaviour change: it alters how requests reach the server and could interact
+with the TSV13 write behaviour the moduledoc documents at length. It needs its
+own measurement, not a line in a documentation step. Filed as a bead.
+
+## Order and dependencies
+
+None of the six steps depends on another. They are ordered by severity, so
+stopping after any of them leaves the more serious things fixed. Steps 1 and 2
+both touch the export path and are kept apart because they fail differently and
+their tests are independent.
+
+---
+
 # Refactor plan III — Audit V, `typedb_grpc`
 
 **Executed in full at `bb08ff1`.** Six steps, six commits, nothing blocked and

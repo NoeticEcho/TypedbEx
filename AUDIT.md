@@ -1,10 +1,12 @@
 # Audit — TypeDB Elixir driver
 
-Five audits, newest first. Audits I–IV cover `typedb`; Audit V covers
-`typedb_grpc`, which had never been audited.
+Six audits, newest first. Audits I–IV cover `typedb`, Audit V covers
+`typedb_grpc`, and Audit VI is the first to sweep both — and the first to audit
+efficiency, stability and security as categories of their own.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
+| [Audit VI](#audit-vi--both-packages-at-a4a2e23) | `a4a2e23`, both packages | 8: 0 critical, 4 major, 4 minor | planned, see `REFACTOR_PLAN.md` |
 | [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | all fixed, `bb08ff1` |
 | [Audit IV](#audit-iv--080-through-a-callers-post-mortems) | `447ff97` (0.8.0), through `newgen-elixir`'s own post-mortems | 4 claims tested: 2 held, 2 did not | shipped in 0.8.0 |
 | [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | both fixed |
@@ -14,6 +16,308 @@ Five audits, newest first. Audits I–IV cover `typedb`; Audit V covers
 Audit I is kept in full, in its original wording, because it records *why*
 several things are the way they are — read it before proposing to change one of
 them.
+
+---
+
+# Audit VI — both packages, at `a4a2e23`
+
+Audited at `a4a2e23`, after the Rust-parity pass. Two things make this one
+different from the five before it. It is the first audit to cover **both**
+packages in one sweep, and the first to include **efficiency, stability and
+security** as categories of their own — Audits I–V had six categories and none
+of them was either.
+
+**Method.** Unchanged, and it is the point: a finding is not a finding until it
+has been *run*. Four of the eight below were settled by measuring — the export
+cleanup, the item-length ceiling, the streaming buffer and the protocol version
+check — and three of those four were invisible to a green suite.
+
+## Stage 1 — what these packages must do
+
+Read from `README.md` (root and both packages), `CLAUDE.md`, both
+`CONTRIBUTING.md`, `typedb/guides/*` and this file's Audits I–V. The baseline
+every finding below is measured against:
+
+1. **Speak to TypeDB 3.12+ over two transports and mean the same thing.**
+   `typedb` over the HTTP API, `typedb_grpc` over gRPC, decoding into the *same*
+   `TypeDB.Concept` structs and failing with the *same* `%TypeDB.Error{}`, so
+   switching is a line in a data-access module.
+2. **Never be the bottleneck.** Requests run in the caller's process; the
+   connection process owns only the token and the channel, published through a
+   read-concurrent ETS table.
+3. **Handle tokens invisibly.** Read the JWT's own lifetime, renew before it
+   expires, collapse concurrent renewals into one sign-in, fall back to reactive
+   renewal.
+4. **Make every failure branchable.** `{:error, %TypeDB.Error{}}` carrying
+   TypeDB's stable code, plus a `!` twin that raises — enforced mechanically by
+   `api_convention_test.exs` in both packages.
+5. **Make parameterised queries safe.** TypeQL's `given` stage in the tagged
+   wire form, so a value can never be read as syntax.
+6. **Stream what the HTTP API cannot.** No answer cap on gRPC, back-pressured
+   reads, and database export/import — a capability the HTTP API does not have
+   at all.
+7. **Be observable.** `:telemetry` spans for every operation, transaction,
+   request and sign-in, with the same event names on both transports and a
+   `:transport` tag to tell them apart.
+8. **Verify the server, not just talk to it.** TLS on by choice, certificates
+   checked against a real trust store, protocol version compared against what
+   the generated modules were built from.
+9. **Keep the two packages honest about each other.** The shared behaviour suite
+   runs one set of assertions through both drivers; a difference is *recorded*,
+   never hidden.
+10. **Ship nothing unmeasured.** Every performance claim in a README or a
+    moduledoc is a number somebody produced against a live server.
+
+## Findings
+
+Nine, against the eight categories. Four major, five minor, no critical.
+
+| | Category | Where | Severity |
+| --- | --- | --- | --- |
+| VI-1 | Requirement mismatch | `typedb_grpc/lib/typedb/grpc/transaction.ex:57` | minor |
+| VI-2 | Errors | `typedb_grpc/lib/typedb/grpc/database.ex:230` | major |
+| VI-3 | Errors | `typedb_grpc/lib/typedb/grpc/database.ex:246` | major |
+| VI-4 | Gaps | `typedb_grpc/lib/typedb/grpc/migration.ex:76` | major |
+| VI-5 | Gaps | `typedb_grpc/lib/typedb/grpc/transaction.ex:290` | minor |
+| VI-6 | Quality | `typedb_grpc/lib/typedb/grpc/transaction.ex:1103` | minor |
+| VI-7 | Efficiency | `typedb_grpc/lib/typedb/grpc/transaction.ex:900` | major |
+| VI-8 | Security | `typedb_grpc/lib/typedb/grpc/config.ex:111` | minor |
+| VI-9 | Requirement mismatch | `AUDIT.md:11` | minor |
+
+### 1. Requirement mismatch
+
+#### VI-1 — the transaction moduledoc denies a feature the module has (minor)
+
+`typedb_grpc/lib/typedb/grpc/transaction.ex:57`
+
+> The current API collects the parts before returning, so a very large answer is
+> a very large list. Constant-memory streaming is a further step and not done.
+
+`stream/3` is eighty lines below it, `TypeDB.GRPC.stream/4` wraps it, both
+READMEs lead with it and the streaming suite measures it. The sentence was true
+when it was written and has been false since the streaming step landed. A
+moduledoc that denies the module's headline feature is worse than no moduledoc:
+it is the first thing a reader believes.
+
+#### VI-9 — this document's index links to an audit it does not contain (minor)
+
+`AUDIT.md:11`
+
+The table of audits links Audit IV to `#audit-iv--080-through-a-callers-post-mortems`.
+There is no such heading: `AUDIT.md` contains Audits I, II, III and V and has
+never contained IV. Its findings were real — they are the substance of `typedb`
+0.8.0 and are described in that release's CHANGELOG entry — but the document
+that claims to record them does not.
+
+Found while writing this audit, which is the only way a dead anchor in a
+document nobody links to gets found.
+
+### 2. Errors
+
+#### VI-2 — a failed export leaves a file it opened and never closes (major)
+
+`typedb_grpc/lib/typedb/grpc/database.ex:230`, `write_export/3`
+
+```elixir
+with {:ok, schema_file} <- open_write(schema_path),
+     {:ok, data_file} <- open_write(data_path) do
+```
+
+When the *second* `open_write/1` fails, `with` short-circuits: the schema file
+is neither closed nor removed, and `discard_files_on_failure/3` — the function
+whose whole job is to make sure a failed export leaves nothing behind — is never
+reached.
+
+**Measured**, against a live 3.12.1, exporting to a data path whose directory
+does not exist:
+
+```
+result: {:error, %TypeDB.Error{kind: :config, reason: :enoent, ...}}
+schema file left on disk: true
+```
+
+The module's own documentation promises the opposite in as many words: "both are
+removed again if the export fails part-way — a half-written backup that looks
+like a backup is worse than none". Here it is worse still: an *empty* file that
+looks like a backup.
+
+#### VI-3 — a write failure does not stop the export (major)
+
+`typedb_grpc/lib/typedb/grpc/database.ex:246`, `drain_export/3`
+
+```elixir
+{:schema, schema} -> {:cont, write(schema_file, schema, acc)}
+{:items, items}   -> {:cont, write(data_file, ..., acc)}
+```
+
+`write/3` returns `{:error, _}` when `:file.write/2` fails — a full disk, a
+revoked permission — and the reduce **continues**. The error survives to the end
+(a later successful write returns the accumulator unchanged), so the caller is
+told the truth eventually; but between the failure and the truth the driver
+drains the entire remaining export from the server and keeps trying to write
+every part of it. On the graph this feature exists for, that is minutes of
+network and CPU spent on an outcome already decided.
+
+### 3. Gaps
+
+#### VI-4 — a corrupt data file is read into memory before it is rejected (major)
+
+`typedb_grpc/lib/typedb/grpc/migration.ex:76`, `take_items/2`
+
+```elixir
+{:ok, length, rest} when byte_size(rest) >= length ->
+```
+
+Nothing bounds `length`. A delimiter declaring an item larger than the rest of
+the file simply never satisfies the guard, so the reader keeps pulling 64 KiB
+chunks and appending them to the buffer until EOF, and only *then* raises "the
+data file ends mid-item". The memory ceiling is the size of the file.
+
+**Measured**: a file whose first varint declares 32 GiB, followed by 5 MB of
+zeroes, is buffered whole — the error reports `5000005 bytes left over`. At 5 MB
+that is nothing; the same shape at 5 GB is an out-of-memory kill of the node,
+caused by a file the operator was told was a backup.
+
+TypeDB's own items are entities, attributes and relations — kilobytes. A
+declared length beyond any plausible item is not a truncated file, it is not a
+TypeDB export, and it can be refused on the first chunk instead of the last.
+
+#### VI-5 — an abandoned streamed read is never collected (minor)
+
+`typedb_grpc/lib/typedb/grpc/transaction.ex:290`, `do_stream_next/3`
+
+A `stream_next` that times out abandons its request — deliberately, and Audit V
+records why. What it leaves behind is the accumulator in `state.pending`, keyed
+by a `req_id` nobody will ask about again, holding whatever rows had arrived.
+The comment says it is "collected when the transaction ends", which is true and
+is the whole of the cleanup. A long-lived transaction whose consumer times out
+repeatedly grows that map without bound.
+
+Minor because a transaction is short by construction and the server's own
+`transaction_timeout_millis` ends it anyway.
+
+### 4. Incomplete work
+
+**Nothing.** No `TODO`, `FIXME`, `HACK` or `XXX` anywhere in either `lib/`, no
+stub, no mock data, no hardcoded value that wants configuring. Checked
+mechanically; the same was true at Audit V and is now true of both packages.
+
+### 5. Empty functions
+
+**Nothing, and structurally so.** Both packages compile with
+`--warnings-as-errors`, and an unused private function is a warning — so dead
+private code cannot survive a build. The public surface of both is enumerated by
+`api_snapshot.txt` and `api_convention_test.exs`, which fail on an addition
+nobody declared.
+
+### 6. Code quality
+
+#### VI-6 — "pipelining" sends one message per request (minor)
+
+`typedb_grpc/lib/typedb/grpc/transaction.ex:1103`, `send_reqs/2`
+
+```elixir
+Enum.each(reqs, fn req ->
+  GRPC.Stub.send_request(state.stream, %Proto.Transaction.Client{reqs: [req]})
+end)
+```
+
+`Transaction.Client` carries `repeated Req reqs` and the moduledoc explains the
+pipelining in terms of that repeated field. The code does not use it: two
+hundred pipelined reads are two hundred `Transaction.Client` messages of one
+request each. The win the moduledoc measures is real and comes from not waiting
+for each reply — but it is not the win the code comment describes, and the frame
+overhead is paid per request rather than per batch.
+
+Either batch them or correct the explanation; the audit's position is that the
+explanation is the thing that must not be wrong.
+
+### 7. Efficiency and stability
+
+#### VI-7 — the streamed-read buffer is quadratic in the number of parts (major)
+
+`typedb_grpc/lib/typedb/grpc/transaction.ex:900`, `on_part/3`
+
+```elixir
+%{acc | buffer: acc.buffer ++ Enum.map(rows, &Decode.row(&1, acc.columns))}
+```
+
+`++` copies the left list. Between two `stream_next/3` calls the server can send
+many parts, and each one copies everything already buffered — so the cost of a
+batch is quadratic in the number of parts it arrives in.
+
+**Measured**, 20 000 rows through `TypeDB.GRPC.stream/4` against a live 3.12.1:
+
+| `prefetch_size` | time |
+| --- | ---: |
+| default | 477 ms |
+| 20 000 | 838 ms |
+
+Raising the prefetch — the option whose entire purpose is to make a large read
+faster by asking for more at a time — makes it **1.76× slower**. The fix is the
+standard one: prepend, and reverse when the buffer is served.
+
+Also examined and clean: `build_answer/1` already prepends and reverses;
+`Migration.items/1` streams in bounded chunks; the transaction's reader process
+is linked, so a dead stream takes the transaction with it rather than leaking;
+`Connection.terminate/2` disconnects the channel. One inefficiency is recorded
+and left alone: several ETS lookups per call (`config/1` inside `timeout/2`, plus
+`channel/1`) where one would do — it is a read-concurrent table and the cost is
+not measurable next to a round trip.
+
+### 8. Security
+
+#### VI-8 — a remote gRPC connection is plaintext by default and says nothing (minor)
+
+`typedb_grpc/lib/typedb/grpc/config.ex:111`, `tls: false`
+
+The default matches TypeDB CE, which ships with encryption off, and for a server
+on loopback — the deployment this driver was written for — it is right. For a
+server anywhere else it means the username and password cross the network in the
+clear, and nothing in the driver says so. Rust does not have this problem
+because `DriverOptions::new/1` takes the TLS configuration as a *required*
+argument: there is no default to fall into.
+
+Changing the default would break every working configuration for the common
+case, which is a poor trade. Saying it out loud when the address is not loopback
+costs one log line.
+
+#### Checked and clean
+
+* **No credential reaches a log, a telemetry event or an error.** The config
+  published to ETS is redacted (`Connection.redact/1`), both `Inspect`
+  implementations omit password and token, `TypeDB.Log` is the single Logger
+  entry point and logs neither, and `TypeDB.GRPC.Error` reads only
+  `ErrorInfo.reason` and `DebugInfo.stack_entries` out of a failure — never
+  metadata, which is where the bearer token is.
+* **Injection.** Database and user names are percent-encoded per path segment on
+  HTTP (`TypeDB.Wire.path_segment/1`) and are protobuf fields on gRPC, where
+  there is no text to inject into. Query values go through `given` rather than
+  interpolation, which is the feature that makes that true.
+* **TLS verification is on and cannot be turned off by accident.** `verify_none`
+  is an explicit option, and the TLS suite asserts that a certificate signed by
+  an untrusted CA is refused — an assertion that would fail if the default ever
+  weakened.
+* **Dependencies.** `typedb` is fully current. In `typedb_grpc`, `gun` (2.4.1 →
+  2.5.0) and `googleapis` (0.1.0 → 0.2.0) are behind, both held there by `grpc`
+  and `grpc_core`'s own requirements rather than by ours — `mix.exs` already
+  allows the newer ones. Nothing to do here; it moves when `grpc` moves.
+
+## Verified, not findings
+
+* **The server really does check the protocol version at `connection_open`.**
+  The claim was added to `Server.check_protocol/2`'s documentation during the
+  parity pass and had not been measured. It is true: sending
+  `version: :UNSPECIFIED` to 3.12.1 is refused with *"Incompatible driver
+  version. This 'elixir' driver…"* — the server even names the `driver_lang`
+  this driver sends.
+* **`create_if_not_exists/3` has a TOCTOU race and it is harmless.** Two callers
+  can both see "absent" and both create; `databases_create` is a no-op for an
+  existing database on both transports, which the shared suite asserts.
+* **Retrying an unauthenticated streaming import is safe.** `Connection.unary/4`
+  retries once on `:unauthenticated`, which for `import_from_files/5` means
+  re-sending the file. The rejection arrives on the first message, before the
+  server has created anything, so the retry starts from nothing.
 
 ---
 
