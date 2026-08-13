@@ -120,7 +120,6 @@ defmodule TypeDB.GRPC.Transaction do
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
     case query_many(tx, [{query, opts}], opts) do
       {:ok, [answer]} -> {:ok, answer}
-      {:ok, answers} -> {:ok, List.last(answers)}
       {:error, _} = error -> error
     end
   end
@@ -310,12 +309,24 @@ defmodule TypeDB.GRPC.Transaction do
 
   Idempotent, and never fails on a transaction that is already finished — so it
   is safe in an `after` block, which is where it belongs.
+
+  Takes `:timeout`, defaulting to 5 s: closing waits for the server to finish
+  whatever was in flight, and a caller under a deadline of its own may want to
+  bound that.
   """
   @spec close(t(), keyword()) :: :ok
-  def close(%__MODULE__{pid: pid}, _opts \\ []) do
-    if Process.alive?(pid), do: GenServer.stop(pid, :normal, 5_000)
+  def close(%__MODULE__{pid: pid}, opts \\ []) do
+    # `:timeout` is honoured rather than accepted and dropped, which is what it
+    # used to be — Audit V, V-10. Closing waits for the server to finish
+    # whatever the transaction had in flight, so a caller under a deadline has a
+    # real reason to bound it.
+    timeout = Keyword.get(opts, :timeout, 5_000)
+
+    if Process.alive?(pid), do: GenServer.stop(pid, :normal, timeout)
     :ok
   catch
+    # A timed-out stop leaves the process to die on its own; the transaction is
+    # over either way, which is all `close/2` promises.
     :exit, _ -> :ok
   end
 

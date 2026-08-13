@@ -412,6 +412,17 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
       assert count_named(conn, database, "after-rollback") == 1
     end
 
+    test "close honours a :timeout instead of discarding it", %{conn: conn, database: database} do
+      # Audit V, V-10: the parameter existed only so the signature matched the
+      # sibling's, so a caller passing a timeout got neither a timeout nor an
+      # error. The observable half is that it is accepted and the transaction
+      # ends; the bound itself only shows up against a wedged server.
+      {:ok, tx} = Transaction.open(conn, database, :write)
+
+      assert :ok = Transaction.close(tx, timeout: 2_000)
+      refute Transaction.open?(tx)
+    end
+
     test "close is idempotent and safe on a finished transaction", %{conn: conn, database: database} do
       {:ok, tx} = Transaction.open(conn, database, :read)
 

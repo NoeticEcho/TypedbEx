@@ -35,7 +35,7 @@ defmodule TypeDB.GRPC.Connection do
   use GenServer
 
   alias TypeDB.Error
-  alias TypeDB.GRPC.{Config, Protocol, Telemetry}
+  alias TypeDB.GRPC.{Config, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
   alias Typedb.Protocol, as: Proto
 
@@ -255,7 +255,7 @@ defmodule TypeDB.GRPC.Connection do
     case :ets.lookup(state.table, @token_key) do
       # Somebody else already replaced the token this caller was holding.
       [{@token_key, token, deadline}] when minted_before != :any ->
-        if minted_before < deadline - lifetime_margin(state) or usable?(deadline) do
+        if minted_before < deadline - @renewal_margin_ms or usable?(deadline) do
           {:reply, {:ok, token}, state}
         else
           sign_in_and_reply(state)
@@ -386,8 +386,6 @@ defmodule TypeDB.GRPC.Connection do
     end
   end
 
-  defp lifetime_margin(_state), do: @renewal_margin_ms
-
   defp usable?(:unknown), do: true
   defp usable?(deadline), do: System.monotonic_time(:millisecond) < deadline
 
@@ -410,8 +408,4 @@ defmodule TypeDB.GRPC.Connection do
         "tree — or it went down and has not been restarted yet."
     )
   end
-
-  @doc false
-  @spec protocol_version() :: String.t()
-  def protocol_version, do: Protocol.version()
 end
