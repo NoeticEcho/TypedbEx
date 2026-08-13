@@ -290,9 +290,15 @@ defmodule TypeDB.GRPC.Transaction do
       # outstanding and became a way for one slow read to destroy every other
       # caller's work once several could — Audit V, V-3.
       #
-      # The abandoned request answers into a reply nobody waits for, which is
-      # harmless, and its bookkeeping is collected when the transaction ends.
-      # Closing is the caller's to do, and `transaction/5` does it.
+      # Giving up also drops the request's accumulator, the same way a consumer
+      # that finished early drops it through `stream_cancel/2`. Leaving it
+      # behind was harmless for one abandoned read and unbounded for a long
+      # transaction whose consumer kept timing out — Audit VI, VI-5.
+      #
+      # Closing the transaction is still the caller's to do, and `transaction/5`
+      # does it.
+      if Process.alive?(pid), do: GenServer.cast(pid, {:stream_cancel, ref})
+
       {:error,
        Error.new(
          :timeout,

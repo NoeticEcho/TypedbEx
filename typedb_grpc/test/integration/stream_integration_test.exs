@@ -176,6 +176,33 @@ defmodule TypeDB.GRPC.StreamIntegrationTest do
       assert length(Enum.to_list(b)) == 1
     end
 
+    test "a read that gives up leaves nothing behind in the transaction", %{
+      conn: conn,
+      database: database
+    } do
+      # Audit VI, VI-5. The abandoned request used to keep its accumulator —
+      # rows and all — for the life of the transaction, keyed by a req_id nobody
+      # would ask about again. Nothing but `:sys.get_state/1` can see that, which
+      # is why the test reaches for it.
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      {:ok, ref} = Transaction.stream_start(tx, @query, [])
+      assert Map.has_key?(:sys.get_state(tx.pid).pending, ref)
+
+      # A zero timeout gives up before the answer can arrive, deterministically.
+      assert {:error, %TypeDB.Error{kind: :timeout}} = Transaction.stream_next(tx, ref, 0)
+
+      # The cast that drops it is queued behind the call that registered it, so
+      # one round trip through the process is enough to know it has been handled.
+      _ = :sys.get_state(tx.pid)
+      refute Map.has_key?(:sys.get_state(tx.pid).pending, ref)
+
+      # And the transaction is still the working transaction it was.
+      assert Transaction.open?(tx)
+      assert {:ok, _} = Transaction.query(tx, "match $p isa person; reduce $c = count;")
+    end
+
     test "a streamed answer is not smaller than a collected one", %{conn: conn, database: database} do
       # The two paths decode differently — one row at a time against all at the
       # end — so they are compared rather than assumed equal.
