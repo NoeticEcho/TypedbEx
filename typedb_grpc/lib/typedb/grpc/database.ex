@@ -15,7 +15,8 @@ defmodule TypeDB.GRPC.Database do
 
   use TypeDB.GRPC.Bang
   alias TypeDB.Error
-  alias TypeDB.GRPC.Connection
+  alias TypeDB.GRPC.{Connection, Migration}
+  alias TypeDB.GRPC.Error, as: GRPCError
   alias Typedb.Protocol, as: Proto
 
   @doc "Every database on the server."
@@ -161,6 +162,252 @@ defmodule TypeDB.GRPC.Database do
     end
   end
 
+  @doc """
+  Writes a database's schema and data to two files.
+
+  The one thing this driver does that the HTTP one cannot do at all. TypeDB's
+  HTTP API has no export and no import — `/v1/databases/x/export` answers 404
+  with a valid token while `/schema` on the same token answers 200 — so a graph
+  written through the sibling can be read back only by replaying whatever
+  journal the application kept. This is the native thing: the server streams the
+  schema and then every entity, attribute and relation, and the pair of files is
+  a complete backup.
+
+  `schema_path` gets TypeQL you can read; `data_path` gets the items in TypeDB's
+  own binary format, which is the format its other drivers and its console
+  write, so a dump is not tied to this driver. Both are truncated if they exist,
+  and both are removed again if the export fails part-way — a half-written
+  backup that looks like a backup is worse than none.
+
+  Nothing is held in memory: items are written as they arrive.
+
+      :ok = TypeDB.GRPC.Database.export_to_files(conn, "social", "social.tql", "social.data")
+
+  ## Options
+
+    * `:timeout` — how long to wait, defaulting to the connection's. An export
+      of a large graph is not a request-sized operation; give it a real budget.
+  """
+  @spec export_to_files(Connection.t(), String.t(), Path.t(), Path.t(), keyword()) ::
+          :ok | {:error, Error.t()}
+  def export_to_files(conn, name, schema_path, data_path, opts \\ [])
+      when is_binary(name) and is_binary(schema_path) and is_binary(data_path) do
+    if Path.expand(schema_path) == Path.expand(data_path) do
+      {:error,
+       Error.new(:config, "the schema and the data cannot be exported to the same file, #{schema_path}")}
+    else
+      do_export(conn, name, schema_path, data_path, opts)
+    end
+  end
+
+  defp do_export(conn, name, schema_path, data_path, opts) do
+    with {:ok, _} <-
+           Connection.unary(
+             conn,
+             fn channel, md ->
+               export_stream(channel, md, name, schema_path, data_path, timeout(conn, opts))
+             end,
+             "exporting database #{inspect(name)}",
+             operation: :database_export,
+             database: name
+           ) do
+      :ok
+    end
+  end
+
+  defp export_stream(channel, md, name, schema_path, data_path, timeout) do
+    request = %Proto.Database.Export.Req{req: %Proto.Migration.Export.Req{name: name}}
+
+    # A server-streaming call hands back the replies itself; there is no second
+    # `recv` step the way there is on the bidirectional streams this driver
+    # opens elsewhere.
+    with {:ok, replies} <-
+           Proto.TypeDB.Stub.database_export(channel, request, metadata: md, timeout: timeout) do
+      write_export(replies, schema_path, data_path)
+    end
+  end
+
+  defp write_export(replies, schema_path, data_path) do
+    with {:ok, schema_file} <- open_write(schema_path),
+         {:ok, data_file} <- open_write(data_path) do
+      try do
+        drain_export(replies, schema_file, data_file)
+      after
+        _ = File.close(schema_file)
+        _ = File.close(data_file)
+      end
+      |> discard_files_on_failure(schema_path, data_path)
+    end
+  end
+
+  defp drain_export(replies, schema_file, data_file) do
+    Enum.reduce_while(replies, {:ok, :exported}, fn reply, acc ->
+      case export_part(reply) do
+        {:schema, schema} -> {:cont, write(schema_file, schema, acc)}
+        {:items, items} -> {:cont, write(data_file, Enum.map(items, &Migration.encode/1), acc)}
+        :done -> {:halt, acc}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp export_part({:ok, %Proto.Database.Export.Server{server: %{server: {:initial_res, initial}}}}),
+    do: {:schema, initial.schema}
+
+  defp export_part({:ok, %Proto.Database.Export.Server{server: %{server: {:res_part, part}}}}),
+    do: {:items, part.items}
+
+  defp export_part({:ok, %Proto.Database.Export.Server{server: %{server: {:done, _}}}}), do: :done
+
+  defp export_part({:error, %GRPC.RPCError{} = error}),
+    do: {:error, GRPCError.from_rpc_error(error, "exporting a database")}
+
+  defp export_part(other),
+    do: {:error, Error.new(:decode, "unexpected export reply: #{inspect(other, limit: 5)}")}
+
+  # `:file.write/2` rather than `IO.binwrite/2`: the latter is typed as never
+  # failing, so a full disk part-way through an export would be discovered by
+  # whoever tried to restore the backup.
+  defp write(file, data, acc) do
+    case :file.write(file, data) do
+      :ok -> acc
+      {:error, reason} -> {:error, file_error(reason, "writing the export")}
+    end
+  end
+
+  # Rust's driver removes both files when an export fails, and so does this:
+  # what is on disk after a failed export is a prefix, and a prefix of a backup
+  # restores into a database that is missing whatever came after it.
+  defp discard_files_on_failure({:error, _} = error, schema_path, data_path) do
+    _ = File.rm(schema_path)
+    _ = File.rm(data_path)
+    error
+  end
+
+  defp discard_files_on_failure(result, _schema_path, _data_path), do: result
+
+  @doc """
+  Creates a database from the two files `export_to_files/5` wrote.
+
+  The database must not already exist — the import creates it, defines the
+  schema and then loads the items, and TypeDB refuses to import over something
+  that is there. Items are read from disk and sent in batches as the stream
+  drains them, so restoring a graph larger than memory is a restore rather than
+  a problem.
+
+  The data file is TypeDB's own format, so this restores a dump taken by any of
+  its drivers, not only by this one.
+
+      :ok = TypeDB.GRPC.Database.import_from_files(conn, "social_restored", "social.tql", "social.data")
+
+  ## Options
+
+    * `:timeout` — how long to wait for the server to finish, defaulting to the
+      connection's. This covers the load, not one request, so it usually wants
+      raising.
+  """
+  @spec import_from_files(Connection.t(), String.t(), Path.t(), Path.t(), keyword()) ::
+          :ok | {:error, Error.t()}
+  def import_from_files(conn, name, schema_path, data_path, opts \\ [])
+      when is_binary(name) and is_binary(schema_path) and is_binary(data_path) do
+    with {:ok, schema} <- read_schema(schema_path),
+         :ok <- readable(data_path),
+         {:ok, _} <-
+           Connection.unary(
+             conn,
+             fn channel, md -> import_stream(channel, md, name, schema, data_path, timeout(conn, opts)) end,
+             "importing database #{inspect(name)}",
+             operation: :database_import,
+             database: name
+           ) do
+      :ok
+    end
+  end
+
+  defp import_stream(channel, md, name, schema, data_path, timeout) do
+    stream = Proto.TypeDB.Stub.databases_import(channel, metadata: md, timeout: timeout)
+
+    with :ok <-
+           send_import(
+             stream,
+             {:initial_req, %Proto.Migration.Import.Client.InitialReq{name: name, schema: schema}}
+           ),
+         :ok <- send_items(stream, data_path),
+         :ok <- send_import(stream, {:done, %Proto.Migration.Import.Client.Done{}}, end_stream: true),
+         {:ok, replies} <- GRPC.Stub.recv(stream, timeout: timeout) do
+      await_import(replies)
+    end
+  end
+
+  # 250 items per message, the batch size TypeDB's own drivers use. Sending them
+  # one at a time would make the framing cost the dominant one; sending them all
+  # at once would defeat the streaming.
+  @import_batch 250
+
+  defp send_items(stream, data_path) do
+    data_path
+    |> Migration.items()
+    |> Stream.chunk_every(@import_batch)
+    |> Enum.reduce_while(:ok, fn items, :ok ->
+      case send_import(stream, {:req_part, %Proto.Migration.Import.Client.ReqPart{items: items}}) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  rescue
+    # `Migration.items/1` raises on a file that is not an export; the caller
+    # asked a question and gets an answer rather than a stack trace.
+    error in [TypeDB.Error] -> {:error, error}
+    error in [File.Error] -> {:error, file_error(error.reason, "reading #{data_path}")}
+  end
+
+  defp send_import(stream, client, opts \\ []) do
+    message = %Proto.DatabaseManager.Import.Client{client: %Proto.Migration.Import.Client{client: client}}
+
+    case GRPC.Stub.send_request(stream, message, opts) do
+      %GRPC.Client.Stream{} -> :ok
+      {:error, reason} -> {:error, GRPCError.from_reason(reason, "importing a database")}
+    end
+  end
+
+  defp await_import(replies) do
+    Enum.reduce_while(replies, {:error, Error.new(:transport, "the import stream ended without a reply")}, fn
+      {:ok, %Proto.DatabaseManager.Import.Server{}}, _acc ->
+        {:halt, {:ok, :imported}}
+
+      {:error, %GRPC.RPCError{} = error}, _acc ->
+        {:halt, {:error, GRPCError.from_rpc_error(error, "importing a database")}}
+
+      other, _acc ->
+        {:halt, {:error, Error.new(:decode, "unexpected import reply: #{inspect(other, limit: 5)}")}}
+    end)
+  end
+
+  defp read_schema(path) do
+    case File.read(path) do
+      {:ok, schema} -> {:ok, schema}
+      {:error, reason} -> {:error, file_error(reason, "reading the schema from #{path}")}
+    end
+  end
+
+  defp readable(path) do
+    if File.regular?(path), do: :ok, else: {:error, file_error(:enoent, "reading the data from #{path}")}
+  end
+
+  defp open_write(path) do
+    case File.open(path, [:write, :binary, :raw]) do
+      {:ok, file} -> {:ok, file}
+      {:error, reason} -> {:error, file_error(reason, "opening #{path}")}
+    end
+  end
+
+  # A path the caller got wrong is a caller mistake, which is what `:config`
+  # names in this driver's error vocabulary. The posix reason travels along, so
+  # `:enoent` and `:eacces` stay tellable apart.
+  defp file_error(reason, context) do
+    Error.new(:config, "#{context}: #{:file.format_error(reason)}", reason: reason)
+  end
+
   defp timeout(conn, opts), do: Keyword.get(opts, :timeout, Connection.config(conn).timeout)
 
   # -- `!` twins ---------------------------------------------------------------
@@ -193,4 +440,14 @@ defmodule TypeDB.GRPC.Database do
   @doc "The type schema, raising on failure."
   @spec type_schema!(term(), term(), term()) :: String.t()
   def type_schema!(conn, name, opts \\ []), do: unwrap!(type_schema(conn, name, opts))
+
+  @doc "Exports a database to two files, raising on failure."
+  @spec export_to_files!(term(), term(), term(), term(), term()) :: :ok
+  def export_to_files!(conn, name, schema_path, data_path, opts \\ []),
+    do: ok!(export_to_files(conn, name, schema_path, data_path, opts))
+
+  @doc "Imports a database from two files, raising on failure."
+  @spec import_from_files!(term(), term(), term(), term(), term()) :: :ok
+  def import_from_files!(conn, name, schema_path, data_path, opts \\ []),
+    do: ok!(import_from_files(conn, name, schema_path, data_path, opts))
 end

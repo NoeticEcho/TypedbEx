@@ -180,6 +180,25 @@ defmodule TypeDB.GRPC do
   @spec delete_database(conn(), String.t(), keyword()) :: :ok | {:error, Error.t()}
   defdelegate delete_database(conn, name, opts \\ []), to: Database, as: :delete
 
+  @doc """
+  Writes a database's schema and data to two files.
+
+  The capability the HTTP API does not have at all — see
+  `TypeDB.GRPC.Database.export_to_files/5`.
+  """
+  @spec export_database(conn(), String.t(), Path.t(), Path.t(), keyword()) ::
+          :ok | {:error, Error.t()}
+  defdelegate export_database(conn, name, schema_path, data_path, opts \\ []),
+    to: Database,
+    as: :export_to_files
+
+  @doc "Creates a database from the two files `export_database/5` wrote."
+  @spec import_database(conn(), String.t(), Path.t(), Path.t(), keyword()) ::
+          :ok | {:error, Error.t()}
+  defdelegate import_database(conn, name, schema_path, data_path, opts \\ []),
+    to: Database,
+    as: :import_from_files
+
   # -- `!` twins ---------------------------------------------------------------
   #
   # The convention `CLAUDE.md` states and the sibling enforces mechanically:
@@ -211,4 +230,14 @@ defmodule TypeDB.GRPC do
   @doc "Deletes a database, raising on failure."
   @spec delete_database!(term(), term(), term()) :: :ok
   def delete_database!(conn, name, opts \\ []), do: ok!(delete_database(conn, name, opts))
+
+  @doc "Exports a database to two files, raising on failure."
+  @spec export_database!(term(), term(), term(), term(), term()) :: :ok
+  def export_database!(conn, name, schema_path, data_path, opts \\ []),
+    do: ok!(export_database(conn, name, schema_path, data_path, opts))
+
+  @doc "Imports a database from two files, raising on failure."
+  @spec import_database!(term(), term(), term(), term(), term()) :: :ok
+  def import_database!(conn, name, schema_path, data_path, opts \\ []),
+    do: ok!(import_database(conn, name, schema_path, data_path, opts))
 end

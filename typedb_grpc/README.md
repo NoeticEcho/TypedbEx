@@ -14,8 +14,24 @@ reads what comes back.
 
 ## Why this one
 
-Two things the HTTP API cannot do, both measured against TypeDB 3.12.1 with
-driver and server on the same machine.
+Three things the HTTP API cannot do. The first is a capability it does not have
+at all; the other two are measured against TypeDB 3.12.1 with driver and server
+on the same machine.
+
+**A database can be exported and imported.** TypeDB's HTTP API has no such
+endpoint — `/v1/databases/x/export` answers 404 with a token that gets 200 from
+`/schema` — so a graph written through the sibling can only be read back by
+replaying whatever the application logged. Here the server streams the schema
+and then every entity, attribute and relation:
+
+```elixir
+:ok = TypeDB.GRPC.export_database(conn, "social", "social.tql", "social.data")
+:ok = TypeDB.GRPC.import_database(conn, "social_restored", "social.tql", "social.data")
+```
+
+The files are TypeDB's own, not this driver's: exporting the same database with
+`typedb console` produces byte-identical data, and dumps move in both
+directions. Nothing is held in memory on either side.
 
 **Answers stream, with no ceiling.** TypeDB's `answerCountLimit` exists only in
 the HTTP API; over gRPC answers arrive in flow-controlled parts and there is no

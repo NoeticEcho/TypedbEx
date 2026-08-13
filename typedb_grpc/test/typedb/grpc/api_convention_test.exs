@@ -61,7 +61,9 @@ defmodule TypeDB.GRPC.APIConventionTest do
   # Everything else under the namespace is plumbing an application does not
   # call, a value type with nothing that can fail, or test support — `Case` is
   # compiled only in `:test`, which is the only environment this runs in.
-  @not_api ~w(Bang Telemetry Protocol Config Connection Decode Error Case)
+  # `Migration` is the file format behind `Database.export_to_files/5` — bytes
+  # in and bytes out, with no operation of its own for a `!` twin to wrap.
+  @not_api ~w(Bang Telemetry Protocol Config Connection Decode Error Case Migration)
 
   defp public_api?(module) do
     case inspect(module) do

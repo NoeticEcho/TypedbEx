@@ -5,7 +5,7 @@ TypeDB 3.x drivers for Elixir. Two packages, one repository.
 | package | transport | when to reach for it |
 | --- | --- | --- |
 | [`typedb`](typedb/) | HTTP API v1 | one dependency, works through anything that speaks HTTP/1.1, debuggable with `curl` |
-| [`typedb_grpc`](typedb_grpc/) | gRPC | large reads, long transactions with many operations, no answer cap |
+| [`typedb_grpc`](typedb_grpc/) | gRPC | large reads, long transactions with many operations, no answer cap, database export and import |
 
 Both decode into the same `TypeDB.Concept` structs and fail with the same
 `%TypeDB.Error{}`, so which one an application uses is a line in its data-access
@@ -35,7 +35,15 @@ Pipelining is the third row and it is **reads only**. TypeDB aborts a write's
 answer stream when the next write in the same transaction starts, with `TSV13`,
 so writes go one at a time — which is what the second row measures.
 
-The cap is the difference that is not about speed. TypeDB's own
+Export and import are the difference that is not a difference in degree.
+TypeDB's HTTP API has no endpoint for either — `/v1/databases/x/export` answers
+404 to a token that gets 200 from `/schema` — so a graph written through
+`typedb` can only be read back by replaying whatever the application logged.
+`typedb_grpc` writes the schema as TypeQL and the data as TypeDB's own binary
+format: dumps taken by `typedb console` restore through the driver, dumps taken
+by the driver restore through the console, and the two are byte-identical.
+
+The cap is the other difference that is not about speed. TypeDB's own
 `answerCountLimit` exists only in the HTTP API; over gRPC answers arrive as a
 flow-controlled stream with no ceiling to raise — and `TypeDB.GRPC.stream/4`
 hands that stream to the caller, asking the server for the next batch only when
