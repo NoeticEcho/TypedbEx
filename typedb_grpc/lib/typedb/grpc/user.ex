@@ -2,8 +2,8 @@ defmodule TypeDB.GRPC.User do
   @moduledoc """
   Users, over the unary half of the protocol.
 
-  Mirrors `TypeDB.User`. Note that `list/2` and `get/3` return names rather than
-  richer records: the protocol's `User` message carries only a name and an
+  Mirrors `TypeDB.User`. `list/2`, `get/3` and `current/2` return names rather
+  than richer records: the protocol's `User` message carries only a name and an
   optional password, and the password is never populated on the way out.
   """
 
@@ -28,6 +28,58 @@ defmodule TypeDB.GRPC.User do
              operation: :users_all
            ) do
       {:ok, Enum.map(reply.users, & &1.name)}
+    end
+  end
+
+  @doc """
+  A username, or an error when the user does not exist.
+
+  The same contract as `TypeDB.User.get/3`: the answer to "is this user there"
+  that can also say "I could not ask", which `exists?/3` cannot.
+  """
+  @spec get(Connection.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, Error.t()}
+  def get(conn, username, opts \\ []) when is_binary(username) do
+    with {:ok, reply} <-
+           Connection.unary(
+             conn,
+             fn channel, md ->
+               Proto.TypeDB.Stub.users_get(channel, %Proto.UserManager.Get.Req{name: username},
+                 metadata: md,
+                 timeout: timeout(conn, opts)
+               )
+             end,
+             "reading user #{inspect(username)}",
+             operation: :users_get
+           ) do
+      {:ok, reply.user.name}
+    end
+  end
+
+  @doc """
+  The user this connection signed in as.
+
+  Rust's `users().get_current()`, and the same implementation: there is no RPC
+  for it, so the name comes from the connection's own credentials and is then
+  looked up — which means it also answers "does the account I am using still
+  exist".
+
+  A connection configured with a pre-issued `:token` has no username to look up,
+  and says so rather than guessing.
+  """
+  @spec current(Connection.t(), keyword()) :: {:ok, String.t()} | {:error, Error.t()}
+  def current(conn, opts \\ []) do
+    case Connection.config(conn).username do
+      username when is_binary(username) ->
+        get(conn, username, opts)
+
+      _ ->
+        {:error,
+         Error.new(
+           :config,
+           "this connection was configured with a :token rather than credentials, so the " <>
+             "driver does not know which user it is. The name is inside the token; decode it " <>
+             "there, or configure :username and :password."
+         )}
     end
   end
 
@@ -138,6 +190,14 @@ defmodule TypeDB.GRPC.User do
   @doc "Every user on the server, raising on failure."
   @spec list!(term(), term()) :: [String.t()]
   def list!(conn, opts \\ []), do: unwrap!(list(conn, opts))
+
+  @doc "A username, raising when the user does not exist."
+  @spec get!(term(), term(), term()) :: String.t()
+  def get!(conn, username, opts \\ []), do: unwrap!(get(conn, username, opts))
+
+  @doc "The user this connection signed in as, raising on failure."
+  @spec current!(term(), term()) :: String.t()
+  def current!(conn, opts \\ []), do: unwrap!(current(conn, opts))
 
   @doc "Creates a user, raising on failure."
   @spec create!(term(), term(), term(), term()) :: :ok

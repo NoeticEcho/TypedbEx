@@ -62,6 +62,44 @@ defmodule TypeDB.User do
   def get!(conn, username, opts \\ []), do: unwrap!(get(conn, username, opts))
 
   @doc """
+  Returns the user this connection signed in as.
+
+  Rust's `users().get_current()`, and the same implementation: there is no
+  endpoint for it, so the name comes from the connection's own credentials and
+  is then looked up — which means it also answers "does the account I am using
+  still exist".
+
+  A connection configured with a pre-issued `:token` has no username to look up,
+  and says so rather than guessing.
+  """
+  @spec current(Connection.t(), keyword()) :: {:ok, String.t()} | {:error, Error.t()}
+  def current(conn, opts \\ []) do
+    # Validated here as well as in `get/3`, so a caller who misspells an option
+    # is told which function they misspelled it to.
+    CallOptions.validate!(opts, CallOptions.request(), "TypeDB.User.current/2")
+
+    case Connection.config(conn).username do
+      username when is_binary(username) ->
+        get(conn, username, opts)
+
+      _ ->
+        {:error,
+         Error.new(
+           :config,
+           "this connection was configured with a :token rather than credentials, so the " <>
+             "driver does not know which user it is. The name is inside the token; decode it " <>
+             "there, or configure :username and :password."
+         )}
+    end
+  end
+
+  @doc """
+  Returns the user this connection signed in as, raising on failure.
+  """
+  @spec current!(Connection.t(), keyword()) :: String.t()
+  def current!(conn, opts \\ []), do: unwrap!(current(conn, opts))
+
+  @doc """
   Returns whether a user exists.
 
   Raises `TypeDB.Error` for anything other than a clean "not found" — an

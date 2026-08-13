@@ -234,6 +234,44 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
       assert :ok = User.delete(conn, username)
       refute User.exists?(conn, username)
     end
+
+    test "get/3 answers with the name, or says the user is not there", %{conn: conn} do
+      assert {:ok, "admin"} = User.get(conn, "admin")
+      assert User.get!(conn, "admin") == "admin"
+
+      # The difference from `exists?/3`: this can be branched on rather than
+      # raising, and it carries the server's own code.
+      assert {:error, %TypeDB.Error{kind: :server}} =
+               User.get(conn, "ghost_#{System.unique_integer([:positive])}")
+    end
+
+    test "current/2 is the account this connection signed in as", %{conn: conn} do
+      assert {:ok, username} = User.current(conn)
+      assert username == Connection.config(conn).username
+      assert username in User.list!(conn)
+      assert User.current!(conn) == username
+    end
+
+    test "a connection holding only a token cannot say who it is", %{conn: conn} do
+      {:ok, token} = Connection.token(conn)
+
+      # Started by hand rather than through the helper: that one supplies
+      # credentials as well, and a connection that has a username knows its user
+      # whatever it authenticates with. The case under test is the one with no
+      # username at all.
+      name = :"grpc_static_#{System.unique_integer([:positive])}"
+      {:ok, pid} = Connection.start_link(name: name, address: address(), token: token)
+      Process.unlink(pid)
+      on_exit(fn -> if Process.alive?(pid), do: Connection.stop(pid) end)
+      static = name
+
+      assert {:error, %TypeDB.Error{kind: :config} = error} = User.current(static)
+      assert error.message =~ ":token"
+
+      # Everything else on that connection still works — it is the name that is
+      # unknown, not the credentials that are missing.
+      assert {:ok, _} = Database.list(static)
+    end
   end
 
   describe "a channel that has gone" do

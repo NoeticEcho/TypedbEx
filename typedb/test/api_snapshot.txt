@@ -576,6 +576,16 @@ create!/3
 create(TypeDB.Connection.t(), String.t(), String.t(), keyword()) ::
   :ok | {:error, TypeDB.Error.t()}
 create/3
+current!(
+  TypeDB.Connection.t(),
+  keyword()
+) :: String.t()
+current!/1
+current(
+  TypeDB.Connection.t(),
+  keyword()
+) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+current/1
 delete!(TypeDB.Connection.t(), String.t(), keyword()) :: :ok
 delete!/2
 delete(TypeDB.Connection.t(), String.t(), keyword()) :: :ok | {:error, TypeDB.Error.t()}

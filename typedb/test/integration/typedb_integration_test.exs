@@ -806,6 +806,34 @@ defmodule TypeDB.IntegrationTest do
 
       assert :ok = TypeDB.User.delete(conn, username)
     end
+
+    test "current/2 is the account this connection signed in as", %{conn: conn} do
+      # No endpoint for it, so the name comes from the connection's credentials
+      # and is then looked up — which makes it a live answer rather than an echo
+      # of the config.
+      assert {:ok, username} = TypeDB.User.current(conn)
+      assert username == TypeDB.Connection.config(conn).username
+      assert username in TypeDB.User.list!(conn)
+      assert TypeDB.User.current!(conn) == username
+    end
+
+    test "a connection holding only a token cannot say who it is", %{conn: conn} do
+      {:ok, token} = TypeDB.Connection.token(conn)
+      name = :"typedb_current_token_#{System.unique_integer([:positive])}"
+
+      {:ok, pid} =
+        TypeDB.start_link(
+          name: name,
+          url: TypeDB.Connection.config(conn).base_url,
+          token: token,
+          http: TypeDB.Case.adapter() || {TypeDB.HTTP.Finch, []}
+        )
+
+      assert {:error, %Error{kind: :config} = error} = TypeDB.User.current(name)
+      assert error.message =~ ":token"
+
+      TypeDB.stop(pid)
+    end
   end
 
   describe "authentication" do

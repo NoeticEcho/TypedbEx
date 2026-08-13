@@ -15,7 +15,9 @@ defmodule TypeDB.GRPC.Config do
   @type t :: %__MODULE__{
           name: atom(),
           address: String.t(),
-          username: String.t(),
+          # Both are nil on a connection configured with a `:token` and nothing
+          # else, which is what `TypeDB.GRPC.User.current/2` has to answer for.
+          username: String.t() | nil,
           password: String.t() | nil,
           static_token: String.t() | nil,
           tls: boolean(),

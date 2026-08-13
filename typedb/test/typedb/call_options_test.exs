@@ -48,6 +48,7 @@ defmodule TypeDB.CallOptionsTest do
       {"TypeDB.User.list/2", CallOptions.request(), fn opts -> User.list(conn, opts) end},
       {"TypeDB.User.get/3", CallOptions.request(), fn opts -> User.get(conn, "admin", opts) end},
       {"TypeDB.User.exists?/3", CallOptions.request(), fn opts -> User.exists?(conn, "admin", opts) end},
+      {"TypeDB.User.current/2", CallOptions.request(), fn opts -> User.current(conn, opts) end},
       {"TypeDB.User.create/4", CallOptions.request(),
        fn opts -> User.create(conn, "alice", "password", opts) end},
       {"TypeDB.User.set_password/4", CallOptions.request(),
