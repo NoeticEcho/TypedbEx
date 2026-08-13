@@ -5,7 +5,7 @@ Five audits, newest first. Audits I–IV cover `typedb`; Audit V covers
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
-| [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | see below |
+| [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | all fixed, `bb08ff1` |
 | [Audit IV](#audit-iv--080-through-a-callers-post-mortems) | `447ff97` (0.8.0), through `newgen-elixir`'s own post-mortems | 4 claims tested: 2 held, 2 did not | shipped in 0.8.0 |
 | [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | both fixed |
 | [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | all fixed, shipped in 0.6.0 |
@@ -130,6 +130,33 @@ one-element list. **minor.**
 and uses them. Here the parameter exists only so the signatures match, which is
 worse than not having it: a caller passing a timeout gets no error and no
 timeout. **minor.**
+
+## Outcome
+
+All nine fixed, in six commits, each with the gate run and each with its test
+proven non-vacuous by reintroducing the defect:
+
+| step | findings | commit |
+| --- | --- | --- |
+| 1 | V-1, V-9 — `datetime-tz` type and instant, temporal coverage | `1afaf1d` |
+| 2 | V-3 — concurrent callers on one transaction | `e22e95e` |
+| 3, 4 | V-5 `connection: nil`, V-4 the port heuristic | `315ee77` |
+| 5 | V-2 — twenty-five `!` twins and a convention test | `5d3b11a` |
+| 6 | V-6, V-7, V-8, V-10 — dead code, `close/2`'s options | `bb08ff1` |
+
+Nothing was blocked and nothing was rolled back. Two things are worth carrying
+forward rather than forgetting:
+
+**The two critical findings were both invisible to the suite that existed.**
+V-1 survived because the shared behaviour suite compared strings, integers and
+dates but not temporal types; V-3 survived because every test used a
+transaction from one process. Both suites were green throughout. That is the
+argument for auditing code that passes its tests.
+
+**The `!` twins were missing because nothing checked.** The convention has been
+written in `CLAUDE.md` since before this package existed and enforced in the
+sibling since 0.1.0; the new package simply never had the test, and thirty
+functions drifted in one session. The test now exists here too.
 
 ## Not findings
 

@@ -1,5 +1,8 @@
 # Refactor plan III — Audit V, `typedb_grpc`
 
+**Executed in full at `bb08ff1`.** Six steps, six commits, nothing blocked and
+nothing rolled back. See `AUDIT.md`'s Audit V for the outcome table.
+
 Nine findings, ordered critical → major → minor. Each step leaves both packages
 building and both suites green, and is committed on its own.
 
