@@ -106,6 +106,15 @@ struct [:query_type, :warning]
 
 ## TypeDB.Concept
 
+@type category() ::
+  :entity
+  | :relation
+  | :attribute
+  | :entity_type
+  | :relation_type
+  | :attribute_type
+  | :role_type
+  | :value
 @type entry() :: t() | nil | [t()]
 @type instance() ::
   TypeDB.Concept.Entity.t() | TypeDB.Concept.Relation.t() | TypeDB.Concept.Attribute.t()
@@ -116,11 +125,15 @@ struct [:query_type, :warning]
   | TypeDB.Concept.AttributeType.t()
   | TypeDB.Concept.RoleType.t()
 cast(term(), String.t()) :: term()
+category(t()) :: category()
 decode(term()) :: entry()
 iid(t()) :: String.t() | nil
+instance?(t()) :: boolean()
 label(t()) :: String.t() | nil
+type?(t()) :: boolean()
 typed_value(t()) :: term()
 value(t()) :: term()
+value?(t()) :: boolean()
 
 ## TypeDB.Concept.Attribute
 

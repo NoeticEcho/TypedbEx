@@ -168,6 +168,86 @@ defmodule TypeDB.Concept do
     end
   end
 
+  @typedoc """
+  What kind of thing a concept is, in one atom.
+
+  The same eight the protocol distinguishes, spelled the way Elixir spells
+  atoms — `:entity_type`, not `:entityType`.
+  """
+  @type category ::
+          :entity
+          | :relation
+          | :attribute
+          | :entity_type
+          | :relation_type
+          | :attribute_type
+          | :role_type
+          | :value
+
+  @doc """
+  What kind of thing a concept is.
+
+  The counterpart of Rust's `Concept::get_category`, and the reason it is worth
+  having in a language with pattern matching: a `case` on this is one line per
+  branch, where matching the structs means knowing all eight module names.
+
+      iex> TypeDB.Concept.category(%TypeDB.Concept.Entity{iid: "0x0", type: nil})
+      :entity
+
+      iex> TypeDB.Concept.category(%TypeDB.Concept.AttributeType{label: "name"})
+      :attribute_type
+
+  Rust's other thirty-odd accessors are deliberately not here. `try_get_integer`
+  and its dozen siblings say in a method what `typed_value/1` says once, and
+  `is_entity` is `match?(%Entity{}, concept)` — a predicate that reads worse
+  than the match it wraps. What survives the translation is this, plus the three
+  predicates below, which answer questions the struct name alone does not.
+  """
+  @spec category(t()) :: category()
+  def category(%Entity{}), do: :entity
+  def category(%Relation{}), do: :relation
+  def category(%Attribute{}), do: :attribute
+  def category(%EntityType{}), do: :entity_type
+  def category(%RelationType{}), do: :relation_type
+  def category(%AttributeType{}), do: :attribute_type
+  def category(%RoleType{}), do: :role_type
+  def category(%Value{}), do: :value
+
+  @doc """
+  Whether the concept is data rather than schema.
+
+      iex> TypeDB.Concept.instance?(%TypeDB.Concept.Entity{iid: "0x0", type: nil})
+      true
+
+      iex> TypeDB.Concept.instance?(%TypeDB.Concept.EntityType{label: "person"})
+      false
+  """
+  @spec instance?(t()) :: boolean()
+  def instance?(concept), do: category(concept) in [:entity, :relation, :attribute]
+
+  @doc """
+  Whether the concept is a type.
+
+      iex> TypeDB.Concept.type?(%TypeDB.Concept.RoleType{label: "friendship:friend"})
+      true
+  """
+  @spec type?(t()) :: boolean()
+  def type?(concept) do
+    category(concept) in [:entity_type, :relation_type, :attribute_type, :role_type]
+  end
+
+  @doc """
+  Whether the concept is a bare value — a computed one, belonging to no instance.
+
+      iex> TypeDB.Concept.value?(%TypeDB.Concept.Value{value: 3, value_type: "integer"})
+      true
+
+  An attribute is not one: it *has* a value and is also a thing in the database.
+  `value/1` and `typed_value/1` read both.
+  """
+  @spec value?(t()) :: boolean()
+  def value?(concept), do: category(concept) == :value
+
   @doc """
   Returns the `iid` of an instance, or `nil` for types and values.
   """

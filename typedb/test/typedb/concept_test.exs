@@ -126,6 +126,47 @@ defmodule TypeDB.ConceptTest do
     end
   end
 
+  describe "category/1 and the predicates" do
+    @concepts [
+      {%Concept.Entity{iid: "0x1"}, :entity},
+      {%Concept.Relation{iid: "0x2"}, :relation},
+      {%Concept.Attribute{iid: "0x3", value: 1, value_type: "integer"}, :attribute},
+      {%Concept.EntityType{label: "person"}, :entity_type},
+      {%Concept.RelationType{label: "friendship"}, :relation_type},
+      {%Concept.AttributeType{label: "name"}, :attribute_type},
+      {%Concept.RoleType{label: "friendship:friend"}, :role_type},
+      {%Concept.Value{value: 1, value_type: "integer"}, :value}
+    ]
+
+    test "every concept struct has a category, and they are all different" do
+      # The list above is the whole of `TypeDB.Concept.t()`. If a struct is
+      # added and not categorised, `category/1` raises a FunctionClauseError
+      # here rather than in somebody's application.
+      for {concept, expected} <- @concepts do
+        assert Concept.category(concept) == expected
+      end
+
+      assert @concepts |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> length() == 8
+    end
+
+    test "instance?, type? and value? partition the categories" do
+      for {concept, _} <- @concepts do
+        answers = [Concept.instance?(concept), Concept.type?(concept), Concept.value?(concept)]
+
+        assert Enum.count(answers, & &1) == 1,
+               "#{inspect(concept.__struct__)} is #{Enum.count(answers, & &1)} of instance/type/value"
+      end
+    end
+
+    test "an attribute is an instance, not a value, even though it has one" do
+      attribute = %Concept.Attribute{iid: "0x1", value: "Alice", value_type: "string"}
+
+      assert Concept.instance?(attribute)
+      refute Concept.value?(attribute)
+      assert Concept.value(attribute) == "Alice"
+    end
+  end
+
   describe "typed_value/1" do
     test "primitives pass through" do
       assert cast(true, "boolean") == true
