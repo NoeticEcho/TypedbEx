@@ -216,6 +216,13 @@ defmodule TypeDB.GRPC.TelemetryIntegrationTest do
       assert Enum.all?(events, fn {_, m, meta} ->
                is_integer(m.wait) and m.wait >= 0 and meta.transport == :grpc
              end)
+
+      # Audit V, V-5: this was the literal `nil`, so a metric grouped by
+      # connection collapsed to one series while the doc promised otherwise.
+      assert Enum.all?(events, fn {_, _, meta} -> meta.connection == conn end),
+             "the batch event must name the connection it came from"
+
+      assert Enum.all?(events, fn {_, _, meta} -> meta.database == database end)
     end
   end
 

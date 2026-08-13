@@ -71,7 +71,8 @@ defmodule TypeDB.GRPC.Telemetry do
   batch handed to a consumer of `TypeDB.GRPC.stream/4`.
 
   Measurements: `:rows` in the batch, and `:wait` — native time units the
-  consumer spent waiting for it. Metadata: `:transport`, `:connection`.
+  consumer spent waiting for it. Metadata: `:transport`, `:connection` and
+  `:database`.
 
   It is here because back pressure is invisible otherwise. A `:wait` near zero
   every time means the server is ahead of the consumer and the batch size could

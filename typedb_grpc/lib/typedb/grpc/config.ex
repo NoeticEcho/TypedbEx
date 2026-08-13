@@ -158,26 +158,51 @@ defmodule TypeDB.GRPC.Config do
     end
   end
 
+  # Parsed once, and the port decided from the parsed URI rather than from a
+  # substring of the raw string. The old version asked
+  # `String.contains?(url, ":80")`, which matches a path segment, an IPv6 host
+  # and userinfo just as happily as a port — Audit V, V-4.
   defp from_url(url) do
-    case URI.parse(url) do
-      %URI{host: host} when is_binary(host) and host != "" ->
-        %URI{port: port} = uri = URI.parse(url)
-        {:ok, "#{uri.host}:#{grpc_port(port, url)}"}
+    case URI.new(url) do
+      {:ok, %URI{host: host} = uri} when is_binary(host) and host != "" ->
+        {:ok, "#{host}:#{grpc_port(uri, url)}"}
 
       _ ->
         error("invalid :url #{inspect(url)}, expected something like \"http://localhost:1729\"")
     end
   end
 
-  # URI.parse fills in the scheme's default port when the URL carries none, so
-  # 80 and 443 mean "the caller said nothing about a port" rather than "the
-  # caller wants TypeDB on 80".
-  defp grpc_port(port, url) when port in [80, 443] do
-    if String.contains?(url, ":#{port}"), do: port, else: 1729
+  # `URI.new/1` fills in the scheme's default port, so 80 and 443 have to be told
+  # from a port the caller actually wrote — and the struct cannot say which it
+  # was, since `http://h` and `http://h:80` parse identically and `:authority` is
+  # deprecated and comes back nil.
+  #
+  # So the authority is taken from the string, but *only* the authority: the old
+  # version asked `String.contains?(url, ":80")` and matched a path segment
+  # (`http://h/a:80`), userinfo (`http://user:80@h`) and an IPv6 host just as
+  # happily — Audit V, V-4.
+  defp grpc_port(%URI{port: port}, url) when port in [80, 443] do
+    if explicit_port?(url, port), do: port, else: 1729
   end
 
-  defp grpc_port(nil, _url), do: 1729
-  defp grpc_port(port, _url), do: port
+  defp grpc_port(%URI{port: nil}, _url), do: 1729
+  defp grpc_port(%URI{port: port}, _url), do: port
+
+  @authority ~r{^[a-zA-Z][a-zA-Z0-9+.\-]*://([^/?#]*)}
+
+  defp explicit_port?(url, port) do
+    case Regex.run(@authority, url) do
+      [_, authority] ->
+        # Userinfo can contain a colon and a number of its own, so it goes first.
+        authority
+        |> String.split("@")
+        |> List.last()
+        |> String.ends_with?(":#{port}")
+
+      _ ->
+        false
+    end
+  end
 
   defp fetch_credentials(opts) do
     username = Keyword.get(opts, :username)

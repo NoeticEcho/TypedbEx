@@ -70,12 +70,13 @@ defmodule TypeDB.GRPC.Transaction do
 
   @type t :: %__MODULE__{
           pid: pid(),
+          conn: Connection.t(),
           database: String.t(),
           type: type()
         }
 
-  @enforce_keys [:pid, :database, :type]
-  defstruct [:pid, :database, :type]
+  @enforce_keys [:pid, :conn, :database, :type]
+  defstruct [:pid, :conn, :database, :type]
 
   @types %{read: :READ, write: :WRITE, schema: :SCHEMA}
 
@@ -97,7 +98,7 @@ defmodule TypeDB.GRPC.Transaction do
     end
 
     case GenServer.start(__MODULE__, {conn, database, type, opts}) do
-      {:ok, pid} -> {:ok, %__MODULE__{pid: pid, database: database, type: type}}
+      {:ok, pid} -> {:ok, %__MODULE__{pid: pid, conn: conn, database: database, type: type}}
       {:error, %Error{} = error} -> {:error, error}
       {:error, reason} -> {:error, GRPCError.from_reason(reason, "opening a transaction on #{database}")}
     end
@@ -237,7 +238,7 @@ defmodule TypeDB.GRPC.Transaction do
       {:rows, rows} ->
         Telemetry.stream_batch(
           %{rows: length(rows), wait: System.monotonic_time() - started_at},
-          %{connection: nil, database: tx.database}
+          %{connection: tx.conn, database: tx.database}
         )
 
       _ ->
@@ -386,6 +387,7 @@ defmodule TypeDB.GRPC.Transaction do
 
     metadata =
       %{
+        connection: tx.conn,
         operation: operation_name(message),
         database: tx.database,
         transaction_type: tx.type
