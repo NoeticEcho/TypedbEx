@@ -19,7 +19,9 @@ Then the four things neither driver had:
     `import_database/5`. The capability the HTTP API does not have at all, and
     the strongest reason to have this package beyond speed. The files are
     TypeDB's own format, not this driver's: a dump taken by `typedb console` and
-    one taken here are byte-identical, and each restores through the other.
+    one taken here are byte-identical, and each restores through the other —
+    checked on every push by CI's `grpc_migration_interop` job, over a database
+    holding every value type TypeDB has.
   * **`connection_open`.** The RPC every official driver makes first and this one
     skipped, going straight to `authentication_token_create`. The first sign-in
     is now the open — no extra round trip, since the open carries the token — so

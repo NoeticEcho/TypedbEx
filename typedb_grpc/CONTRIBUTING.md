@@ -41,6 +41,33 @@ TYPEDB_GRPC_ADDRESS=127.0.0.1:1729 \
 mix test --include integration test/behaviour
 ```
 
+One test wants a third thing: the `typedb` binary, for the claim that the export
+files this driver writes are TypeDB's format and not its own. Without it that
+test says it is skipping; with it, dumps move between the driver and the console
+in both directions and are compared byte for byte.
+
+```sh
+version=3.12.1   # the same version as the server, or the comparison means nothing
+name=typedb-all-linux-x86_64
+curl -fsSL "https://repo.typedb.com/public/public-release/raw/names/$name/versions/$version/$name-$version.tar.gz" \
+  | tar -xz
+
+TYPEDB_GRPC_ADDRESS=127.0.0.1:1729 \
+TYPEDB_CONSOLE="$PWD/$name-$version/typedb" \
+mix test --include integration test/integration/migration_integration_test.exs
+```
+
+The console is not in the `typedb/typedb` Docker image — that one ships the
+server alone — which is why it comes from the `typedb-all` distribution. CI's
+`grpc_migration_interop` job does exactly the above and fails if it cannot, so
+this is checked on every push rather than when somebody remembers.
+
+Worth knowing before touching `TypeDB.GRPC.Migration`: the round-trip tests do
+**not** catch a wrong file format. Encoding a length as a non-canonical varint —
+`0x81 0x00` for 1 — round-trips through this driver perfectly and imports through
+the console without complaint, because both decoders accept it. Only the
+byte-for-byte comparison notices. That is what the console test is for.
+
 ## The generated protocol modules
 
 `lib/protocol/` is generated from

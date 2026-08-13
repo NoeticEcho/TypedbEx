@@ -761,3 +761,75 @@ jobs:
       - name: Server logs on failure
         if: failure()
         run: docker logs typedb-tls
+
+  grpc_migration_interop:
+    name: Export files are TypeDB's, not ours (TypeDB ${{ matrix.typedb }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    # A job of its own, pinned to one version rather than matrixed over the
+    # others, because of what it compares: this driver's dump of a database
+    # against the console's dump of the same database, byte for byte. That only
+    # means anything when the console is the same version as the server.
+    #
+    # The console does not come from the image. `typedb/typedb` ships the server
+    # alone — `docker export` on it lists `/opt/typedb-server-linux-x86_64/typedb`
+    # and no console — so it is fetched from the `typedb-all` distribution, which
+    # is the only published artefact that carries one.
+    strategy:
+      matrix:
+        typedb: ["3.12.1"]
+
+    services:
+      typedb:
+        image: typedb/typedb:${{ matrix.typedb }}
+        ports:
+          - 8000:8000
+          - 1729:1729
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "TypeDB did not become healthy in time" >&2
+          exit 1
+
+      - name: Fetch the matching TypeDB console
+        run: |
+          version="${{ matrix.typedb }}"
+          name="typedb-all-linux-x86_64"
+          curl -fsSL --retry 3 \
+            "https://repo.typedb.com/public/public-release/raw/names/$name/versions/$version/$name-$version.tar.gz" \
+            -o typedb-all.tar.gz
+          tar -xzf typedb-all.tar.gz
+          console="$PWD/$name-$version/typedb"
+          test -x "$console"
+          echo "TYPEDB_CONSOLE=$console" >> "$GITHUB_ENV"
+
+      # The suite skips the interop test when TYPEDB_CONSOLE is unset, which is
+      # right on a developer's machine and would make this job green while
+      # proving nothing. Set-but-missing already fails the test; unset here has
+      # to fail the job.
+      - name: The console has to be there
+        run: test -x "$TYPEDB_CONSOLE"
+
+      - name: Run the migration suite against the real console
+        env:
+          TYPEDB_GRPC_ADDRESS: localhost:1729
+          TYPEDB_GRPC_USERNAME: admin
+          TYPEDB_GRPC_PASSWORD: password
+        run: mix test --include integration test/integration/migration_integration_test.exs

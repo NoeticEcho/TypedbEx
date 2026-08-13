@@ -10,7 +10,9 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
   The claim that matters most is not that a round trip works — it is that the
   files are TypeDB's, not this driver's. Set `TYPEDB_CONSOLE` to the `typedb`
   binary and the suite proves that against the real console, in both directions
-  and byte for byte. Without it that one test says so and skips.
+  and byte for byte; without it that one test says so and skips. CI's
+  `grpc_migration_interop` job fetches a console matching the server it runs
+  and fails if it cannot, so the claim is checked on every push.
   """
 
   use TypeDB.GRPC.Case, async: false
@@ -68,6 +70,80 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
     end
 
     database
+  end
+
+  # Every value type TypeDB has, in one database.
+  #
+  # The framing this driver writes is meant to be opaque to what an item holds —
+  # items go out exactly as they arrived — so the way to find out whether that
+  # is true is to put the awkward ones through it: a decimal with TypeDB's fixed
+  # 19-digit scale, a zoned datetime, a duration that keeps months, days and
+  # nanos apart. A dump of only strings and integers would prove none of them.
+  @rich_schema """
+  define
+    attribute name, value string;
+    attribute flag, value boolean;
+    attribute age, value integer;
+    attribute score, value double;
+    attribute price, value decimal;
+    attribute born, value date;
+    attribute at, value datetime;
+    attribute at_tz, value datetime-tz;
+    attribute lasted, value duration;
+    entity person,
+      owns name @key, owns flag, owns age, owns score, owns price,
+      owns born, owns at, owns at_tz, owns lasted;
+    relation friendship, relates friend @card(0..);
+    person plays friendship:friend;
+  """
+
+  defp seed_rich(conn) do
+    database = start_database(conn, "migrich")
+
+    {:ok, _} =
+      Transaction.transaction(conn, database, :schema, fn tx ->
+        Transaction.query(tx, @rich_schema)
+      end)
+
+    {:ok, _} =
+      Transaction.transaction(conn, database, :write, fn tx ->
+        Transaction.query(tx, """
+          insert
+            $a isa person,
+              has name "one", has flag true, has age -42, has score 1.5,
+              has price 3.141592653589793238dec,
+              has born 1969-07-20,
+              has at 2024-03-01T12:00:00.000,
+              has at_tz 2024-03-01T12:00:00.000+05:00,
+              has lasted P1Y2M3DT4H5M6S;
+            $b isa person,
+              has name "two", has flag false, has age 0, has score -0.25,
+              has price -0.0000000000000000001dec,
+              has born 0001-01-01,
+              has at 9999-12-31T23:59:59.999,
+              has at_tz 1970-01-01T00:00:00.000-11:30,
+              has lasted P0Y;
+            (friend: $a, friend: $b) isa friendship;
+        """)
+      end)
+
+    database
+  end
+
+  defp values(conn, database, name) do
+    {:ok, answer} =
+      Transaction.transaction(conn, database, :read, fn tx ->
+        Transaction.query(tx, """
+          match $p isa person, has name == "#{name}",
+            has flag $f, has age $g, has score $s, has price $pr,
+            has born $b, has at $t, has at_tz $z, has lasted $l;
+          select $f, $g, $s, $pr, $b, $t, $z, $l;
+        """)
+      end)
+
+    row = answer |> TypeDB.Answer.rows() |> hd()
+
+    Map.new(~w(f g s pr b t z l), &{&1, TypeDB.ConceptRow.typed_value(row, &1)})
   end
 
   defp count(conn, database, pattern) do
@@ -136,6 +212,31 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
       assert count(conn, restored, "$p isa person;") == 0
     end
 
+    test "every value type comes back as the same value", %{
+      conn: conn,
+      schema_path: schema_path,
+      data_path: data_path
+    } do
+      source = seed_rich(conn)
+      before = %{"one" => values(conn, source, "one"), "two" => values(conn, source, "two")}
+
+      assert :ok = Database.export_to_files(conn, source, schema_path, data_path)
+
+      restored = restored_name(conn)
+      assert :ok = Database.import_from_files(conn, restored, schema_path, data_path)
+
+      # Value by value rather than count by count. A dump is only a backup if a
+      # decimal comes back with its scale, a zoned datetime with its offset, and
+      # a duration with months, days and nanos still held apart.
+      for name <- ["one", "two"] do
+        assert values(conn, restored, name) == before[name], "#{name} changed across the round trip"
+      end
+
+      assert %TypeDB.DateTimeTZ{} = before["one"]["z"]
+      assert %TypeDB.Duration{months: 14, days: 3} = before["one"]["l"]
+      assert count(conn, restored, "$f isa friendship;") == 1
+    end
+
     test "the ! twins do the same thing", %{conn: conn, schema_path: schema_path, data_path: data_path} do
       source = seed(conn, 3)
 
@@ -165,42 +266,66 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
       schema_path: schema_path,
       data_path: data_path
     } do
-      console = System.get_env("TYPEDB_CONSOLE")
+      case System.get_env("TYPEDB_CONSOLE") do
+        nil ->
+          # Skipped rather than failed when the console is not on this machine:
+          # the same posture as the rest of the suite, which skips without a
+          # server rather than pretending the absence is a defect. The
+          # `grpc_migration_interop` CI job sets it, so this is covered on every
+          # push and not only when somebody remembers.
+          IO.puts(:stderr, "skipping the console interop test: set TYPEDB_CONSOLE to the typedb binary")
 
-      if console && File.exists?(console) do
-        interop(conn, console, dir, schema_path, data_path)
-      else
-        # Skipped rather than failed when the console is not on this machine:
-        # it is the same posture as the rest of the suite, which skips without a
-        # server rather than pretending the absence is a defect. CI runs TypeDB
-        # as a service container and has no console binary on the runner, so
-        # this one is a local check — run it after touching the file format.
-        IO.puts(:stderr, "skipping the console interop test: set TYPEDB_CONSOLE to the typedb binary")
+        "" ->
+          IO.puts(:stderr, "skipping the console interop test: TYPEDB_CONSOLE is empty")
+
+        console ->
+          # Set but unusable is a different thing from unset, and it must not
+          # pass quietly: that is exactly how a CI job goes green while proving
+          # nothing.
+          assert File.exists?(console), "TYPEDB_CONSOLE is set to #{console}, which is not there"
+          interop(conn, console, dir, schema_path, data_path)
       end
     end
   end
 
   defp interop(conn, console, dir, schema_path, data_path) do
-    source = seed(conn, 50)
+    # The rich database rather than the plain one: a format claim made only over
+    # strings and integers is a claim about the easy half. This carries a
+    # decimal at TypeDB's fixed scale, a zoned datetime, and a duration.
+    source = seed_rich(conn)
+    before = values(conn, source, "one")
+
     assert :ok = Database.export_to_files(conn, source, schema_path, data_path)
 
     # 1. this driver's dump, restored by the console.
     from_driver = restored_name(conn)
-    assert {_, 0} = console(console, "database import #{from_driver} #{schema_path} #{data_path}")
+
+    assert {output, 0} = console(console, "database import #{from_driver} #{schema_path} #{data_path}"),
+           "the console refused this driver's dump"
+
+    assert output =~ "Successfully imported"
+    assert values(conn, from_driver, "one") == before
+    assert count(conn, from_driver, "$f isa friendship;") == 1
 
     # 2. the console's dump, restored by this driver.
     console_schema = Path.join(dir, "console.tql")
     console_data = Path.join(dir, "console.typedb")
-    assert {_, 0} = console(console, "database export #{source} #{console_schema} #{console_data}")
+
+    assert {_, 0} = console(console, "database export #{source} #{console_schema} #{console_data}"),
+           "the console could not export the database this driver wrote"
 
     from_console = restored_name(conn)
     assert :ok = Database.import_from_files(conn, from_console, console_schema, console_data)
-    assert count(conn, from_console, "$p isa person;") == 50
+    assert values(conn, from_console, "one") == before
+    assert count(conn, from_console, "$p isa person;") == 2
 
     # And the two dumps of the same database are the same bytes. That is the
     # strongest form of the claim: not "both are readable" but "both are the
     # same file".
-    assert File.read!(console_data) == File.read!(data_path)
+    assert File.read!(console_data) == File.read!(data_path),
+           "this driver's data file and the console's differ for the same database"
+
+    assert File.read!(console_schema) == File.read!(schema_path)
   end
 
   describe "what goes wrong" do
