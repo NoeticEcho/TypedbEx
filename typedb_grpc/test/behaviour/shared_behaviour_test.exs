@@ -37,7 +37,10 @@ defmodule TypeDB.SharedBehaviourTest do
     attribute age, value integer;
     attribute score, value double;
     attribute born, value date;
-    entity person, owns name, owns age, owns score, owns born;
+    attribute at, value datetime;
+    attribute at_tz, value datetime-tz;
+    attribute lasted, value duration;
+    entity person, owns name, owns age, owns score, owns born, owns at, owns at_tz, owns lasted;
     relation friendship, relates friend;
     person plays friendship:friend;
   """
@@ -231,6 +234,63 @@ defmodule TypeDB.SharedBehaviourTest do
 
           assert [row] = TypeDB.Answer.rows(answer)
           assert TypeDB.ConceptRow.typed_value(row, "b") == ~D[1969-07-20]
+        end)
+      end
+
+      # Added by Audit V, which found that `datetime-tz` decoded to a different
+      # type *and* a different instant on the two transports. The suite compared
+      # strings, integers, doubles and dates — and temporal types are exactly
+      # where two independent decoders drift, because each one is a small pile
+      # of arithmetic nobody reads twice.
+      test "every temporal type round-trips to the same value on both", context do
+        skip_or(context, fn %{adapter: adapter, conn: conn, database: database} ->
+          {:ok, _} =
+            adapter.query(
+              conn,
+              database,
+              """
+              insert $p isa person,
+                has name "temporal",
+                has born 1969-07-20,
+                has at 2024-03-01T12:00:00.000,
+                has at_tz 2024-03-01T12:00:00.000+05:00,
+                has lasted P1Y2M3DT4H5M6S;
+              """,
+              :write
+            )
+
+          {:ok, answer} =
+            adapter.query(
+              conn,
+              database,
+              ~s|match $p isa person, has name "temporal", has born $d, has at $t, has at_tz $z, has lasted $l; select $d, $t, $z, $l;|,
+              :read
+            )
+
+          assert [row] = TypeDB.Answer.rows(answer)
+
+          assert TypeDB.ConceptRow.typed_value(row, "d") == ~D[1969-07-20]
+
+          assert TypeDB.ConceptRow.typed_value(row, "t") == ~N[2024-03-01 12:00:00.000000],
+                 "a naive datetime must be the same naive datetime on both transports"
+
+          assert %TypeDB.DateTimeTZ{} = tz = TypeDB.ConceptRow.typed_value(row, "z"),
+                 """
+                 A `datetime-tz` must decode to TypeDB.DateTimeTZ on both transports.
+
+                 It has its own struct precisely because a DateTime cannot hold "this
+                 wall clock, in this zone" without a tz database, and an application
+                 that matches on it keeps matching only if both drivers agree.
+
+                 Got: #{inspect(TypeDB.ConceptRow.typed_value(row, "z"))}
+                 """
+
+          assert tz.naive == ~N[2024-03-01 12:00:00.000000],
+                 "the wall clock TypeDB was given, not one shifted by the offset"
+
+          assert tz.utc_offset == 18_000
+
+          assert %TypeDB.Duration{months: 14, days: 3} = TypeDB.ConceptRow.typed_value(row, "l")
         end)
       end
 

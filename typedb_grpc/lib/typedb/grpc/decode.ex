@@ -27,7 +27,7 @@ defmodule TypeDB.GRPC.Decode do
   sibling documents cannot arise here.
   """
 
-  alias TypeDB.{Concept, ConceptRow, Duration}
+  alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration}
   alias Typedb.Protocol, as: Proto
 
   # TypeDB's decimal has a fixed fractional scale of 19 digits.
@@ -172,7 +172,7 @@ defmodule TypeDB.GRPC.Decode do
   defp scalar(:datetime, %Proto.Value.Datetime{} = datetime), do: naive(datetime)
 
   defp scalar(:datetime_tz, %Proto.Value.Datetime_TZ{datetime: datetime, timezone: timezone}) do
-    datetime_tz(naive(datetime), timezone)
+    datetime_tz(datetime, timezone)
   end
 
   defp scalar(:duration, %Proto.Value.Duration{months: months, days: days, nanos: nanos}) do
@@ -184,38 +184,48 @@ defmodule TypeDB.GRPC.Decode do
   # caller can at least tell what it was.
   defp scalar(:struct, %Proto.Value.Struct{struct_type_name: name}), do: {:struct, name}
 
+  # A `datetime` is the wall clock TypeDB was given, with no zone attached, so it
+  # decodes to a `NaiveDateTime` — the same thing the sibling produces from the
+  # HTTP API's text.
   defp naive(%Proto.Value.Datetime{seconds: seconds, nanos: nanos}) do
-    DateTime.from_unix!(seconds * 1_000_000_000 + nanos, :nanosecond)
+    seconds
+    |> Kernel.*(1_000_000_000)
+    |> Kernel.+(nanos)
+    |> DateTime.from_unix!(:nanosecond)
+    |> DateTime.to_naive()
   end
 
+  # A `datetime-tz` becomes `TypeDB.DateTimeTZ`, which is the sibling's struct
+  # and exists because a `DateTime` cannot hold "this wall clock, in this zone"
+  # without a tz database.
+  #
+  # The arithmetic is the part Audit V found wrong. Protobuf carries the *UTC
+  # instant* plus the zone; the struct wants the *wall clock*. The old code
+  # stamped the offset onto the UTC value without moving the clock, so
+  # `12:00+05:00` came back as `07:00+05:00` — a plausible answer five hours out.
+  defp datetime_tz(datetime, {:offset, seconds}) do
+    datetime
+    |> naive()
+    |> NaiveDateTime.add(seconds, :second)
+    |> DateTimeTZ.new(seconds)
+  end
+
+  # A named zone needs a tz database to turn an instant into a wall clock. With
+  # one, the answer is exact; without, the naive value stays UTC and the zone
+  # name is still recorded, which is the same partial answer the sibling gives a
+  # host with no tz database rather than a decoding failure.
   defp datetime_tz(datetime, {:named, zone}) do
-    case DateTime.shift_zone(datetime, zone) do
-      {:ok, shifted} -> shifted
-      # No tzdata in the host application. The instant is right and the zone is
-      # not applied, which is better than failing to decode an answer.
-      {:error, _} -> datetime
+    utc =
+      (datetime.seconds * 1_000_000_000 + datetime.nanos)
+      |> DateTime.from_unix!(:nanosecond)
+
+    case DateTime.shift_zone(utc, zone) do
+      {:ok, shifted} -> DateTimeTZ.new(DateTime.to_naive(shifted), zone)
+      {:error, _} -> DateTimeTZ.new(DateTime.to_naive(utc), zone)
     end
   end
 
-  defp datetime_tz(datetime, {:offset, seconds}) do
-    %{
-      datetime
-      | utc_offset: seconds,
-        std_offset: 0,
-        zone_abbr: offset_abbr(seconds),
-        time_zone: offset_abbr(seconds)
-    }
-  end
-
-  defp datetime_tz(datetime, nil), do: datetime
-
-  defp offset_abbr(seconds) do
-    sign = if seconds < 0, do: "-", else: "+"
-    total = abs(div(seconds, 60))
-    "#{sign}#{pad(div(total, 60))}:#{pad(rem(total, 60))}"
-  end
-
-  defp pad(n), do: String.pad_leading("#{n}", 2, "0")
+  defp datetime_tz(datetime, nil), do: naive(datetime)
 
   # `Decimal` is optional in the sibling package, so this driver must build
   # against its absence. `@compile {:no_warn_undefined, ...}` is what makes
