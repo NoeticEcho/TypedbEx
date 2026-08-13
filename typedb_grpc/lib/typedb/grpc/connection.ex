@@ -319,31 +319,39 @@ defmodule TypeDB.GRPC.Connection do
 
   defp connect(%Config{} = config) do
     adapter_opts = [retry: config.connect_retries, connect_timeout: config.connect_timeout]
-    opts = [adapter_opts: adapter_opts] ++ credential(config)
 
-    case GRPC.Stub.connect(config.address, opts) do
-      {:ok, channel} ->
-        {:ok, channel}
+    with {:ok, credential} <- credential(config) do
+      case GRPC.Stub.connect(config.address, [adapter_opts: adapter_opts] ++ credential) do
+        {:ok, channel} ->
+          {:ok, channel}
 
-      {:error, reason} ->
-        {:error,
-         Error.new(
-           :transport,
-           "could not open a gRPC channel to #{config.address}: #{inspect(reason)}",
-           reason: reason
-         )}
+        {:error, reason} ->
+          {:error,
+           Error.new(
+             :transport,
+             "could not open a gRPC channel to #{config.address}: #{inspect(reason)}",
+             reason: reason
+           )}
+      end
     end
   end
-
-  defp credential(%Config{tls: false}), do: []
 
   # `GRPC.Credential.new(ssl: opts)` hands `opts` straight to `:ssl`, whose
   # default is `verify_peer` — so a connection to a server this machine does not
   # trust fails rather than succeeding quietly. Measured against a TypeDB with a
-  # self-signed certificate: without a `cacertfile` the handshake ends in
-  # `Unknown CA`, and it takes a `cacertfile` or an explicit `verify_none` to
-  # get through. That posture is pinned by the TLS suite.
-  defp credential(%Config{tls_opts: tls_opts}), do: [cred: GRPC.Credential.new(ssl: tls_opts)]
+  # self-signed certificate: without a trusted CA the handshake ends in
+  # `Unknown CA`, and it takes one or an explicit `verify_none` to get through.
+  # That posture is pinned by the TLS suite.
+  #
+  # Which CAs those are is `Config.ssl_options/1`'s business, including reading
+  # the machine's trust store when nothing more specific was configured.
+  defp credential(%Config{tls: false}), do: {:ok, []}
+
+  defp credential(%Config{} = config) do
+    with {:ok, ssl_opts} <- Config.ssl_options(config) do
+      {:ok, [cred: GRPC.Credential.new(ssl: ssl_opts)]}
+    end
+  end
 
   defp sign_in_and_reply(state) do
     case sign_in(state) do

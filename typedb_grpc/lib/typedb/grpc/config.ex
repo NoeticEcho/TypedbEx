@@ -19,6 +19,7 @@ defmodule TypeDB.GRPC.Config do
           password: String.t() | nil,
           static_token: String.t() | nil,
           tls: boolean(),
+          tls_root_ca: Path.t() | nil,
           tls_opts: keyword(),
           timeout: timeout(),
           call_timeout: timeout(),
@@ -33,6 +34,7 @@ defmodule TypeDB.GRPC.Config do
     :username,
     :password,
     :static_token,
+    :tls_root_ca,
     tls: false,
     tls_opts: [],
     timeout: 60_000,
@@ -41,7 +43,7 @@ defmodule TypeDB.GRPC.Config do
     connect_retries: 0
   ]
 
-  @keys ~w(name address url username password token tls tls_opts timeout call_timeout connect_timeout connect_retries)a
+  @keys ~w(name address url username password token tls tls_root_ca tls_opts timeout call_timeout connect_timeout connect_retries)a
 
   @doc """
   Builds a config from `start_link/1` options.
@@ -54,7 +56,18 @@ defmodule TypeDB.GRPC.Config do
       HTTP driver can feed this one
     * `:username` / `:password` — credentials to sign in with
     * `:token` — a pre-issued token, instead of credentials. Nothing renews it
-    * `:tls` / `:tls_opts` — TLS for the channel
+    * `:tls` — TLS for the channel. With nothing else set, the certificate is
+      verified against **this machine's trust store**, which is what makes
+      `tls: true` enough for a server whose certificate a public CA signed. The
+      option exists because `:ssl` does not do that on its own: `verify_peer`
+      with no `cacerts` refuses every certificate, including good ones
+    * `:tls_root_ca` — a PEM file to verify against instead of the machine's
+      store, for a private CA. The counterpart of Rust's
+      `DriverTlsConfig::enabled_with_root_ca/1`; checked at start-up, so a path
+      that is not there fails the connection rather than the handshake
+    * `:tls_opts` — options passed straight to `:ssl`, and the last word: what
+      it sets is never overwritten by the two above. The escape hatch for
+      client certificates, a pinned cipher list, or `verify: :verify_none`
     * `:timeout` — per-call timeout in ms, default 60 s
     * `:call_timeout` — how long to wait on the connection process itself when
       it has to mint a token, default 30 s. Worth knowing because a per-call
@@ -82,7 +95,8 @@ defmodule TypeDB.GRPC.Config do
          {:ok, timeout} <- fetch_timeout(opts, :timeout, 60_000),
          {:ok, call_timeout} <- fetch_timeout(opts, :call_timeout, 30_000),
          {:ok, connect_timeout} <- fetch_timeout(opts, :connect_timeout, 10_000),
-         {:ok, connect_retries} <- fetch_retries(opts) do
+         {:ok, connect_retries} <- fetch_retries(opts),
+         {:ok, tls_root_ca} <- fetch_tls_root_ca(opts) do
       {username, password, token} = credentials
 
       {:ok,
@@ -93,6 +107,7 @@ defmodule TypeDB.GRPC.Config do
          password: password,
          static_token: token,
          tls: Keyword.get(opts, :tls, false),
+         tls_root_ca: tls_root_ca,
          tls_opts: Keyword.get(opts, :tls_opts, []),
          timeout: timeout,
          call_timeout: call_timeout,
@@ -108,6 +123,75 @@ defmodule TypeDB.GRPC.Config do
     case new(opts) do
       {:ok, config} -> config
       {:error, error} -> raise error
+    end
+  end
+
+  @doc """
+  The options this config hands to `:ssl`.
+
+  Where `:tls`, `:tls_root_ca` and `:tls_opts` become one keyword list, and the
+  place the machine's trust store is read. Separate from the struct on purpose:
+  the store is a hundred and fifty certificates, and putting them in a struct
+  that lives in ETS and gets inspected in error messages would be a poor trade
+  for something `:ssl` wants once per connection.
+  """
+  @spec ssl_options(t()) :: {:ok, keyword()} | {:error, Error.t()}
+  def ssl_options(%__MODULE__{tls: false}), do: {:ok, []}
+
+  def ssl_options(%__MODULE__{tls_opts: opts} = config) do
+    cond do
+      # The caller said how to verify. Nothing here second-guesses that — it is
+      # also how `verify: :verify_none` stays possible.
+      trust_configured?(opts) -> {:ok, opts}
+      is_binary(config.tls_root_ca) -> {:ok, Keyword.put(opts, :cacertfile, config.tls_root_ca)}
+      true -> native_trust_store(opts)
+    end
+  end
+
+  defp trust_configured?(opts) do
+    Keyword.has_key?(opts, :cacerts) or Keyword.has_key?(opts, :cacertfile) or
+      Keyword.get(opts, :verify) == :verify_none
+  end
+
+  # `:ssl` has no default trust store: `verify: :verify_peer` with no `cacerts`
+  # fails against a certificate a public CA signed, which is measured rather
+  # than assumed — see test/typedb/grpc/tls_options_test.exs. So this driver
+  # supplies the store, which is what `tls: true` means everywhere else and what
+  # Rust's `DriverTlsConfig::enabled_with_native_root_ca/0` does.
+  defp native_trust_store(opts) do
+    case :public_key.cacerts_get() do
+      [] -> {:error, no_trust_store("it is empty")}
+      certs -> {:ok, Keyword.put(opts, :cacerts, certs)}
+    end
+  rescue
+    # `cacerts_get/0` raises rather than returning an error when the platform
+    # has no store or it cannot be parsed.
+    exception -> {:error, no_trust_store(Exception.message(exception))}
+  end
+
+  defp no_trust_store(why) do
+    Error.new(
+      :config,
+      "tls: true verifies the server against this machine's trust store, and it could not be " <>
+        "read (#{why}). Point :tls_root_ca at the CA's PEM file, or pass the store yourself " <>
+        "through :tls_opts."
+    )
+  end
+
+  defp fetch_tls_root_ca(opts) do
+    case Keyword.fetch(opts, :tls_root_ca) do
+      :error ->
+        {:ok, nil}
+
+      {:ok, path} when is_binary(path) ->
+        # Checked now rather than at the handshake: a typo in a path is a
+        # configuration mistake, and it should read as one.
+        if File.regular?(path),
+          do: {:ok, path},
+          else: error("invalid :tls_root_ca #{inspect(path)}, no such file")
+
+      {:ok, other} ->
+        error("invalid :tls_root_ca #{inspect(other)}, expected a path to a PEM file")
     end
   end
 

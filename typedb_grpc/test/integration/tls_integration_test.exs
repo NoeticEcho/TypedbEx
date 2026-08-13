@@ -139,6 +139,20 @@ defmodule TypeDB.GRPC.TLSIntegrationTest do
       end
     end
 
+    test ":tls_root_ca is the same thing without the :ssl vocabulary", context do
+      if context[:skip] do
+        :ok
+      else
+        # The shorthand for a private CA, and the counterpart of Rust's
+        # `enabled_with_root_ca`. Worth its own test rather than trusting the
+        # unit test on `ssl_options/1`: what matters is that `:ssl` accepts what
+        # this produces, and only a handshake can say that.
+        {:ok, conn} = start(context, tls: true, tls_root_ca: context.cacertfile)
+
+        assert :ok = TypeDB.GRPC.health(conn)
+      end
+    end
+
     test "a streamed read works over TLS too", context do
       if context[:skip] do
         :ok
@@ -173,10 +187,11 @@ defmodule TypeDB.GRPC.TLSIntegrationTest do
       if context[:skip] do
         :ok
       else
-        # The whole point of the suite. The certificate is signed by a CA that
-        # is not in the system store, so `:ssl`'s default `verify_peer` must
-        # reject it — and TypeDB is a database, so accepting an unverified
-        # server means handing credentials to whoever answers the port.
+        # The whole point of the suite. `tls: true` now means "verify against
+        # this machine's trust store" — a hundred and fifty real CAs — and the
+        # test CA is not one of them, so `verify_peer` must reject it. TypeDB is
+        # a database: accepting an unverified server means handing credentials
+        # to whoever answers the port.
         assert {:error, %TypeDB.Error{kind: :transport} = error} = start(context, tls: true)
 
         assert error.message =~ "unknown_ca" or error.message =~ "tls_alert",
