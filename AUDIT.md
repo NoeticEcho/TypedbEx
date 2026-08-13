@@ -1,9 +1,12 @@
 # Audit — TypeDB Elixir driver
 
-Three audits of this driver, newest first.
+Five audits, newest first. Audits I–IV cover `typedb`; Audit V covers
+`typedb_grpc`, which had never been audited.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
+| [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | see below |
+| [Audit IV](#audit-iv--080-through-a-callers-post-mortems) | `447ff97` (0.8.0), through `newgen-elixir`'s own post-mortems | 4 claims tested: 2 held, 2 did not | shipped in 0.8.0 |
 | [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | both fixed |
 | [Audit II](#audit-ii--051) | `367a393` (0.5.1) | 8: 0 critical, 5 major, 3 minor | all fixed, shipped in 0.6.0 |
 | [Audit I](#audit-i--010) | `b96ae98` (0.1.0) | 31: 2 critical, 9 major, 20 minor | all fixed |
@@ -11,6 +14,135 @@ Three audits of this driver, newest first.
 Audit I is kept in full, in its original wording, because it records *why*
 several things are the way they are — read it before proposing to change one of
 them.
+
+---
+
+# Audit V — `typedb_grpc`
+
+Audited at `3e6b986`. The package was written in a single session, reached
+feature parity with its sibling quickly, and had never been read back. That is
+the profile of code that is worth auditing: `typedb` has had four passes and is
+at 0.8.0, while this had none.
+
+**Method.** The three findings that matter were settled by running rather than
+by reading — the same rule the rest of this document is held to. The rest are
+mechanical and are marked as such.
+
+## Несоответствие задаче
+
+**V-1. `datetime-tz` decodes to a different type than the sibling, and to the
+wrong instant.** `lib/typedb/grpc/decode.ex`, `datetime_tz/2`. **critical.**
+
+Measured against 3.12.1, inserting `2024-03-01T12:00:00.000+05:00` and reading
+it back:
+
+| | value | unix |
+| --- | --- | --- |
+| `typedb` | `%TypeDB.DateTimeTZ{naive: ~N[2024-03-01 12:00:00.000000], utc_offset: 18000}` | — |
+| `typedb_grpc` | `#DateTime<2024-03-01 07:00:00.000000+05:00>` | 1709258400 |
+| correct | | 1709276400 |
+
+Two defects in one function. The type is wrong — the sibling has a dedicated
+`TypeDB.DateTimeTZ` struct precisely because a `DateTime` cannot hold "this wall
+clock, in this zone" without a tz database — and the instant is five hours out,
+because the decoder stamps the offset onto a UTC `DateTime` without shifting the
+wall clock.
+
+This is the worst kind of defect this package can have: it returns a plausible
+answer that is silently wrong, and the shared behaviour suite did not catch it
+because it has no temporal-type coverage. See V-9.
+
+**V-2. Thirty public functions return `{:error, %TypeDB.Error{}}` and two have a
+`!` twin.** All of `lib/typedb/grpc/`. **major.**
+
+`CLAUDE.md` states the convention — "every failing operation returns
+`{:error, %TypeDB.Error{}}` and has a `!` twin that raises" — and `typedb`
+enforces it mechanically in `test/typedb/api_convention_test.exs`. This package
+has `TypeDB.GRPC.query!/4` and `Config.new!/1` and nothing else, so an
+application that switches transports loses every `!` call it wrote.
+
+## Ошибки
+
+**V-3. Two processes sharing one transaction handle lose one of them.**
+`lib/typedb/grpc/transaction.ex`, the `awaiting` field. **critical, race
+condition.**
+
+The state holds *one* outstanding call: `%{state | awaiting: {from, ids, %{}}}`
+overwrites whatever was there. The moduledoc promises the opposite — "the handle
+you hold is still a plain struct, so it can still be passed between processes
+freely, which is the property the sibling driver documents and which would
+otherwise have been lost".
+
+Measured, two `Task`s querying one handle:
+
+```
+caller 1: ERROR :timeout the transaction did not answer within 8000ms; it has been closed
+caller 2: ok, 1 rows
+```
+
+The first caller's `from` is discarded, it waits out its timeout, and the
+timeout path then closes the transaction — so the loser also destroys the
+winner's transaction.
+
+**V-4. `Config.from_url/1` decides the port by substring.** `config.ex`,
+`grpc_port/2`. **major.**
+
+`URI.parse` fills in a scheme's default port, so 80 and 443 have to be told from
+"the caller wrote no port". The test is `String.contains?(url, ":80")`, which
+matches anywhere in the string — a path segment, an IPv6 host, userinfo. The
+same function also calls `URI.parse/1` twice on the same input.
+
+## Gaps
+
+**V-5. The stream-batch telemetry event carries `connection: nil`.**
+`transaction.ex:233`, a literal. **major.**
+
+`TypeDB.GRPC.Telemetry`'s doc says the event's metadata is `:transport` and
+`:connection`. The transaction struct never carried the connection name, so the
+call site fills in `nil` rather than the doc being corrected — a metric grouped
+by connection silently collapses to one series.
+
+**V-9. The shared behaviour suite has no temporal-type coverage.**
+`test/behaviour/shared_behaviour_test.exs`. **minor, but it is why V-1
+survived.**
+
+The suite compares strings, integers, doubles and `date`. `datetime`,
+`datetime-tz` and `duration` are exactly where two independent decoders drift,
+and they are the ones it does not look at.
+
+## Пустые функции
+
+**V-6. `Connection.lifetime_margin/1` takes a parameter it ignores and returns a
+constant.** `connection.ex:389`. **minor.**
+
+**V-7. `Connection.protocol_version/0` is unreachable indirection.**
+`connection.ex:416` — `@doc false`, nothing calls it, and it forwards to
+`TypeDB.GRPC.Protocol.version/0` which is public. **minor.**
+
+**V-8. A dead clause in `Transaction.query/3`.** `{:ok, answers} ->
+{:ok, List.last(answers)}` cannot be reached: the call above it always passes a
+one-element list. **minor.**
+
+## Качество
+
+**V-10. `Transaction.close/2` accepts `_opts` and ignores it.**
+`transaction.ex:293`. The sibling's `close/2` takes `:timeout` and `:deadline`
+and uses them. Here the parameter exists only so the signatures match, which is
+worse than not having it: a caller passing a timeout gets no error and no
+timeout. **minor.**
+
+## Not findings
+
+Checked and deliberately not listed:
+
+  * **No TODO, FIXME or stub anywhere in `lib/`.** The generated protocol
+    modules are machine-written but they are not stubs, and CI regenerates and
+    diffs them.
+  * **No mock data or hardcoded credentials.** The only literal that looked
+    like configuration — the answer-batch size — turns out not to exist here at
+    all, because this transport has no answer cap to configure.
+  * **`typedb` itself.** Four audits and 508 tests; the only change to it this
+    session was additive telemetry metadata, covered by its own suite.
 
 ---
 

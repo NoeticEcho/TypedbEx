@@ -1,3 +1,113 @@
+# Refactor plan III — Audit V, `typedb_grpc`
+
+Nine findings, ordered critical → major → minor. Each step leaves both packages
+building and both suites green, and is committed on its own.
+
+**Gate after every step**, from the package directory:
+
+```sh
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix credo --strict
+mix dialyzer
+TYPEDB_GRPC_ADDRESS=127.0.0.1:1729 TYPEDB_INTEGRATION_URL=http://127.0.0.1:8000 \
+  mix test --include integration
+```
+
+**Rollback rule.** A step whose tests cannot be made green in two or three
+attempts is reverted, marked `blocked` here, and the next step proceeds.
+
+**Public API.** Two steps change it, and both say so: step 5 adds `!` twins
+(additive), step 6 makes `close/2` honour its options (behavioural). Nothing
+else touches the surface.
+
+| # | Finding | Severity | Version impact |
+| --- | --- | --- | --- |
+| 1 | V-1, V-9 — `datetime-tz` decodes wrongly; no temporal coverage | critical | none, package unreleased |
+| 2 | V-3 — concurrent callers on one transaction | critical | none |
+| 3 | V-5 — `connection: nil` in telemetry | major | none |
+| 4 | V-4 — `from_url/1` port heuristic | major | none |
+| 5 | V-2 — missing `!` twins | major | additive |
+| 6 | V-6, V-7, V-8, V-10 — dead code and an ignored parameter | minor | `close/2` gains behaviour |
+
+## Step 1 — `datetime-tz`, and the coverage that would have caught it
+
+**Changes.** `Decode.scalar/2` for `:datetime_tz` builds a
+`%TypeDB.DateTimeTZ{}` — the sibling's struct — from the protobuf's naive
+instant plus its zone or offset, rather than a `DateTime` with the offset
+stamped on. `:datetime` and `:duration` are checked against the sibling at the
+same time, since they are decoded by the same neighbourhood of code.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/decode.ex`,
+`typedb_grpc/test/behaviour/shared_behaviour_test.exs`.
+
+**Verify.** A new shared-suite test round-trips every temporal type through both
+drivers and asserts they agree. It must fail before the fix and pass after.
+
+## Step 2 — one transaction, many callers
+
+**Changes.** Replace the single `awaiting` slot with a per-request map from
+`req_id` to the caller waiting on it, so concurrent calls on one handle are
+independent. The timeout path must then close only the request it owns, not the
+transaction.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/transaction.ex`,
+`typedb_grpc/test/integration/transaction_integration_test.exs`.
+
+**Verify.** Two `Task`s querying one handle both answer. Non-vacuity by
+reverting to the single slot and watching it fail.
+
+## Step 3 — the connection name reaches the telemetry
+
+**Changes.** Carry the connection on `%Transaction{}` so the stream-batch event
+can report it. The struct gains a field; it is not part of any documented
+pattern match.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/transaction.ex`,
+`typedb_grpc/test/integration/telemetry_integration_test.exs`.
+
+**Verify.** The telemetry test asserts `metadata.connection` is the connection
+name rather than `nil`.
+
+## Step 4 — `from_url/1`
+
+**Changes.** Decide the port from the parsed URI rather than from a substring of
+the raw string, and parse once.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/config.ex`, plus a unit test file for
+`Config` — the package has none, which is its own small gap.
+
+**Verify.** Unit tests over the shapes that break the current version: a path
+containing `:80`, an IPv6 host, an explicit `:443`, no port at all.
+
+## Step 5 — `!` twins
+
+**Changes.** Every public function that returns `{:error, %TypeDB.Error{}}`
+gains a `!` twin that raises, matching the sibling's convention. The sibling
+generates them with the `TypeDB.Bang` macro for a documented reason — a shared
+`unwrap!/1` widens every caller's success type and Dialyzer then reports
+`missing_range` on all of them — so the same approach is used here.
+
+**Files.** all of `typedb_grpc/lib/typedb/grpc/`, plus a convention test
+mirroring `typedb`'s.
+
+**Verify.** A test that enumerates the public surface and asserts the pairing,
+so the next function added cannot forget.
+
+## Step 6 — dead code and the ignored parameter
+
+**Changes.** Delete `lifetime_margin/1`, `Connection.protocol_version/0` and the
+unreachable clause in `query/3`. Make `close/2` honour `:timeout` instead of
+discarding it.
+
+**Files.** `typedb_grpc/lib/typedb/grpc/connection.ex`,
+`typedb_grpc/lib/typedb/grpc/transaction.ex`.
+
+**Verify.** The suite stays green; `close/2` with a short timeout returns rather
+than waiting `:infinity`.
+
+---
+
 # Refactor plan
 
 | | From | Steps | Status |
