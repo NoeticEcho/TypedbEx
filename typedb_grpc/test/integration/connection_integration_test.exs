@@ -76,6 +76,51 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     end
   end
 
+  describe "opening the connection" do
+    test "there is no connection id until the first call needs one", %{conn: conn} do
+      # Opening is lazy on purpose: a supervision tree must be able to boot
+      # while TypeDB is still starting.
+      assert Connection.connection_id(conn) == nil
+
+      assert {:ok, _token} = Connection.token(conn)
+
+      assert Connection.connection_id(conn) =~
+               ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    end
+
+    test "the id survives a token renewal", %{conn: conn} do
+      {:ok, _} = Connection.token(conn)
+      id = Connection.connection_id(conn)
+
+      # A renewal is `authentication_token_create`, not a second open — opening
+      # again would leave the server holding two connections for one client.
+      assert {:ok, _} = Connection.renew_token(conn, System.monotonic_time(:millisecond) + 1_000_000)
+      assert Connection.connection_id(conn) == id
+    end
+
+    test "two connections to the same server get different ids" do
+      one = start_connection()
+      other = start_connection()
+
+      {:ok, _} = Connection.token(one)
+      {:ok, _} = Connection.token(other)
+
+      assert Connection.connection_id(one) != Connection.connection_id(other)
+    end
+
+    test "a connection that cannot open reports it and stays usable afterwards" do
+      # The credentials travel *inside* the open, so a wrong password fails the
+      # handshake rather than a later call — and the failure has to be the same
+      # one the token call used to report.
+      conn = start_connection(password: "definitely-not-the-password")
+
+      assert {:error, error} = Connection.token(conn)
+      assert error.kind == :unauthenticated
+      assert Connection.connection_id(conn) == nil
+      assert Connection.running?(conn)
+    end
+  end
+
   describe "authentication" do
     test "a token is minted once and reused", %{conn: conn} do
       assert {:ok, token} = Connection.token(conn)

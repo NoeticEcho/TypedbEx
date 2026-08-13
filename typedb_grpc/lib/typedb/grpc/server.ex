@@ -141,6 +141,13 @@ defmodule TypeDB.GRPC.Server do
 
   A mismatch is not proof of breakage — protobuf tolerates a client built from
   an older schema — but it is proof that nobody has checked.
+
+  Since `connection_open` carries the protocol version, the server now performs
+  the authoritative version check itself and refuses a driver it cannot speak
+  to. This one compares the two strings, which is a different and weaker
+  question — it catches a *generated* protocol that has drifted from the server
+  even when both ends still interoperate — and it is why the integration suite
+  keeps calling it.
   """
   @spec check_protocol(Connection.t(), keyword()) :: :ok | {:error, Error.t()}
   def check_protocol(conn, opts \\ []) do

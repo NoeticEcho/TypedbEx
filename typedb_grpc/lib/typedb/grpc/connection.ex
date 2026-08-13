@@ -20,6 +20,18 @@ defmodule TypeDB.GRPC.Connection do
         password: "password"
       )
 
+  ## Opening
+
+  The first call on a connection performs `connection_open`, the RPC every
+  official driver makes first: it tells the server which protocol version, which
+  language and which driver version are on this end, and the server answers with
+  a connection id and the token. So an incompatible driver is refused by the
+  server at the connection rather than discovered later by something that failed
+  to decode, and the id in this driver's telemetry is the id in the server's log.
+
+  It happens on the first call rather than in `start_link/1`, which is what keeps
+  a supervision tree from failing to boot because TypeDB is not up yet.
+
   ## Tokens
 
   TypeDB issues expiring JWTs, and this driver renews one *before* it expires by
@@ -44,11 +56,19 @@ defmodule TypeDB.GRPC.Connection do
   @config_key :config
   @channel_key :channel
   @token_key :token
+  @connection_id_key :connection_id
 
   # Renew this long before the token actually expires, capped at a quarter of
   # its lifetime so a short-lived token never looks permanently stale. The same
   # numbers the sibling uses, for the same reason.
   @renewal_margin_ms 30_000
+
+  # Who the server is told it is talking to. `connection_open` carries this, and
+  # it is the only place TypeDB learns which driver is on the other end — it
+  # turns up in the server's log and in its connection list, so an operator can
+  # tell an Elixir application apart from a console session.
+  @driver_lang "elixir"
+  @driver_version Mix.Project.config()[:version]
 
   @doc """
   Starts a connection. See `TypeDB.GRPC.Config.new/1` for the options.
@@ -99,6 +119,25 @@ defmodule TypeDB.GRPC.Connection do
   @doc "The gRPC channel. Safe to use from any process."
   @spec channel(t()) :: channel()
   def channel(conn), do: lookup!(conn, @channel_key)
+
+  @doc """
+  The id the server gave this connection, or `nil` before it has been opened.
+
+  A UUID, and the same one the server writes in its own log, so it is what
+  connects a slow query on this side to a session on that side. `nil` until the
+  first call makes the connection sign in — this driver opens lazily — and
+  permanently `nil` for a connection configured with a `:token`, which has no
+  credentials to open with.
+  """
+  @spec connection_id(t()) :: String.t() | nil
+  def connection_id(conn) do
+    case :ets.lookup(conn, @connection_id_key) do
+      [{@connection_id_key, id}] -> id
+      [] -> nil
+    end
+  rescue
+    ArgumentError -> reraise not_running(conn), __STACKTRACE__
+  end
 
   @doc """
   A token that is not about to expire, minting one if needed.
@@ -242,7 +281,7 @@ defmodule TypeDB.GRPC.Connection do
         # `:ets.lookup/2` away.
         :ets.insert(table, [{@config_key, redact(config)}, {@channel_key, channel}])
 
-        state = %{config: config, table: table, channel: channel}
+        state = %{config: config, table: table, channel: channel, connection_id: nil}
         {:ok, cache_static_token(state)}
 
       {:error, error} ->
@@ -308,7 +347,7 @@ defmodule TypeDB.GRPC.Connection do
 
   defp sign_in_and_reply(state) do
     case sign_in(state) do
-      {:ok, token, deadline} ->
+      {:ok, token, deadline, state} ->
         :ets.insert(state.table, {@token_key, token, deadline})
         {:reply, {:ok, token}, state}
 
@@ -320,7 +359,7 @@ defmodule TypeDB.GRPC.Connection do
   defp sign_in(%{config: config} = state) do
     Telemetry.span_sign_in(%{connection: config.name}, fn ->
       case do_sign_in(state) do
-        {:ok, _token, _deadline} = ok -> {ok, %{connection: config.name}}
+        {:ok, _token, _deadline, _state} = ok -> {ok, %{connection: config.name}}
         {:error, error} = failed -> {failed, %{connection: config.name, error: error}}
       end
     end)
@@ -338,19 +377,53 @@ defmodule TypeDB.GRPC.Connection do
      )}
   end
 
-  defp do_sign_in(%{config: config, channel: channel}) do
-    request = %Proto.Authentication.Token.Create.Req{
-      credentials:
-        {:password,
-         %Proto.Authentication.Token.Create.Req.Password{
-           username: config.username,
-           password: config.password
-         }}
+  # The first sign-in is a `connection_open`, which is the RPC every official
+  # driver makes first and this one used to skip. It costs no extra round trip
+  # — the open carries the token that `authentication_token_create` would have
+  # returned — and it buys two things a bare token call does not:
+  #
+  #   * the server sees the protocol version, the driver's language and its
+  #     version, so an incompatible driver is refused *by the server*, at the
+  #     connection, rather than surfacing later as something that failed to
+  #     decode. `TypeDB.GRPC.Server.check_protocol/2` predates this and is a
+  #     client-side approximation of it;
+  #   * a connection id, which is what ties this side's logs to that side's.
+  #
+  # The response also carries the cluster's server list. It is deliberately not
+  # cached: `TypeDB.GRPC.Server.servers/2` asks, and a list captured at open
+  # would be a snapshot that goes stale silently.
+  defp do_sign_in(%{connection_id: nil, config: config, channel: channel} = state) do
+    request = %Proto.Connection.Open.Req{
+      version: :VERSION,
+      extension_version: :EXTENSION,
+      driver_lang: @driver_lang,
+      driver_version: @driver_version,
+      authentication: token_request(config)
     }
+
+    case Proto.TypeDB.Stub.connection_open(channel, request, timeout: config.timeout) do
+      {:ok, %Proto.Connection.Open.Res{authentication: %{token: token}} = res} ->
+        id = connection_id_of(res.connection_id)
+        if id, do: :ets.insert(state.table, {@connection_id_key, id})
+        {:ok, token, deadline_for(token), %{state | connection_id: id}}
+
+      {:ok, other} ->
+        {:error, Error.new(:decode, "opening the connection returned no token: #{inspect(other, limit: 5)}")}
+
+      {:error, error} ->
+        {:error, open_error(error, config)}
+    end
+  end
+
+  # Renewals go back to the plain token call: the connection is already open,
+  # and re-opening it would mint a second one server-side. This is what the
+  # official drivers do too — open once, renew many times.
+  defp do_sign_in(%{config: config, channel: channel} = state) do
+    request = token_request(config)
 
     case Proto.TypeDB.Stub.authentication_token_create(channel, request, timeout: config.timeout) do
       {:ok, %{token: token}} ->
-        {:ok, token, deadline_for(token)}
+        {:ok, token, deadline_for(token), state}
 
       {:error, %GRPC.RPCError{} = error} ->
         {:error, GRPCError.from_rpc_error(error, "signing in as #{inspect(config.username)}")}
@@ -359,6 +432,48 @@ defmodule TypeDB.GRPC.Connection do
         {:error, GRPCError.from_reason(reason, "signing in as #{inspect(config.username)}")}
     end
   end
+
+  defp token_request(config) do
+    %Proto.Authentication.Token.Create.Req{
+      credentials:
+        {:password,
+         %Proto.Authentication.Token.Create.Req.Password{
+           username: config.username,
+           password: config.password
+         }}
+    }
+  end
+
+  defp open_error(%GRPC.RPCError{} = error, config) do
+    GRPCError.from_rpc_error(error, "opening a connection as #{inspect(config.username)}")
+  end
+
+  defp open_error(reason, config) do
+    GRPCError.from_reason(reason, "opening a connection as #{inspect(config.username)}")
+  end
+
+  # The server sends sixteen bytes and means a UUID by them, so this renders the
+  # UUID — the same text the server's own log carries, which is the only reason
+  # to hand a caller an id at all. Anything else is hex, because guessing at a
+  # shape the server did not send would be worse than showing the bytes.
+  defp connection_id_of(%Proto.ConnectionID{id: <<a::32, b::16, c::16, d::16, e::48>>}) do
+    [
+      Integer.to_string(a, 16),
+      Integer.to_string(b, 16),
+      Integer.to_string(c, 16),
+      Integer.to_string(d, 16),
+      Integer.to_string(e, 16)
+    ]
+    |> Enum.zip([8, 4, 4, 4, 12])
+    |> Enum.map_join("-", fn {part, width} -> String.pad_leading(part, width, "0") end)
+    |> String.downcase()
+  end
+
+  defp connection_id_of(%Proto.ConnectionID{id: id}) when is_binary(id) and byte_size(id) > 0 do
+    Base.encode16(id, case: :lower)
+  end
+
+  defp connection_id_of(_), do: nil
 
   defp cache_static_token(%{config: %Config{static_token: token}} = state) when is_binary(token) do
     :ets.insert(state.table, {@token_key, token, deadline_for(token)})
