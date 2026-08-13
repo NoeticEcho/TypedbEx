@@ -340,6 +340,23 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
       refute File.exists?(path)
     end
 
+    test "a data file that cannot be opened leaves no schema file either", %{
+      conn: conn,
+      dir: dir,
+      schema_path: schema_path
+    } do
+      source = seed(conn, 2)
+
+      # Audit VI, VI-2. The schema file opens first and the data file second, so
+      # a failure on the second used to leave the first open and on disk — an
+      # empty file that looks like a backup, which the module's own docs promise
+      # cannot happen.
+      assert {:error, %TypeDB.Error{kind: :config, reason: :enoent}} =
+               Database.export_to_files(conn, source, schema_path, Path.join(dir, "no/such/dir/data"))
+
+      refute File.exists?(schema_path)
+    end
+
     test "exporting a database that is not there leaves no files behind", %{
       conn: conn,
       schema_path: schema_path,

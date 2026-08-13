@@ -258,29 +258,77 @@ defmodule TypeDB.GRPC.Database do
     end
   end
 
+  # Each file is opened inside the cleanup for the one before it, so a failure
+  # at any point closes what is open and removes what was created. The `with`
+  # this used to be short-circuited on the second open and left the first both
+  # open and on disk — Audit VI, VI-2.
   defp write_export(replies, schema_path, data_path) do
-    with {:ok, schema_file} <- open_write(schema_path),
-         {:ok, data_file} <- open_write(data_path) do
-      try do
-        drain_export(replies, schema_file, data_file)
-      after
-        _ = File.close(schema_file)
-        _ = File.close(data_file)
-      end
-      |> discard_files_on_failure(schema_path, data_path)
+    with {:ok, schema_file} <- open_write(schema_path) do
+      discarding(schema_path, data_path, fn ->
+        try do
+          with {:ok, data_file} <- open_write(data_path) do
+            try do
+              drain_export(replies, schema_file, data_file)
+            after
+              _ = File.close(data_file)
+            end
+          end
+        after
+          _ = File.close(schema_file)
+        end
+      end)
     end
+  end
+
+  # Rust's driver removes both files when an export fails, and so does this:
+  # what is on disk after a failed export is a prefix, and a prefix of a backup
+  # restores into a database that is missing whatever came after it.
+  #
+  # A raise or an exit counts as a failure. The reply stream is a gRPC stream
+  # consumed lazily, so an adapter fault arrives that way rather than as a
+  # return value, and the version of this that only looked at `{:error, _}` left
+  # a half-written file behind for exactly the case the files are dangerous in.
+  defp discarding(schema_path, data_path, fun) do
+    case fun.() do
+      {:error, _} = error ->
+        discard(schema_path, data_path)
+        error
+
+      result ->
+        result
+    end
+  rescue
+    exception ->
+      discard(schema_path, data_path)
+      reraise exception, __STACKTRACE__
+  catch
+    kind, reason ->
+      discard(schema_path, data_path)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp discard(schema_path, data_path) do
+    _ = File.rm(schema_path)
+    _ = File.rm(data_path)
+    :ok
   end
 
   defp drain_export(replies, schema_file, data_file) do
     Enum.reduce_while(replies, {:ok, :exported}, fn reply, acc ->
       case export_part(reply) do
-        {:schema, schema} -> {:cont, write(schema_file, schema, acc)}
-        {:items, items} -> {:cont, write(data_file, Enum.map(items, &Migration.encode/1), acc)}
+        {:schema, schema} -> continue(write(schema_file, schema), acc)
+        {:items, items} -> continue(write(data_file, Enum.map(items, &Migration.encode/1)), acc)
         :done -> {:halt, acc}
         {:error, _} = error -> {:halt, error}
       end
     end)
   end
+
+  # A write that failed ends the export. It used to carry the error along and
+  # keep going, which drained the whole of a large export from the server into a
+  # file that was already broken before returning the failure — Audit VI, VI-3.
+  defp continue(:ok, acc), do: {:cont, acc}
+  defp continue({:error, _} = error, _acc), do: {:halt, error}
 
   defp export_part({:ok, %Proto.Database.Export.Server{server: %{server: {:initial_res, initial}}}}),
     do: {:schema, initial.schema}
@@ -299,23 +347,12 @@ defmodule TypeDB.GRPC.Database do
   # `:file.write/2` rather than `IO.binwrite/2`: the latter is typed as never
   # failing, so a full disk part-way through an export would be discovered by
   # whoever tried to restore the backup.
-  defp write(file, data, acc) do
+  defp write(file, data) do
     case :file.write(file, data) do
-      :ok -> acc
+      :ok -> :ok
       {:error, reason} -> {:error, file_error(reason, "writing the export")}
     end
   end
-
-  # Rust's driver removes both files when an export fails, and so does this:
-  # what is on disk after a failed export is a prefix, and a prefix of a backup
-  # restores into a database that is missing whatever came after it.
-  defp discard_files_on_failure({:error, _} = error, schema_path, data_path) do
-    _ = File.rm(schema_path)
-    _ = File.rm(data_path)
-    error
-  end
-
-  defp discard_files_on_failure(result, _schema_path, _data_path), do: result
 
   @doc """
   Creates a database from the two files `export_to_files/5` wrote.
