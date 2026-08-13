@@ -23,7 +23,8 @@ defmodule TypeDB.GRPC.User do
                  timeout: timeout(conn, opts)
                )
              end,
-             "listing users"
+             "listing users",
+             operation: :users_all
            ) do
       {:ok, Enum.map(reply.users, & &1.name)}
     end
@@ -43,7 +44,8 @@ defmodule TypeDB.GRPC.User do
                  timeout: timeout(conn, opts)
                )
              end,
-             "checking whether user #{inspect(username)} exists"
+             "checking whether user #{inspect(username)} exists",
+             operation: :user_exists
            ) do
       {:ok, reply.contains}
     end
@@ -66,7 +68,8 @@ defmodule TypeDB.GRPC.User do
                  timeout: timeout(conn, opts)
                )
              end,
-             "creating user #{inspect(username)}"
+             "creating user #{inspect(username)}",
+             operation: :user_create
            ) do
       :ok
     end
@@ -90,7 +93,8 @@ defmodule TypeDB.GRPC.User do
                  timeout: timeout(conn, opts)
                )
              end,
-             "setting the password for #{inspect(username)}"
+             "setting the password for #{inspect(username)}",
+             operation: :user_set_password
            ) do
       :ok
     end
@@ -108,7 +112,8 @@ defmodule TypeDB.GRPC.User do
                  timeout: timeout(conn, opts)
                )
              end,
-             "deleting user #{inspect(username)}"
+             "deleting user #{inspect(username)}",
+             operation: :user_delete
            ) do
       :ok
     end

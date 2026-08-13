@@ -694,3 +694,70 @@ jobs:
           TYPEDB_GRPC_USERNAME: admin
           TYPEDB_GRPC_PASSWORD: password
         run: mix test --include integration test/behaviour
+
+  grpc_tls:
+    name: gRPC TLS defaults
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    # No service container: this needs server flags, and a service container's
+    # command cannot be overridden. `docker run` in an ordinary step can.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Mint a CA and a server certificate
+        run: |
+          mkdir -p tls && cd tls
+          openssl req -x509 -newkey rsa:2048 -keyout ca.key -out ca.pem -days 1 -nodes \
+            -subj "/CN=TypeDB Test CA"
+          openssl req -newkey rsa:2048 -keyout server.key -out server.csr -nodes \
+            -subj "/CN=localhost"
+          printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n" > ext.cnf
+          openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
+            -out server.pem -days 1 -extfile ext.cnf
+
+      - name: Start TypeDB with encryption on
+        run: |
+          docker run -d --name typedb-tls \
+            -p 8443:8443 -p 1730:1730 \
+            -v "$PWD/tls:/tls:ro" \
+            typedb/typedb:3.12.1 \
+            typedb server \
+              --server.http.enabled true --server.http.listen-address 0.0.0.0:8443 \
+              --server.address 0.0.0.0:1730 \
+              --server.encryption.enabled true \
+              --server.encryption.certificate /tls/server.pem \
+              --server.encryption.certificate-key /tls/server.key
+
+          for i in $(seq 1 60); do
+            if openssl s_client -connect 127.0.0.1:1730 -CAfile tls/ca.pem </dev/null 2>&1 \
+               | grep -q "Verify return code: 0"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "TypeDB did not come up with TLS in time" >&2
+          docker logs typedb-tls >&2
+          exit 1
+
+      # The assertion this job exists for is the negative one: a certificate
+      # signed by a CA the runner does not trust must be refused. A driver that
+      # verified nothing would pass every other test in the suite.
+      - name: Run the TLS suite
+        env:
+          TYPEDB_GRPC_TLS_ADDRESS: localhost:1730
+          TYPEDB_GRPC_TLS_CACERTFILE: tls/ca.pem
+        run: mix test --include tls test/integration/tls_integration_test.exs
+
+      - name: Server logs on failure
+        if: failure()
+        run: docker logs typedb-tls

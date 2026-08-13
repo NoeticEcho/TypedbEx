@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Every telemetry event now carries `:transport`**, set to `:http`. The new
+  `typedb_grpc` package emits the *same* event names — `[:typedb, :operation, …]`,
+  `[:typedb, :transaction, …]`, `[:typedb, :sign_in, …]` — with `:grpc`, so that
+  an application which switches transports keeps its dashboards and one running
+  both can break a metric down by the key.
+
+  Additive: no event name, measurement or existing metadata key changes, and
+  `test/api_snapshot.txt` does not move. A handler that ignores the key sees
+  nothing different.
+
 ## [0.8.0] - 2026-08-13
 
 Audit IV, and the same method as Audit III: read the driver through

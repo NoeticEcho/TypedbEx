@@ -35,7 +35,7 @@ defmodule TypeDB.GRPC.Connection do
   use GenServer
 
   alias TypeDB.Error
-  alias TypeDB.GRPC.{Config, Protocol}
+  alias TypeDB.GRPC.{Config, Protocol, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
   alias Typedb.Protocol, as: Proto
 
@@ -184,9 +184,21 @@ defmodule TypeDB.GRPC.Connection do
   `context` names the operation for the message when the server supplies
   nothing better.
   """
-  @spec unary(t(), (channel(), map() -> {:ok, term()} | {:error, term()}), String.t()) ::
+  @spec unary(t(), (channel(), map() -> {:ok, term()} | {:error, term()}), String.t(), keyword()) ::
           {:ok, term()} | {:error, Error.t()}
-  def unary(conn, call, context) when is_function(call, 2) do
+  def unary(conn, call, context, span_metadata \\ []) when is_function(call, 2) do
+    metadata = span_metadata |> Map.new() |> Map.put(:connection, conn)
+
+    Telemetry.span_operation(metadata, fn ->
+      result = do_unary(conn, call, context)
+      {result, Map.merge(metadata, error_metadata(result))}
+    end)
+  end
+
+  defp error_metadata({:error, %Error{} = error}), do: %{error: error}
+  defp error_metadata(_), do: %{}
+
+  defp do_unary(conn, call, context) do
     channel = channel(conn)
 
     authenticated(conn, fn md ->
@@ -267,12 +279,8 @@ defmodule TypeDB.GRPC.Connection do
   def terminate(_reason, _state), do: :ok
 
   defp connect(%Config{} = config) do
-    opts =
-      if config.tls do
-        [cred: GRPC.Credential.new(ssl: config.tls_opts)]
-      else
-        []
-      end
+    adapter_opts = [retry: config.connect_retries, connect_timeout: config.connect_timeout]
+    opts = [adapter_opts: adapter_opts] ++ credential(config)
 
     case GRPC.Stub.connect(config.address, opts) do
       {:ok, channel} ->
@@ -288,6 +296,16 @@ defmodule TypeDB.GRPC.Connection do
     end
   end
 
+  defp credential(%Config{tls: false}), do: []
+
+  # `GRPC.Credential.new(ssl: opts)` hands `opts` straight to `:ssl`, whose
+  # default is `verify_peer` — so a connection to a server this machine does not
+  # trust fails rather than succeeding quietly. Measured against a TypeDB with a
+  # self-signed certificate: without a `cacertfile` the handshake ends in
+  # `Unknown CA`, and it takes a `cacertfile` or an explicit `verify_none` to
+  # get through. That posture is pinned by the TLS suite.
+  defp credential(%Config{tls_opts: tls_opts}), do: [cred: GRPC.Credential.new(ssl: tls_opts)]
+
   defp sign_in_and_reply(state) do
     case sign_in(state) do
       {:ok, token, deadline} ->
@@ -299,10 +317,19 @@ defmodule TypeDB.GRPC.Connection do
     end
   end
 
+  defp sign_in(%{config: config} = state) do
+    Telemetry.span_sign_in(%{connection: config.name}, fn ->
+      case do_sign_in(state) do
+        {:ok, _token, _deadline} = ok -> {ok, %{connection: config.name}}
+        {:error, error} = failed -> {failed, %{connection: config.name, error: error}}
+      end
+    end)
+  end
+
   # A connection configured with a pre-issued token has nothing to sign in with,
   # so the expiry of that token is the caller's problem and surfaces as an
   # authentication failure rather than as a renewal that cannot happen.
-  defp sign_in(%{config: %Config{static_token: token}}) when is_binary(token) do
+  defp do_sign_in(%{config: %Config{static_token: token}}) when is_binary(token) do
     {:error,
      Error.new(
        :unauthenticated,
@@ -311,7 +338,7 @@ defmodule TypeDB.GRPC.Connection do
      )}
   end
 
-  defp sign_in(%{config: config, channel: channel}) do
+  defp do_sign_in(%{config: config, channel: channel}) do
     request = %Proto.Authentication.Token.Create.Req{
       credentials:
         {:password,

@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing released yet. The package is being built; see the repository's
+Telemetry and a TLS suite, and the package is otherwise feature-complete
+against `typedb`. Nothing released yet. The package is being built; see the repository's
 `AUDIT.md` and the `Монорепо и gRPC-драйвер` epic in `bd` for what is done and
 what is not.

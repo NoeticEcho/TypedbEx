@@ -21,7 +21,9 @@ defmodule TypeDB.GRPC.Config do
           tls: boolean(),
           tls_opts: keyword(),
           timeout: timeout(),
-          call_timeout: timeout()
+          call_timeout: timeout(),
+          connect_timeout: timeout(),
+          connect_retries: non_neg_integer()
         }
 
   @enforce_keys [:name, :address]
@@ -34,10 +36,12 @@ defmodule TypeDB.GRPC.Config do
     tls: false,
     tls_opts: [],
     timeout: 60_000,
-    call_timeout: 30_000
+    call_timeout: 30_000,
+    connect_timeout: 10_000,
+    connect_retries: 0
   ]
 
-  @keys ~w(name address url username password token tls tls_opts timeout call_timeout)a
+  @keys ~w(name address url username password token tls tls_opts timeout call_timeout connect_timeout connect_retries)a
 
   @doc """
   Builds a config from `start_link/1` options.
@@ -53,7 +57,21 @@ defmodule TypeDB.GRPC.Config do
     * `:tls` / `:tls_opts` — TLS for the channel
     * `:timeout` — per-call timeout in ms, default 60 s
     * `:call_timeout` — how long to wait on the connection process itself when
-      it has to mint a token, default 30 s
+      it has to mint a token, default 30 s. Worth knowing because a per-call
+      `:timeout` does not cover it: the first call on a connection signs in
+      first, and that wait is bounded by this rather than by the option the
+      caller passed
+    * `:connect_timeout` — how long to wait for the channel to come up, default
+      10 s, matching `TypeDB.Config`. It bounds the case a retry count cannot:
+      a plaintext client against a TLS port completes its TCP connection and
+      then waits, because the server is waiting for a handshake that will never
+      arrive. Without this the wait is minutes
+    * `:connect_retries` — how many times the transport retries establishing the
+      channel, default `0`. The adapter's own default is 100, which turns a
+      wrong CA or a wrong port into a wait of tens of seconds ending in
+      `:timeout` — a failure that reads as "the server is slow" when it is
+      really "this will never work". Raise it for a server that is expected to
+      come up after the application does
   """
   @spec new(keyword()) :: {:ok, t()} | {:error, Error.t()}
   def new(opts) when is_list(opts) do
@@ -62,7 +80,9 @@ defmodule TypeDB.GRPC.Config do
          {:ok, address} <- fetch_address(opts),
          {:ok, credentials} <- fetch_credentials(opts),
          {:ok, timeout} <- fetch_timeout(opts, :timeout, 60_000),
-         {:ok, call_timeout} <- fetch_timeout(opts, :call_timeout, 30_000) do
+         {:ok, call_timeout} <- fetch_timeout(opts, :call_timeout, 30_000),
+         {:ok, connect_timeout} <- fetch_timeout(opts, :connect_timeout, 10_000),
+         {:ok, connect_retries} <- fetch_retries(opts) do
       {username, password, token} = credentials
 
       {:ok,
@@ -75,7 +95,9 @@ defmodule TypeDB.GRPC.Config do
          tls: Keyword.get(opts, :tls, false),
          tls_opts: Keyword.get(opts, :tls_opts, []),
          timeout: timeout,
-         call_timeout: call_timeout
+         call_timeout: call_timeout,
+         connect_timeout: connect_timeout,
+         connect_retries: connect_retries
        }}
     end
   end
@@ -182,6 +204,13 @@ defmodule TypeDB.GRPC.Config do
       :infinity -> {:ok, :infinity}
       n when is_integer(n) and n > 0 -> {:ok, n}
       other -> error("invalid #{inspect(key)} #{inspect(other)}, expected a positive integer or :infinity")
+    end
+  end
+
+  defp fetch_retries(opts) do
+    case Keyword.get(opts, :connect_retries, 0) do
+      n when is_integer(n) and n >= 0 -> {:ok, n}
+      other -> error("invalid :connect_retries #{inspect(other)}, expected a non-negative integer")
     end
   end
 

@@ -26,6 +26,9 @@ defmodule TypeDB.Telemetry do
 
   Metadata:
 
+    * `:transport` — always `:http`. The `typedb_grpc` package emits these same
+      events with `:grpc`, so that an application which switches transports
+      keeps its dashboards and one running both can break a metric down by it
     * `:connection` — the connection name
     * `:method` — `:get`, `:post`, `:put` or `:delete`
     * `:route` — a low-cardinality template such as `"/transactions/:id/query"`,
@@ -137,27 +140,43 @@ defmodule TypeDB.Telemetry do
   @spec retry_exhausted_event() :: [atom()]
   def retry_exhausted_event, do: @retry_exhausted
 
+  # Every event this module emits carries it, so that an application running both
+  # drivers can tell them apart and one running either can ignore it.
+  @transport :http
+
   @doc false
   @spec span_operation(map(), (-> {term(), map()})) :: term()
-  def span_operation(metadata, fun), do: :telemetry.span(@operation, metadata, fun)
+  def span_operation(metadata, fun), do: span(@operation, metadata, fun)
 
   @doc false
   @spec span_request(map(), (-> {term(), map()})) :: term()
-  def span_request(metadata, fun), do: :telemetry.span(@request, metadata, fun)
+  def span_request(metadata, fun), do: span(@request, metadata, fun)
 
   @doc false
   @spec span_transaction(map(), (-> {term(), map()})) :: term()
-  def span_transaction(metadata, fun), do: :telemetry.span(@transaction, metadata, fun)
+  def span_transaction(metadata, fun), do: span(@transaction, metadata, fun)
 
   @doc false
   @spec retry_exhausted(map(), map()) :: :ok
   def retry_exhausted(measurements, metadata) do
-    :telemetry.execute(@retry_exhausted, measurements, metadata)
+    :telemetry.execute(@retry_exhausted, measurements, tagged(metadata))
   end
 
   @doc false
   @spec span_sign_in(map(), (-> {term(), map()})) :: term()
-  def span_sign_in(metadata, fun), do: :telemetry.span(@sign_in, metadata, fun)
+  def span_sign_in(metadata, fun), do: span(@sign_in, metadata, fun)
+
+  # Both ends. `:telemetry.span/3` takes the `:stop` metadata from what the
+  # function returns rather than carrying the start's forward, so tagging only
+  # the argument leaves `:stop` — the event metrics are built on — untagged.
+  defp span(event, metadata, fun) do
+    :telemetry.span(event, tagged(metadata), fn ->
+      {result, stop_metadata} = fun.()
+      {result, tagged(stop_metadata)}
+    end)
+  end
+
+  defp tagged(metadata), do: Map.put(metadata, :transport, @transport)
 
   # ----------------------------------------------------------------------------
   # Default logger

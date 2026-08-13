@@ -29,7 +29,8 @@ defmodule TypeDB.GRPC.Database do
                  timeout: timeout(conn, opts)
                )
              end,
-             "listing databases"
+             "listing databases",
+             operation: :databases_all
            ) do
       {:ok, Enum.map(reply.databases, & &1.name)}
     end
@@ -56,7 +57,9 @@ defmodule TypeDB.GRPC.Database do
                timeout: timeout(conn, opts)
              )
            end,
-           "checking whether database #{inspect(name)} exists"
+           "checking whether database #{inspect(name)} exists",
+           operation: :database_exists,
+           database: name
          ) do
       {:ok, reply} -> reply.contains
       {:error, error} -> raise error
@@ -81,7 +84,9 @@ defmodule TypeDB.GRPC.Database do
                  timeout: timeout(conn, opts)
                )
              end,
-             "creating database #{inspect(name)}"
+             "creating database #{inspect(name)}",
+             operation: :database_create,
+             database: name
            ) do
       :ok
     end
@@ -105,7 +110,9 @@ defmodule TypeDB.GRPC.Database do
                  timeout: timeout(conn, opts)
                )
              end,
-             "deleting database #{inspect(name)}"
+             "deleting database #{inspect(name)}",
+             operation: :database_delete,
+             database: name
            ) do
       :ok
     end
@@ -123,7 +130,9 @@ defmodule TypeDB.GRPC.Database do
                  timeout: timeout(conn, opts)
                )
              end,
-             "reading the schema of #{inspect(name)}"
+             "reading the schema of #{inspect(name)}",
+             operation: :database_schema,
+             database: name
            ) do
       {:ok, reply.schema}
     end
@@ -143,7 +152,9 @@ defmodule TypeDB.GRPC.Database do
                  timeout: timeout(conn, opts)
                )
              end,
-             "reading the type schema of #{inspect(name)}"
+             "reading the type schema of #{inspect(name)}",
+             operation: :database_type_schema,
+             database: name
            ) do
       {:ok, reply.schema}
     end

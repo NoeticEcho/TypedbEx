@@ -24,7 +24,8 @@ defmodule TypeDB.GRPC.Server do
                  timeout: Keyword.get(opts, :timeout, Connection.config(conn).timeout)
                )
              end,
-             "reading the server version"
+             "reading the server version",
+             operation: :server_version
            ) do
       {:ok, %{distribution: reply.distribution, version: reply.version}}
     end

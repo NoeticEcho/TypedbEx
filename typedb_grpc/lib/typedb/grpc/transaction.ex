@@ -55,7 +55,7 @@ defmodule TypeDB.GRPC.Transaction do
   use GenServer
 
   alias TypeDB.{Answer, Error}
-  alias TypeDB.GRPC.{Connection, Decode}
+  alias TypeDB.GRPC.{Connection, Decode, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
   alias Typedb.Protocol, as: Proto
 
@@ -131,8 +131,8 @@ defmodule TypeDB.GRPC.Transaction do
   """
   @spec query_many(t(), [String.t() | {String.t(), keyword()}], keyword()) ::
           {:ok, [Answer.t()]} | {:error, Error.t()}
-  def query_many(%__MODULE__{pid: pid}, queries, opts \\ []) when is_list(queries) do
-    call(pid, {:query_many, Enum.map(queries, &normalise/1)}, opts)
+  def query_many(%__MODULE__{} = tx, queries, opts \\ []) when is_list(queries) do
+    call(tx, {:query_many, Enum.map(queries, &normalise/1)}, opts)
   end
 
   @doc """
@@ -166,8 +166,8 @@ defmodule TypeDB.GRPC.Transaction do
   """
   @spec execute_many(t(), [String.t() | {String.t(), keyword()}], keyword()) ::
           :ok | {:error, Error.t()}
-  def execute_many(%__MODULE__{pid: pid}, queries, opts \\ []) when is_list(queries) do
-    case call(pid, {:execute_many, Enum.map(queries, &normalise/1)}, opts) do
+  def execute_many(%__MODULE__{} = tx, queries, opts \\ []) when is_list(queries) do
+    case call(tx, {:execute_many, Enum.map(queries, &normalise/1)}, opts) do
       {:ok, _} -> :ok
       {:error, _} = error -> error
     end
@@ -216,13 +216,31 @@ defmodule TypeDB.GRPC.Transaction do
 
   @doc false
   @spec stream_start(t(), String.t(), keyword()) :: {:ok, reference() | binary()} | {:error, Error.t()}
-  def stream_start(%__MODULE__{pid: pid}, query, opts) do
-    call(pid, {:stream_start, query, opts}, opts)
+  def stream_start(%__MODULE__{} = tx, query, opts) do
+    call(tx, {:stream_start, query, opts}, opts)
   end
 
   @doc false
   @spec stream_next(t(), binary(), timeout()) :: {:rows, [term()]} | :done | {:error, Error.t()}
-  def stream_next(%__MODULE__{pid: pid}, ref, timeout) do
+  def stream_next(%__MODULE__{} = tx, ref, timeout) do
+    started_at = System.monotonic_time()
+    result = do_stream_next(tx.pid, ref, timeout)
+
+    case result do
+      {:rows, rows} ->
+        Telemetry.stream_batch(
+          %{rows: length(rows), wait: System.monotonic_time() - started_at},
+          %{connection: nil, database: tx.database}
+        )
+
+      _ ->
+        :ok
+    end
+
+    result
+  end
+
+  defp do_stream_next(pid, ref, timeout) do
     GenServer.call(pid, {:stream_next, ref}, timeout)
   catch
     :exit, {:timeout, _} ->
@@ -244,8 +262,8 @@ defmodule TypeDB.GRPC.Transaction do
 
   @doc "Commits. The transaction is finished either way."
   @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
-  def commit(%__MODULE__{pid: pid}, opts \\ []) do
-    case call(pid, :commit, opts) do
+  def commit(%__MODULE__{} = tx, opts \\ []) do
+    case call(tx, :commit, opts) do
       {:ok, _} -> :ok
       {:error, _} = error -> error
     end
@@ -258,8 +276,8 @@ defmodule TypeDB.GRPC.Transaction do
   does **not** finish a transaction. `close/2` does.
   """
   @spec rollback(t(), keyword()) :: :ok | {:error, Error.t()}
-  def rollback(%__MODULE__{pid: pid}, opts \\ []) do
-    case call(pid, :rollback, opts) do
+  def rollback(%__MODULE__{} = tx, opts \\ []) do
+    case call(tx, :rollback, opts) do
       {:ok, _} -> :ok
       {:error, _} = error -> error
     end
@@ -294,6 +312,20 @@ defmodule TypeDB.GRPC.Transaction do
           result | {:error, Error.t()}
         when result: term()
   def transaction(conn, database, type, fun, opts \\ []) when is_function(fun, 1) do
+    metadata = %{connection: conn, database: database, type: type}
+
+    Telemetry.span_transaction(metadata, fn ->
+      result = do_transaction(conn, database, type, fun, opts)
+      {result, Map.merge(metadata, transaction_outcome(type, result))}
+    end)
+  end
+
+  defp transaction_outcome(:read, _result), do: %{outcome: :close}
+  defp transaction_outcome(_type, {:error, %Error{} = error}), do: %{outcome: :commit_failed, error: error}
+  defp transaction_outcome(_type, {:error, reason}), do: %{outcome: :close, error: reason}
+  defp transaction_outcome(_type, _result), do: %{outcome: :commit}
+
+  defp do_transaction(conn, database, type, fun, opts) do
     with {:ok, tx} <- open(conn, database, type, opts) do
       try do
         case fun.(tx) do
@@ -329,10 +361,39 @@ defmodule TypeDB.GRPC.Transaction do
   defp normalise(query) when is_binary(query), do: {query, []}
   defp normalise({query, opts}) when is_binary(query) and is_list(opts), do: {query, opts}
 
-  defp call(pid, message, opts) do
+  defp call(%__MODULE__{} = tx, message, opts) do
     timeout = Keyword.get(opts, :timeout, 60_000)
-    do_call(pid, message, timeout)
+
+    metadata =
+      %{
+        operation: operation_name(message),
+        database: tx.database,
+        transaction_type: tx.type
+      }
+      |> put_query_count(message)
+
+    Telemetry.span_operation(metadata, fn ->
+      result = do_call(tx.pid, message, timeout)
+
+      {result,
+       case result do
+         {:error, %Error{} = error} -> Map.put(metadata, :error, error)
+         _ -> metadata
+       end}
+    end)
   end
+
+  defp operation_name({:query_many, [_]}), do: :query
+  defp operation_name({:query_many, _}), do: :query_many
+  defp operation_name({:execute_many, _}), do: :execute_many
+  defp operation_name({:stream_start, _, _}), do: :stream
+  defp operation_name(atom) when is_atom(atom), do: atom
+
+  defp put_query_count(metadata, {op, queries}) when op in [:query_many, :execute_many] do
+    Map.put(metadata, :queries, length(queries))
+  end
+
+  defp put_query_count(metadata, _), do: metadata
 
   defp do_call(pid, message, timeout) do
     GenServer.call(pid, message, timeout)
