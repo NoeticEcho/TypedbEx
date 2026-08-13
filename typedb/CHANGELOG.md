@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-13
+
+Parity work, measured against TypeDB's Rust driver — the reference for what a
+TypeDB driver is expected to cover. Two of its ideas survived the translation
+into Elixir and are here; most did not, and `TypeDB.Concept`'s documentation
+says why in as many words. Additive throughout: nothing existing changes
+behaviour, and `test/api_snapshot.txt` grows rather than moves.
+
+A minor under the 0.x rule, because the public surface gained functions.
+
 ### Added
 
 - **`TypeDB.User.current/2`** — the account this connection signed in as. Rust's
@@ -894,7 +904,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...v0.6.0

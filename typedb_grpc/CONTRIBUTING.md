@@ -62,8 +62,9 @@ server alone — which is why it comes from the `typedb-all` distribution. CI's
 `grpc_migration_interop` job does exactly the above and fails if it cannot, so
 this is checked on every push rather than when somebody remembers.
 
-Worth knowing before touching `TypeDB.GRPC.Migration`: the round-trip tests do
-**not** catch a wrong file format. Encoding a length as a non-canonical varint —
+Worth knowing before touching the `Migration` module — internal, which is why
+this names it without a link: the round-trip tests do **not** catch a wrong file
+format. Encoding a length as a non-canonical varint —
 `0x81 0x00` for 1 — round-trips through this driver perfectly and imports through
 the console without complaint, because both decoders accept it. Only the
 byte-for-byte comparison notices. That is what the console test is for.
@@ -108,7 +109,7 @@ Tags are prefixed, because two packages in one repository cannot both answer to
 
 | package | tag | workflow |
 | --- | --- | --- |
-| `typedb` | `v0.8.0` | `.github/workflows/release.yml` |
+| `typedb` | `v0.9.0` | `.github/workflows/release.yml` |
 | `typedb_grpc` | `typedb_grpc-v0.1.0` | `.github/workflows/release-grpc.yml` |
 
 To cut a release: bump `@version` in `mix.exs`, move `## [Unreleased]` in
@@ -123,6 +124,9 @@ The workflow re-runs the gate against the publishable shape of the package,
 publishes, and creates the GitHub Release.
 
 ## Creating the package on hex.pm the first time
+
+*Done for 0.1.0. Kept because the next new package in this repository will need
+it, and because step 3 is worth re-reading before every release.*
 
 **The first publish is manual, and deliberately so.** It claims a global name
 on a shared registry, ties the package to an owner account, and cannot be

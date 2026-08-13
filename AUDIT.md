@@ -19,6 +19,19 @@ Audit I is kept in full, in its original wording, because it records *why*
 several things are the way they are — read it before proposing to change one of
 them.
 
+## The rule these audits are held to
+
+**A finding is a hypothesis until it has been run.** Audit VI is where this
+stopped being a slogan: it wrote down nine findings, measured four, and one of
+the five it did not measure was wrong (VI-7) — reasoned convincingly from the
+code, refuted in one command by a counter. Chasing that mistake then turned up a
+tenth finding the audit had missed entirely (VI-10).
+
+So, from Audit VII onwards: **measure before writing it down, or mark it
+unmeasured in the finding itself.** A slower audit with nine true findings beats
+a faster one with eight true and one that costs a day. The cost is real and it is
+smaller than it looks — the counter that refuted VI-7 took two minutes.
+
 ---
 
 # Audit VI — both packages, at `a4a2e23`
@@ -414,10 +427,39 @@ costs one log line.
   is an explicit option, and the TLS suite asserts that a certificate signed by
   an untrusted CA is refused — an assertion that would fail if the default ever
   weakened.
-* **Dependencies.** `typedb` is fully current. In `typedb_grpc`, `gun` (2.4.1 →
-  2.5.0) and `googleapis` (0.1.0 → 0.2.0) are behind, both held there by `grpc`
-  and `grpc_core`'s own requirements rather than by ours — `mix.exs` already
-  allows the newer ones. Nothing to do here; it moves when `grpc` moves.
+* **Dependencies — and a correction.** `typedb` is fully current. In
+  `typedb_grpc`, `gun` (2.4.1 → 2.5.0) and `googleapis` (0.1.0 → 0.2.0) are
+  behind, both held there by `grpc` and `grpc_core`'s own requirements rather
+  than by ours. This audit first wrote *"nothing to do here; it moves when
+  `grpc` moves"*, and that was written without looking at **why** one would
+  want to move.
+
+  Resolving the published dependency tree, as the first release forced, says
+  more than a version comparison does:
+
+  ```
+  cowlib 2.19.0 VULNERABLE!
+    EEF-CVE-2026-43969 (LOW)     cookie request header injection, cow_cookie:cookie/1
+    EEF-CVE-2026-43966 (MEDIUM)  HTTP response splitting, cow_http_struct_hd:escape_string/2
+  gun 2.4.1 VULNERABLE!
+    GHSA-w4f7-4cxr-rv3c (MEDIUM) the same, through cowboy and gun
+  ```
+
+  **There is no fixed release to move to.** `cowlib 2.19.0` is the newest
+  cowlib and is the flagged one; `gun 2.5.0` requires
+  `cowlib >= 2.19.0 and < 3.0.0`, so upgrading gun cannot get out of it either.
+
+  **Neither is reachable through this driver.** Both are about attacker-
+  controlled bytes reaching a header. This driver builds exactly one header —
+  `authorization: Bearer <token>`, where the token came from the server — and
+  offers no option, anywhere, that puts caller data into a header: database
+  names, queries, usernames and values all travel in protobuf message bodies.
+  Checked mechanically; every `metadata:` in `lib/` is the same `md`.
+
+  So the release proceeds, and the reason is written down rather than assumed:
+  not "it is only a transitive dependency" but "there is nowhere to upgrade to
+  and no path from this API to the vulnerable code". `bd show tdb-h5o` tracks
+  moving when cowlib ships a fix.
 
 ## Verified, not findings
 

@@ -78,7 +78,7 @@ prefixed:
 
 | package | tag | workflow |
 | --- | --- | --- |
-| `typedb` | `v0.8.0` | `.github/workflows/release.yml` |
+| `typedb` | `v0.9.0` | `.github/workflows/release.yml` |
 | `typedb_grpc` | `typedb_grpc-v0.1.0` | `.github/workflows/release-grpc.yml` |
 
 CI runs each package's gate separately, and one job on top of both: the shared

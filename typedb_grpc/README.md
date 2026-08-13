@@ -9,9 +9,6 @@ the HTTP API, and it depends on it: concepts decode into the same
 application switching transports changes the module it calls, not the code that
 reads what comes back.
 
-> **Status: in development.** The public surface is not settled and there is no
-> released version yet.
-
 ## Why this one
 
 Three things the HTTP API cannot do. The first is a capability it does not have
@@ -79,12 +76,55 @@ to speak it.
 ```elixir
 def deps do
   [
-    {:typedb_grpc, "~> 0.1"}
+    {:typedb_grpc, "~> 0.1.0"}
   ]
 end
 ```
 
 `typedb` comes with it.
+
+## Quick start
+
+Add a connection to your supervision tree — it validates the options and starts
+the process, and does **not** contact the server, so your application boots
+whether or not TypeDB is up yet:
+
+```elixir
+children = [
+  {TypeDB.GRPC,
+   name: :graph,
+   address: "127.0.0.1:1729",
+   username: "admin",
+   password: System.fetch_env!("TYPEDB_PASSWORD")}
+]
+```
+
+`url: "https://typedb.example.com"` works too, and turns TLS on because the
+scheme says so.
+
+```elixir
+:ok = TypeDB.GRPC.create_database(:graph, "social")
+
+{:ok, _} =
+  TypeDB.GRPC.query(:graph, "social", """
+    define
+      attribute name, value string;
+      entity person, owns name;
+  """)
+
+{:ok, _} =
+  TypeDB.GRPC.query(:graph, "social", "given $n: string; insert $p isa person, has name == $n;",
+    transaction_type: :write,
+    given_rows: [%{"n" => "Alice"}, %{"n" => "Bo"}]
+  )
+
+TypeDB.GRPC.stream(:graph, "social", "match $p isa person, has name $n; select $n;")
+|> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+|> Enum.each(&IO.puts/1)
+```
+
+`given_rows` is how a value reaches a query without being spliced into its text,
+and it is the only way this driver offers — a value can never be read as syntax.
 
 ## The generated protocol modules
 
