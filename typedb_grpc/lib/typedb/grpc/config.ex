@@ -58,7 +58,11 @@ defmodule TypeDB.GRPC.Config do
       HTTP driver can feed this one
     * `:username` / `:password` — credentials to sign in with
     * `:token` — a pre-issued token, instead of credentials. Nothing renews it
-    * `:tls` — TLS for the channel. With nothing else set, the certificate is
+    * `:tls` — TLS for the channel, defaulting to `false` — which is what TypeDB
+      CE ships with — **except** when `:url` names an `https://` one, where it
+      defaults to `true`. A scheme is an instruction, and reading it as decor
+      would hand a password to whoever answers the port. An explicit `:tls`
+      wins over both. With nothing else set, the certificate is
       verified against **this machine's trust store**, which is what makes
       `tls: true` enough for a server whose certificate a public CA signed. The
       option exists because `:ssl` does not do that on its own: `verify_peer`
@@ -108,7 +112,7 @@ defmodule TypeDB.GRPC.Config do
          username: username,
          password: password,
          static_token: token,
-         tls: Keyword.get(opts, :tls, false),
+         tls: Keyword.get(opts, :tls, tls_from_url(opts)),
          tls_root_ca: tls_root_ca,
          tls_opts: Keyword.get(opts, :tls_opts, []),
          timeout: timeout,
@@ -241,6 +245,19 @@ defmodule TypeDB.GRPC.Config do
       {:ok, name} when is_atom(name) and not is_nil(name) -> {:ok, name}
       {:ok, other} -> error("invalid :name #{inspect(other)}, expected an atom")
       :error -> error("missing required option :name")
+    end
+  end
+
+  # A `:url` written with `https` means TLS, exactly as it does for the sibling
+  # driver, which is the whole point of accepting a URL here: one configuration
+  # block feeds both. The scheme used to be parsed for the host and the port and
+  # then discarded, so `url: "https://typedb.example.com"` connected in clear
+  # text — a downgrade the user had explicitly asked not to have, and the worst
+  # kind because it looks configured.
+  defp tls_from_url(opts) do
+    case Keyword.fetch(opts, :url) do
+      {:ok, url} when is_binary(url) -> match?(%URI{scheme: "https"}, URI.parse(url))
+      _ -> false
     end
   end
 

@@ -96,6 +96,19 @@ defmodule TypeDB.GRPC.MigrationTest do
     end
   end
 
+  test "an item larger than the file that holds it is refused, whatever the ceiling", %{path: path} do
+    # The bound the constant cannot give. Eight MiB is well under the 64 MiB
+    # ceiling, so only the file's own size — four MiB — can say this is nonsense.
+    # An item cannot be larger than the file containing it; that is a fact rather
+    # than a judgement, and it needs no number chosen by anybody.
+    eight_mib = <<0x80, 0x80, 0x80, 0x04>>
+    File.write!(path, [eight_mib, :binary.copy(<<0>>, 4 * 1024 * 1024)])
+
+    assert_raise TypeDB.Error, ~r/declares an item of 8388608 bytes/, fn ->
+      Enum.to_list(Migration.items(path))
+    end
+  end
+
   test "an item just under the ceiling is still an item", %{path: path} do
     # The ceiling has to be generous enough to be invisible: TypeDB's items are
     # entities, attributes and relations. This is a 2 MiB one, which is already

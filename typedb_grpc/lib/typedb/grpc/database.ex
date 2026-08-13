@@ -395,17 +395,39 @@ defmodule TypeDB.GRPC.Database do
   defp import_stream(channel, md, name, schema, data_path, timeout) do
     stream = Proto.TypeDB.Stub.databases_import(channel, metadata: md, timeout: timeout)
 
-    with :ok <-
-           send_import(
-             stream,
-             {:initial_req, %Proto.Migration.Import.Client.InitialReq{name: name, schema: schema}}
-           ),
-         :ok <- send_items(stream, data_path),
-         :ok <- send_import(stream, {:done, %Proto.Migration.Import.Client.Done{}}, end_stream: true),
-         {:ok, replies} <- GRPC.Stub.recv(stream, timeout: timeout) do
-      await_import(replies)
-    end
+    result =
+      with :ok <-
+             send_import(
+               stream,
+               {:initial_req, %Proto.Migration.Import.Client.InitialReq{name: name, schema: schema}}
+             ),
+           :ok <- send_items(stream, data_path),
+           :ok <- send_import(stream, {:done, %Proto.Migration.Import.Client.Done{}}, end_stream: true),
+           {:ok, replies} <- GRPC.Stub.recv(stream, timeout: timeout) do
+        await_import(replies)
+      end
+
+    abandon(stream, result)
   end
+
+  # An import that fails part-way — a data file that turns out not to be one is
+  # the usual way — used to return and leave the stream half open, with the
+  # server holding an import it would only give up on after its own timeout. The
+  # server says so in its log: *"Import to '…' finished without completion"*.
+  #
+  # Ending the stream is this side's to do. It says nothing about whether the
+  # import succeeded: the `done` message is what does that, and it has already
+  # been sent on the path where there was one.
+  defp abandon(stream, {:error, _} = result) do
+    _ = GRPC.Stub.end_stream(stream)
+    result
+  rescue
+    _ -> result
+  catch
+    _, _ -> result
+  end
+
+  defp abandon(_stream, result), do: result
 
   # 250 items per message, the batch size TypeDB's own drivers use. Sending them
   # one at a time would make the framing cost the dominant one; sending them all

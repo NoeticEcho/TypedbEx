@@ -107,6 +107,42 @@ defmodule TypeDB.GRPC.TLSOptionsTest do
     end
   end
 
+  describe "the URL's scheme is an instruction" do
+    defp from_url(url, opts \\ []) do
+      Config.new!(
+        [name: :"url_#{System.unique_integer([:positive])}", url: url, username: "a", password: "b"] ++
+          opts
+      )
+    end
+
+    test "https means TLS" do
+      # The scheme used to be read for the host and the port and then thrown
+      # away, so a URL that said https connected in clear text — a downgrade the
+      # user had explicitly asked not to have.
+      assert from_url("https://typedb.example.com").tls
+      assert from_url("https://typedb.example.com:1730").tls
+    end
+
+    test "http does not" do
+      refute from_url("http://localhost:8000").tls
+    end
+
+    test "an explicit :tls wins either way" do
+      refute from_url("https://typedb.example.com", tls: false).tls
+      assert from_url("http://typedb.example.com", tls: true).tls
+    end
+
+    test "an address without a scheme is plaintext, as before" do
+      config = Config.new!(name: :url_plain, address: "typedb.example.com:1729", username: "a", password: "b")
+      refute config.tls
+    end
+
+    test "https also settles the plaintext warning" do
+      refute Config.plaintext_to_remote?(from_url("https://typedb.example.com"))
+      assert Config.plaintext_to_remote?(from_url("http://typedb.example.com"))
+    end
+  end
+
   describe "tls_root_ca is checked at start-up" do
     test "a path that is not there fails the config, not the handshake" do
       assert_raise TypeDB.Error, ~r/no such file/, fn ->

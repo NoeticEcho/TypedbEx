@@ -31,15 +31,24 @@ defmodule TypeDB.GRPC.Migration do
   # is not a delimiter.
   @max_varint_bytes 10
 
-  # And a delimiter that parses can still be nonsense. TypeDB's migration items
-  # are entities, attributes and relations — kilobytes each — so anything past
-  # this is not a truncated export, it is not an export at all.
+  # A delimiter that parses can still be nonsense, and without a bound the reader
+  # had no way to know: a length larger than the rest of the file simply never
+  # satisfied "have I got that many bytes yet", so it kept buffering chunks until
+  # EOF and only then reported the file as ending mid-item. The memory ceiling
+  # was the size of the file, which for a file arriving as a backup is a way to
+  # be killed by one — Audit VI, VI-4.
   #
-  # Without the ceiling the reader had no way to know that: a length larger than
-  # the rest of the file simply never satisfied "have I got that many bytes
-  # yet", so it kept buffering chunks until EOF and only then reported the file
-  # as ending mid-item. The memory ceiling was the size of the file, which for a
-  # file arriving as a backup is a way to be killed by one — Audit VI, VI-4.
+  # Two bounds, because neither is enough alone.
+  #
+  # The file's own size is the exact one: an item cannot be larger than the file
+  # that contains it, so a length past it is provably corrupt with no judgement
+  # involved. It is what catches a 50 MiB file declaring a 60 MiB item.
+  #
+  # This constant is the one the file size cannot give: a genuinely large export
+  # — gigabytes — declaring an item of most of itself would pass the first bound
+  # and still exhaust memory. TypeDB's migration items are entities, attributes
+  # and relations, kilobytes each, so this is orders of magnitude above any real
+  # one and orders below a problem.
   @max_item_bytes 64 * 1024 * 1024
 
   @doc "One item, length-delimited: the varint byte count, then the item."
@@ -59,6 +68,8 @@ defmodule TypeDB.GRPC.Migration do
   """
   @spec items(Path.t()) :: Enumerable.t()
   def items(path) do
+    bound = item_bound(path)
+
     path
     |> File.stream!(@chunk_bytes)
     # The end of the file is an event the reducer has to see: a buffer with
@@ -68,12 +79,22 @@ defmodule TypeDB.GRPC.Migration do
     # — `Enum.take/2`, or a failed send abandoning the rest — from being told
     # the file is corrupt when it simply has not read all of it.
     |> Stream.concat([:eof])
-    |> Stream.transform("", &decode_chunk/2)
+    |> Stream.transform("", &decode_chunk(&1, &2, bound))
   end
 
-  defp decode_chunk(:eof, ""), do: {[], ""}
+  # `File.stat/1` rather than `File.stat!/1`: a file that cannot be stat'd will
+  # fail on the first read with a better message than this could give, so the
+  # bound falls back to the constant and the failure stays where it belongs.
+  defp item_bound(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{size: size}} -> min(size, @max_item_bytes)
+      {:error, _} -> @max_item_bytes
+    end
+  end
 
-  defp decode_chunk(:eof, rest) do
+  defp decode_chunk(:eof, "", _bound), do: {[], ""}
+
+  defp decode_chunk(:eof, rest, _bound) do
     raise Error.new(
             :decode,
             "the data file ends mid-item: #{byte_size(rest)} bytes left over after the last " <>
@@ -81,24 +102,24 @@ defmodule TypeDB.GRPC.Migration do
           )
   end
 
-  defp decode_chunk(chunk, buffer) when is_binary(chunk) do
-    {items, rest} = take_items(buffer <> chunk, [])
+  defp decode_chunk(chunk, buffer, bound) when is_binary(chunk) do
+    {items, rest} = take_items(buffer <> chunk, [], bound)
     {Enum.reverse(items), rest}
   end
 
-  defp take_items(binary, acc) do
+  defp take_items(binary, acc, bound) do
     case take_varint(binary, 0, 0) do
-      {:ok, length, _rest} when length > @max_item_bytes ->
+      {:ok, length, _rest} when length > bound ->
         raise Error.new(
                 :decode,
-                "the data file declares an item of #{length} bytes, past the #{@max_item_bytes} " <>
-                  "this driver will read. TypeDB's migration items are entities, attributes and " <>
-                  "relations; this file is corrupt, or it is not a TypeDB export."
+                "the data file declares an item of #{length} bytes, past the #{bound} this " <>
+                  "driver will read from it. TypeDB's migration items are entities, attributes " <>
+                  "and relations; this file is corrupt, or it is not a TypeDB export."
               )
 
       {:ok, length, rest} when byte_size(rest) >= length ->
         <<body::binary-size(^length), tail::binary>> = rest
-        take_items(tail, [decode_item(body) | acc])
+        take_items(tail, [decode_item(body) | acc], bound)
 
       # Either the delimiter or the item it announces is still arriving.
       _incomplete ->
