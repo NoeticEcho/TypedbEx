@@ -13,9 +13,16 @@ defmodule TypeDB.GRPC.Transaction do
   A stream has to be owned by something, so a transaction here is a `GenServer`.
   The handle you hold is still a plain struct — it carries the pid — so it can
   still be passed between processes freely, which is the property the sibling
-  driver documents and which would otherwise have been lost. What changes is
-  lifetime: the transaction dies with its process, so a transaction is no longer
-  something that outlives the VM that opened it.
+  driver documents and which would otherwise have been lost. Requests from
+  different processes are tracked independently, so concurrent callers on one
+  handle each get their own answer. What changes is lifetime: the transaction
+  dies with its process, so a transaction is no longer something that outlives
+  the VM that opened it.
+
+  A call that times out abandons its own request and leaves the transaction
+  open, because with several callers the alternative is one slow read taking
+  everybody else's work down with it. Ending the transaction is the caller's
+  decision, and `transaction/5` makes it.
 
   ## Reads pipeline. Writes do not.
 
@@ -244,7 +251,20 @@ defmodule TypeDB.GRPC.Transaction do
     GenServer.call(pid, {:stream_next, ref}, timeout)
   catch
     :exit, {:timeout, _} ->
-      {:error, Error.new(:timeout, "the next batch of a streamed read did not arrive within #{timeout}ms")}
+      # This caller gives up on *its* request. It used to close the whole
+      # transaction, which was defensible while only one call could be
+      # outstanding and became a way for one slow read to destroy every other
+      # caller's work once several could — Audit V, V-3.
+      #
+      # The abandoned request answers into a reply nobody waits for, which is
+      # harmless, and its bookkeeping is collected when the transaction ends.
+      # Closing is the caller's to do, and `transaction/5` does it.
+      {:error,
+       Error.new(
+         :timeout,
+         "the transaction did not answer within #{timeout}ms; the request was abandoned " <>
+           "and the transaction is still open"
+       )}
 
     :exit, {:noproc, _} ->
       {:error, Error.new(:server, "no open transaction", code: "TSV12", status: 404)}
@@ -433,8 +453,13 @@ defmodule TypeDB.GRPC.Transaction do
       type: type,
       # req_id -> accumulator, for requests whose answers are still arriving
       pending: %{},
-      # {from, [req_id], %{req_id => result}} while a call is outstanding
-      awaiting: nil,
+      # Outstanding calls, keyed by a reference, each `%{from:, ids:, collected:}`.
+      # A map rather than the single slot this used to be: the moduledoc promises
+      # a handle can be passed between processes, and one slot meant the second
+      # caller overwrote the first's `from` — Audit V, V-3.
+      calls: %{},
+      # req_id -> the reference of the call that owns it.
+      owner: %{},
       reader: nil
     }
 
@@ -529,7 +554,7 @@ defmodule TypeDB.GRPC.Transaction do
     ids = Enum.map(reqs, & &1.req_id)
     send_reqs(state, reqs)
 
-    {:noreply, %{state | pending: pending, awaiting: {from, ids, %{}}}}
+    {:noreply, register_call(%{state | pending: pending}, from, ids)}
   end
 
   def handle_call({:execute_many, queries}, from, state) do
@@ -543,7 +568,7 @@ defmodule TypeDB.GRPC.Transaction do
     ids = Enum.map(reqs, & &1.req_id)
     send_reqs(state, reqs)
 
-    {:noreply, %{state | pending: pending, awaiting: {from, ids, %{}}}}
+    {:noreply, register_call(%{state | pending: pending}, from, ids)}
   end
 
   def handle_call({:stream_start, query, opts}, _from, state) do
@@ -600,7 +625,17 @@ defmodule TypeDB.GRPC.Transaction do
   # A commit or a rollback answers once and carries nothing to accumulate, so
   # its slot in `pending` is a marker rather than a collector.
   defp awaiting(state, from, id) do
-    %{state | awaiting: {from, [id], %{}}, pending: Map.put(state.pending, id, :unit)}
+    register_call(%{state | pending: Map.put(state.pending, id, :unit)}, from, [id])
+  end
+
+  defp register_call(state, from, ids) do
+    ref = make_ref()
+
+    %{
+      state
+      | calls: Map.put(state.calls, ref, %{from: from, ids: ids, collected: %{}}),
+        owner: Enum.reduce(ids, state.owner, &Map.put(&2, &1, ref))
+    }
   end
 
   @impl GenServer
@@ -911,21 +946,24 @@ defmodule TypeDB.GRPC.Transaction do
   # -- completion ------------------------------------------------------------
 
   defp finish_one(state, id, result) do
-    pending = Map.delete(state.pending, id)
+    state = %{state | pending: Map.delete(state.pending, id)}
 
-    case state.awaiting do
-      {from, ids, collected} ->
-        collected = Map.put(collected, id, result)
+    case Map.fetch(state.owner, id) do
+      :error -> state
+      {:ok, ref} -> complete(state, ref, id, result)
+    end
+  end
 
-        if Enum.all?(ids, &Map.has_key?(collected, &1)) do
-          GenServer.reply(from, assemble(ids, collected))
-          %{state | pending: pending, awaiting: nil}
-        else
-          %{state | pending: pending, awaiting: {from, ids, collected}}
-        end
+  defp complete(state, ref, id, result) do
+    call = Map.fetch!(state.calls, ref)
+    collected = Map.put(call.collected, id, result)
+    state = %{state | owner: Map.delete(state.owner, id)}
 
-      _ ->
-        %{state | pending: pending}
+    if Enum.all?(call.ids, &Map.has_key?(collected, &1)) do
+      GenServer.reply(call.from, assemble(call.ids, collected))
+      %{state | calls: Map.delete(state.calls, ref)}
+    else
+      %{state | calls: Map.put(state.calls, ref, %{call | collected: collected})}
     end
   end
 
@@ -938,15 +976,11 @@ defmodule TypeDB.GRPC.Transaction do
     end
   end
 
+  # The stream is gone, so every outstanding call is gone with it — not just
+  # whichever one happened to be in a slot.
   defp fail_awaiting(state, error) do
-    case state.awaiting do
-      {from, _ids, _collected} ->
-        GenServer.reply(from, {:error, error})
-        %{state | awaiting: nil}
-
-      _ ->
-        state
-    end
+    Enum.each(state.calls, fn {_ref, call} -> GenServer.reply(call.from, {:error, error}) end)
+    %{state | calls: %{}, owner: %{}}
   end
 
   # -- wire ------------------------------------------------------------------

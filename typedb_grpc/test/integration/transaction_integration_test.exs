@@ -82,6 +82,60 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
     end
   end
 
+  describe "one transaction, several callers" do
+    # Audit V, critical. The moduledoc promises the handle can be passed between
+    # processes freely; the state held one `awaiting` slot, so the second caller
+    # overwrote the first's `from`. The loser then waited out its timeout — and
+    # the timeout path closed the transaction, so it destroyed the winner's work
+    # on the way down.
+    test "two processes querying one handle both get their own answer", %{
+      conn: conn,
+      database: database
+    } do
+      insert_people(conn, database, 20)
+
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      tasks =
+        for i <- 1..2 do
+          Task.async(fn ->
+            Transaction.query(tx, ~s|match $p isa person, has name == "p#{i}"; select $p;|, timeout: 15_000)
+          end)
+        end
+
+      results = Task.await_many(tasks, 30_000)
+
+      for {result, i} <- Enum.with_index(results, 1) do
+        assert {:ok, answer} = result, "caller #{i} got #{inspect(result)}"
+        assert length(TypeDB.Answer.rows(answer)) == 1
+      end
+
+      assert Transaction.open?(tx), "neither caller may take the transaction down"
+    end
+
+    test "many concurrent callers all answer", %{conn: conn, database: database} do
+      insert_people(conn, database, 30)
+
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      results =
+        1..12
+        |> Task.async_stream(
+          fn i ->
+            Transaction.query(tx, ~s|match $p isa person, has name == "p#{i}"; select $p;|, timeout: 20_000)
+          end,
+          max_concurrency: 12,
+          timeout: 40_000
+        )
+        |> Enum.map(fn {:ok, r} -> r end)
+
+      assert Enum.all?(results, &match?({:ok, _}, &1)),
+             "#{Enum.count(results, &match?({:error, _}, &1))} of 12 concurrent callers failed"
+    end
+  end
+
   describe "answers" do
     test "a write reports what it did", %{conn: conn, database: database} do
       {:ok, answer} =
