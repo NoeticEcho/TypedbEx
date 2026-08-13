@@ -76,6 +76,50 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     end
   end
 
+  describe "the plaintext warning" do
+    test "does not fire for the loopback server the suite runs against" do
+      # A warning every local user sees is a warning nobody reads. The suite's
+      # own connection is the ordinary case, and it has to stay quiet.
+      captured =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn = start_connection()
+          assert :ok = Server.health(conn)
+        end)
+
+      refute captured =~ "clear text"
+    end
+
+    test "fires for a server that is not on this machine" do
+      # The address does not have to answer: the warning is about the
+      # configuration, and it is said before the channel is even attempted.
+      # `start_link/1` links, and this connection's `init/1` stops — the address
+      # does not resolve — so the test process has to trap that exit or die with
+      # it. The TLS suite traps for the same reason.
+      Process.flag(:trap_exit, true)
+
+      captured =
+        ExUnit.CaptureLog.capture_log(fn ->
+          name = :"grpc_remote_#{System.unique_integer([:positive])}"
+
+          case Connection.start_link(
+                 name: name,
+                 address: "typedb.invalid:1729",
+                 username: "admin",
+                 password: "password",
+                 connect_timeout: 1_000
+               ) do
+            {:ok, pid} -> Connection.stop(pid)
+            {:error, _} -> :ok
+          end
+        end)
+
+      Process.flag(:trap_exit, false)
+
+      assert captured =~ "clear text"
+      assert captured =~ "tls: true"
+    end
+  end
+
   describe "opening the connection" do
     test "there is no connection id until the first call needs one", %{conn: conn} do
       # Opening is lazy on purpose: a supervision tree must be able to boot

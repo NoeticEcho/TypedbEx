@@ -46,6 +46,8 @@ defmodule TypeDB.GRPC.Connection do
 
   use GenServer
 
+  require Logger
+
   alias TypeDB.Error
   alias TypeDB.GRPC.{Config, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
@@ -272,6 +274,8 @@ defmodule TypeDB.GRPC.Connection do
   def init(%Config{} = config) do
     Process.flag(:trap_exit, true)
 
+    warn_if_plaintext(config)
+
     case connect(config) do
       {:ok, channel} ->
         table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
@@ -316,6 +320,25 @@ defmodule TypeDB.GRPC.Connection do
   end
 
   def terminate(_reason, _state), do: :ok
+
+  # Said once per connection, at start-up, and only for a server that is not on
+  # this machine. The default is not changed: it matches TypeDB CE's own, and a
+  # driver that refused to connect the way the server ships would be wrong more
+  # often than right. What it must not do is stay quiet while a password crosses
+  # a network — Audit VI, VI-8.
+  defp warn_if_plaintext(%Config{} = config) do
+    if Config.plaintext_to_remote?(config) do
+      Logger.warning(
+        "TypeDB.GRPC is connecting to #{config.address} without TLS, so the username and " <>
+          "password will cross the network in clear text. Pass `tls: true` — and `:tls_root_ca` " <>
+          "if the server's certificate comes from a private CA. If the server has no encryption " <>
+          "enabled, this is the only place that will be said.",
+        typedb_connection: config.name
+      )
+    end
+
+    :ok
+  end
 
   defp connect(%Config{} = config) do
     adapter_opts = [retry: config.connect_retries, connect_timeout: config.connect_timeout]

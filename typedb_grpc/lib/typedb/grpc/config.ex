@@ -150,6 +150,33 @@ defmodule TypeDB.GRPC.Config do
     end
   end
 
+  @doc """
+  Whether this connection would send credentials in clear text to another
+  machine.
+
+  `tls: false` is the default and it is the right one for TypeDB CE, which ships
+  with encryption off and is usually on the same host. It is the wrong one the
+  moment the server is somewhere else, and nothing else in the driver is in a
+  position to notice — Rust cannot have this problem because
+  `DriverOptions::new/1` takes the TLS configuration as a required argument.
+
+  So the default stays and `TypeDB.GRPC.Connection` says so once, at start-up,
+  for an address that is not loopback.
+  """
+  @spec plaintext_to_remote?(t()) :: boolean()
+  def plaintext_to_remote?(%__MODULE__{tls: true}), do: false
+  def plaintext_to_remote?(%__MODULE__{address: address}), do: not loopback?(host(address))
+
+  defp host(address), do: address |> String.split(":") |> hd()
+
+  # The whole of 127.0.0.0/8, not just 127.0.0.1: `127.0.0.2` is as local as its
+  # neighbour and a warning that fired on it would be noise.
+  defp loopback?("localhost"), do: true
+  defp loopback?("::1"), do: true
+  defp loopback?("[::1]"), do: true
+  defp loopback?("127." <> _), do: true
+  defp loopback?(_host), do: false
+
   defp trust_configured?(opts) do
     Keyword.has_key?(opts, :cacerts) or Keyword.has_key?(opts, :cacertfile) or
       Keyword.get(opts, :verify) == :verify_none

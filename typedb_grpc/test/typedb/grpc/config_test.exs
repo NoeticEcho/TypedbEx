@@ -93,4 +93,36 @@ defmodule TypeDB.GRPC.ConfigTest do
       refute inspect(config) =~ "hunter2"
     end
   end
+
+  describe "plaintext_to_remote?/1" do
+    defp at(address, opts \\ []) do
+      Config.new!(
+        [
+          name: :"plain_#{System.unique_integer([:positive])}",
+          address: address,
+          username: "admin",
+          password: "password"
+        ] ++ opts
+      )
+    end
+
+    test "a local server is not a warning" do
+      # A warning every local user sees is a warning nobody reads, and TypeDB CE
+      # ships without encryption, so this is the ordinary case.
+      refute Config.plaintext_to_remote?(at("127.0.0.1:1729"))
+      refute Config.plaintext_to_remote?(at("localhost:1729"))
+      refute Config.plaintext_to_remote?(at("127.0.0.2:1729"))
+    end
+
+    test "a server anywhere else, without TLS, is" do
+      assert Config.plaintext_to_remote?(at("typedb.internal:1729"))
+      assert Config.plaintext_to_remote?(at("10.0.0.5:1729"))
+      assert Config.plaintext_to_remote?(at("192.168.1.10:1729"))
+    end
+
+    test "TLS settles it wherever the server is" do
+      refute Config.plaintext_to_remote?(at("typedb.internal:1729", tls: true))
+      refute Config.plaintext_to_remote?(at("10.0.0.5:1729", tls: true))
+    end
+  end
 end
