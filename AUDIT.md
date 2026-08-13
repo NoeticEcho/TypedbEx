@@ -1,6 +1,8 @@
 # Audit — TypeDB Elixir driver
 
-Six audits, newest first. Audits I–IV cover `typedb`, Audit V covers
+Six audits, newest first, and all six are here — Audit IV's section was written
+during Audit VI, which found the index pointing at nothing. Audits I–IV cover
+`typedb`, Audit V covers
 `typedb_grpc`, and Audit VI is the first to sweep both — and the first to audit
 efficiency, stability and security as categories of their own.
 
@@ -531,6 +533,33 @@ Checked and deliberately not listed:
     all, because this transport has no answer cap to configure.
   * **`typedb` itself.** Four audits and 508 tests; the only change to it this
     session was additive telemetry metadata, covered by its own suite.
+
+---
+
+# Audit IV — 0.8.0, through a caller's post-mortems
+
+Audited at `447ff97`, and written down here at last: the index has linked to
+this section since 0.8.0 shipped and the section never existed — Audit VI,
+VI-9. What follows is the summary; the full account is the 0.8.0 entry in
+`typedb/CHANGELOG.md`, which was where the work was recorded at the time.
+
+**Method**, the same as Audit III: read the driver through
+`NoeticEcho/newgen-elixir`, then on 0.7.0, and treat what its authors had to
+learn the hard way as evidence about this driver. The material was their own
+post-mortems — four `P0`s that name TypeDB — and each was re-measured against
+3.12.1 rather than taken on trust.
+
+**Outcome: two of the four claims held, two did not.**
+
+| Their claim | Verdict |
+| --- | --- |
+| A transaction that is gone (`TSV12`) reads as a permanent failure | **Held.** `retryable_codes/0` gained `TSV12`; it arrives as a `404`, which is otherwise this driver's word for a permanent no, and in two of its three causes nothing was committed |
+| A read of many keys is quadratic when written the obvious way | **Held.** Measured at 11 134 ms for 500 keys against 70 ms for the `given`-stage form; the recipe and the warning are in `guides/recipes.md` |
+| The driver re-sends non-idempotent requests | **Did not hold.** A write query is `idempotent: false` and is never re-sent; their triple execution was their own job runner |
+| `transaction/5` reports its rollback's failure instead of the body's | **Did not hold.** It reports the body's, verified |
+
+The two that did not hold cost nothing to check and are worth as much as the two
+that did: they are the reason the other two were believed.
 
 ---
 

@@ -79,8 +79,11 @@ defmodule TypeDB.GRPC.Transaction do
   large as the query makes it. `TypeDB.Answer.truncated?/1` on an answer from
   this driver is always `false`, and honestly so.
 
-  The current API collects the parts before returning, so a very large answer is
-  a very large list. Constant-memory streaming is a further step and not done.
+  `query/3` collects the parts before returning, so a very large answer is a very
+  large list. `stream/3` does not: it hands the parts to the caller as they
+  arrive and asks for the next only when the consumer wants it, so memory
+  follows the batch rather than the answer. That was true from the streaming
+  step onwards, and this paragraph went on denying it — Audit VI, VI-1.
   """
 
   use GenServer
@@ -147,7 +150,11 @@ defmodule TypeDB.GRPC.Transaction do
       renders one, so the caveat there applies here — the transports describe
       the same analysis and do not spell it identically
     * `:prefetch_size` — how many answers the server sends before waiting to be
-      asked for more
+      asked for more. Worth knowing before reaching for it: raising it makes a
+      streamed read **slower**, not faster. Measured on 20 000 rows, 432 ms at
+      the default against 985 ms at `prefetch_size: 20_000` — the server
+      produces the whole batch before sending any of it, so its work stops
+      overlapping with the driver's decoding
   """
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
@@ -1106,6 +1113,13 @@ defmodule TypeDB.GRPC.Transaction do
 
   # -- wire ------------------------------------------------------------------
 
+  # One `Transaction.Client` per request, although the field is `repeated Req
+  # reqs` and could carry them together. The pipelining this module documents
+  # comes from not waiting for each reply, not from batching the sends — worth
+  # saying plainly, because the moduledoc explains the win in terms of the
+  # repeated field and the code does not use it. Batching is a behaviour change
+  # that could interact with the TSV13 write behaviour above, so it is its own
+  # measured piece of work rather than a tidy-up: `bd show tdb-2v6`.
   defp send_reqs(state, reqs) do
     Enum.each(reqs, fn req ->
       GRPC.Stub.send_request(state.stream, %Proto.Transaction.Client{reqs: [req]})
