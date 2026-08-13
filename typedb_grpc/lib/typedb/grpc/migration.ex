@@ -31,6 +31,17 @@ defmodule TypeDB.GRPC.Migration do
   # is not a delimiter.
   @max_varint_bytes 10
 
+  # And a delimiter that parses can still be nonsense. TypeDB's migration items
+  # are entities, attributes and relations — kilobytes each — so anything past
+  # this is not a truncated export, it is not an export at all.
+  #
+  # Without the ceiling the reader had no way to know that: a length larger than
+  # the rest of the file simply never satisfied "have I got that many bytes
+  # yet", so it kept buffering chunks until EOF and only then reported the file
+  # as ending mid-item. The memory ceiling was the size of the file, which for a
+  # file arriving as a backup is a way to be killed by one — Audit VI, VI-4.
+  @max_item_bytes 64 * 1024 * 1024
+
   @doc "One item, length-delimited: the varint byte count, then the item."
   @spec encode(struct()) :: [binary()]
   def encode(%Proto.Migration.Item{} = item) do
@@ -77,6 +88,14 @@ defmodule TypeDB.GRPC.Migration do
 
   defp take_items(binary, acc) do
     case take_varint(binary, 0, 0) do
+      {:ok, length, _rest} when length > @max_item_bytes ->
+        raise Error.new(
+                :decode,
+                "the data file declares an item of #{length} bytes, past the #{@max_item_bytes} " <>
+                  "this driver will read. TypeDB's migration items are entities, attributes and " <>
+                  "relations; this file is corrupt, or it is not a TypeDB export."
+              )
+
       {:ok, length, rest} when byte_size(rest) >= length ->
         <<body::binary-size(^length), tail::binary>> = rest
         take_items(tail, [decode_item(body) | acc])

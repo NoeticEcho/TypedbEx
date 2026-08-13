@@ -11,6 +11,8 @@ defmodule TypeDB.GRPC.MigrationTest do
   against the real console; this proves the pieces it is made of.
   """
 
+  import Bitwise
+
   alias TypeDB.GRPC.Migration
   alias Typedb.Protocol, as: Proto
 
@@ -78,6 +80,30 @@ defmodule TypeDB.GRPC.MigrationTest do
     File.write!(path, binary_part(encoded, 0, byte_size(encoded) - 3))
 
     assert_raise TypeDB.Error, ~r/ends mid-item/, fn -> Enum.to_list(Migration.items(path)) end
+  end
+
+  test "an item longer than any item can be is refused before the file is read", %{path: path} do
+    # Audit VI, VI-4. Nothing bounded the declared length, so a delimiter this
+    # size simply never satisfied "have I got that many bytes yet" — the reader
+    # buffered the whole file and only then said it ended mid-item. The memory
+    # ceiling was the size of the file.
+    huge = <<0x80, 0x80, 0x80, 0x80, 0x01>>
+    assert <<0x80, 0x80, 0x80, 0x80, 0x01>> == huge and 0x01 <<< 28 == 268_435_456
+    File.write!(path, [huge, :binary.copy(<<0>>, 4 * 1024 * 1024)])
+
+    assert_raise TypeDB.Error, ~r/declares an item of 268435456 bytes/, fn ->
+      Enum.to_list(Migration.items(path))
+    end
+  end
+
+  test "an item just under the ceiling is still an item", %{path: path} do
+    # The ceiling has to be generous enough to be invisible: TypeDB's items are
+    # entities, attributes and relations. This is a 2 MiB one, which is already
+    # absurd for a real graph and nowhere near the limit.
+    big = entity(String.duplicate("x", 2 * 1024 * 1024))
+    write(path, [big])
+
+    assert Enum.to_list(Migration.items(path)) == [big]
   end
 
   test "a file that is not an export at all is reported", %{path: path} do

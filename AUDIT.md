@@ -173,10 +173,12 @@ the file simply never satisfies the guard, so the reader keeps pulling 64 KiB
 chunks and appending them to the buffer until EOF, and only *then* raises "the
 data file ends mid-item". The memory ceiling is the size of the file.
 
-**Measured**: a file whose first varint declares 32 GiB, followed by 5 MB of
+**Measured**: a file whose first varint declares 256 MiB, followed by 5 MB of
 zeroes, is buffered whole — the error reports `5000005 bytes left over`. At 5 MB
 that is nothing; the same shape at 5 GB is an out-of-memory kill of the node,
-caused by a file the operator was told was a backup.
+caused by a file the operator was told was a backup. Nothing about the size of
+the declared length matters, only that it exceeds what follows it: the buffer
+grows to the file, whatever the delimiter said.
 
 TypeDB's own items are entities, attributes and relations — kilobytes. A
 declared length beyond any plausible item is not a truncated file, it is not a
