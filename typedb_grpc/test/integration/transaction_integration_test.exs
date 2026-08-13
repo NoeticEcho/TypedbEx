@@ -394,6 +394,48 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
     end
   end
 
+  describe "watching a transaction end" do
+    # The documented answer to Rust's `on_close` callback. Written as a test
+    # rather than only as prose, because a moduledoc that shows an idiom which
+    # does not work is worse than no moduledoc.
+    test "a monitor fires when the transaction is closed", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      ref = Process.monitor(tx.pid)
+
+      :ok = Transaction.close(tx)
+
+      assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 5_000
+    end
+
+    test "and when it is committed", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :write)
+      ref = Process.monitor(tx.pid)
+
+      {:ok, _} = Transaction.query(tx, ~s|insert $p isa person, has name "monitored";|)
+      assert :ok = Transaction.commit(tx)
+
+      assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 5_000
+      refute Transaction.open?(tx)
+    end
+
+    test "and from a process that did not open it", %{conn: conn, database: database} do
+      # The half a callback cannot do: the handle travels, so the watching can
+      # happen anywhere, and more than once.
+      {:ok, tx} = Transaction.open(conn, database, :read)
+
+      task = Task.async(fn -> Process.monitor(tx.pid) end)
+      elsewhere = Task.await(task)
+      here = Process.monitor(tx.pid)
+
+      :ok = Transaction.close(tx)
+
+      assert_receive {:DOWN, ^here, :process, _pid, _}, 5_000
+      # The task's monitor died with the task; what matters is that taking one
+      # out from another process was allowed at all.
+      assert is_reference(elsewhere)
+    end
+  end
+
   describe "rollback and close" do
     test "rollback discards writes and leaves the transaction open", %{conn: conn, database: database} do
       {:ok, tx} = Transaction.open(conn, database, :write)

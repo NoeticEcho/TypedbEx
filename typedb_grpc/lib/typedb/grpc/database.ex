@@ -39,6 +39,37 @@ defmodule TypeDB.GRPC.Database do
   end
 
   @doc """
+  A database's name, or an error when it does not exist.
+
+  The same contract as `TypeDB.Database.get/3` and as Rust's
+  `DatabaseManager::get`: absence is an error carrying the server's own code,
+  not a `false`. `exists?/3` is the boolean question, and it raises when it
+  cannot ask.
+
+  A name rather than a handle object: everything else in this module is a
+  function taking one, so a struct here would be a second way to say the same
+  thing.
+  """
+  @spec get(Connection.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, Error.t()}
+  def get(conn, name, opts \\ []) when is_binary(name) do
+    with {:ok, reply} <-
+           Connection.unary(
+             conn,
+             fn channel, md ->
+               Proto.TypeDB.Stub.databases_get(channel, %Proto.DatabaseManager.Get.Req{name: name},
+                 metadata: md,
+                 timeout: timeout(conn, opts)
+               )
+             end,
+             "reading database #{inspect(name)}",
+             operation: :databases_get,
+             database: name
+           ) do
+      {:ok, reply.database.name}
+    end
+  end
+
+  @doc """
   Whether `name` exists.
 
   Raises `TypeDB.Error` for anything other than a clean answer — the same
@@ -420,6 +451,10 @@ defmodule TypeDB.GRPC.Database do
   @doc "Every database on the server, raising on failure."
   @spec list!(term(), term()) :: [String.t()]
   def list!(conn, opts \\ []), do: unwrap!(list(conn, opts))
+
+  @doc "A database's name, raising when it does not exist."
+  @spec get!(term(), term(), term()) :: String.t()
+  def get!(conn, name, opts \\ []), do: unwrap!(get(conn, name, opts))
 
   @doc "Creates a database, raising on failure."
   @spec create!(term(), term(), term()) :: :ok

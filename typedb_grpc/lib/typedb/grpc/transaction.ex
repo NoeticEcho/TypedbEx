@@ -24,6 +24,30 @@ defmodule TypeDB.GRPC.Transaction do
   everybody else's work down with it. Ending the transaction is the caller's
   decision, and `transaction/5` makes it.
 
+  ## Watching a transaction end
+
+  TypeDB's other drivers offer an `on_close` callback. There is no such function
+  here, and that is the API rather than a gap: a transaction is a process, so
+  the language already has a better answer.
+
+      {:ok, tx} = Transaction.open(conn, "social", :write)
+      ref = Process.monitor(tx.pid)
+
+      receive do
+        {:DOWN, ^ref, :process, _pid, reason} -> handle_the_end(reason)
+      end
+
+  A monitor does everything a callback does and several things it cannot. It
+  delivers to *your* mailbox rather than running your code inside the
+  transaction's process, so a slow or crashing handler cannot take the
+  transaction down with it. It works from any process holding the handle, and
+  more than one at a time. It can be cancelled with `Process.demonitor/2`. And
+  it fires whatever ended the transaction — a commit, a `close/2`, a stream that
+  died, the VM shutting down — where a callback list has to be maintained.
+
+  `reason` is `:normal` for a transaction that finished on purpose, including
+  after `commit/2` and `close/2`.
+
   ## Reads pipeline. Writes do not.
 
   `Transaction.Client` carries a repeated field and requests are correlated by

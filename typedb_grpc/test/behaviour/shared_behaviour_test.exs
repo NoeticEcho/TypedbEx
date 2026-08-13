@@ -460,6 +460,21 @@ defmodule TypeDB.SharedBehaviourTest do
       end
     end
 
+    test "a database that is not there is an error on both, not a false" do
+      for adapter <- @adapters, adapter.available?() do
+        {:ok, conn} = adapter.connect(:"get_db_#{System.unique_integer([:positive])}")
+        database = "get_db_#{System.unique_integer([:positive])}"
+        :ok = adapter.create_database(conn, database)
+        on_exit(fn -> adapter.delete_database(conn, database) end)
+
+        assert {:ok, ^database} = adapter.get_database(conn, database)
+
+        assert {:error, %TypeDB.Error{kind: :server}} =
+                 adapter.get_database(conn, "absent_#{System.unique_integer([:positive])}"),
+               "#{adapter.name()} did not report an absent database as a server error"
+      end
+    end
+
     test "the cluster looks the same through both" do
       # `servers/2` is the one call that describes the deployment rather than
       # the data, and it landed on gRPC long after HTTP had it. The shape is the

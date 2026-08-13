@@ -165,6 +165,17 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
       refute Database.exists?(conn, name)
     end
 
+    test "get/3 answers with the name, or an error carrying the server's code", %{conn: conn} do
+      name = start_database(conn)
+
+      assert {:ok, ^name} = Database.get(conn, name)
+      assert Database.get!(conn, name) == name
+
+      # The difference from `exists?/3`, which cannot say "I could not ask".
+      assert {:error, %TypeDB.Error{kind: :server}} =
+               Database.get(conn, "absent_#{System.unique_integer([:positive])}")
+    end
+
     test "deleting one that is not there carries TypeDB's own code", %{conn: conn} do
       assert {:error, error} =
                Database.delete(conn, "definitely_absent_#{System.unique_integer([:positive])}")

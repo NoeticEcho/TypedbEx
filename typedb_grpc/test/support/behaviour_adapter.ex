@@ -43,6 +43,9 @@ defmodule TypeDB.Behaviour.Adapter do
   @doc "Closes an open transaction handle."
   @callback tx_close(term()) :: :ok
 
+  @doc "A database's name, or an error when it is not there."
+  @callback get_database(conn(), String.t()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+
   @doc "The servers in the cluster, as the driver reports them."
   @callback servers(conn()) :: {:ok, [map()]} | {:error, TypeDB.Error.t()}
 
@@ -136,6 +139,9 @@ defmodule TypeDB.Behaviour.Adapter.HTTP do
   def servers(conn), do: TypeDB.Server.servers(conn)
 
   @impl true
+  def get_database(conn, database), do: TypeDB.Database.get(conn, database)
+
+  @impl true
   def tx_close(tx) do
     _ = TypeDB.Transaction.close(tx)
     :ok
@@ -212,4 +218,7 @@ defmodule TypeDB.Behaviour.Adapter.GRPC do
 
   @impl true
   def servers(conn), do: Server.servers(conn)
+
+  @impl true
+  def get_database(conn, database), do: Database.get(conn, database)
 end
