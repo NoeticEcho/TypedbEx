@@ -86,8 +86,14 @@
           # You can customize the priority of any check
           # Priority values are: `low, normal, high, higher`
           #
+          # TypeDB's protocol namespace is `Typedb.Protocol.DatabaseManager.All.Req`
+          # and similar — four segments deep before anything this package wrote.
+          # Aliasing each leaf would add fifty alias lines that say nothing; the
+          # modules are aliased at their root as `Proto` instead. The depth
+          # allowance is raised to match rather than the check disabled, so a
+          # deeply nested module of *ours* would still be reported.
           {Credo.Check.Design.AliasUsage,
-           [priority: :low, if_nested_deeper_than: 2, if_called_more_often_than: 0]},
+           [priority: :low, if_nested_deeper_than: 4, if_called_more_often_than: 0]},
           {Credo.Check.Design.TagFIXME, []},
           # You can also customize the exit_status of each check.
           # If you don't want TODO comments to cause `mix credo` to fail, just
