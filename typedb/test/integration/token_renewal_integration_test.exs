@@ -70,7 +70,7 @@ defmodule TypeDB.TokenRenewalIntegrationTest do
   end
 
   setup context do
-    database = "renewal_test_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("renewal_test")
     :ok = Database.create(context.conn, database)
     {:ok, _} = TypeDB.query(context.conn, database, @schema)
     on_exit(fn -> Database.delete(context.conn, database) end)

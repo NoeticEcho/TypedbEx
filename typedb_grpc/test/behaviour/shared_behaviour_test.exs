@@ -72,7 +72,7 @@ defmodule TypeDB.SharedBehaviourTest do
           name = :"shared_#{System.unique_integer([:positive])}"
           {:ok, conn} = adapter.connect(name)
 
-          database = "shared_#{System.unique_integer([:positive])}"
+          database = TypeDB.GRPC.Case.unique_name("shared")
           :ok = adapter.create_database(conn, database)
           on_exit(fn -> adapter.delete_database(conn, database) end)
 
@@ -87,7 +87,7 @@ defmodule TypeDB.SharedBehaviourTest do
       @tag adapter: adapter
       test "a database it created exists, and does not after deletion", context do
         skip_or(context, fn %{adapter: adapter, conn: conn} ->
-          name = "shared_life_#{System.unique_integer([:positive])}"
+          name = TypeDB.GRPC.Case.unique_name("shared_life")
 
           refute adapter.database_exists?(conn, name)
           assert :ok = adapter.create_database(conn, name)
@@ -100,7 +100,7 @@ defmodule TypeDB.SharedBehaviourTest do
       test "deleting a database that is not there is DBD1 on both", context do
         skip_or(context, fn %{adapter: adapter, conn: conn} ->
           assert {:error, %TypeDB.Error{} = error} =
-                   adapter.delete_database(conn, "absent_#{System.unique_integer([:positive])}")
+                   adapter.delete_database(conn, TypeDB.GRPC.Case.unique_name("absent"))
 
           assert error.kind == :server
           assert error.code == "DBD1"
@@ -397,7 +397,7 @@ defmodule TypeDB.SharedBehaviourTest do
       for adapter <- @adapters, adapter.available?() do
         name = :"same_#{System.unique_integer([:positive])}"
         {:ok, conn} = adapter.connect(name)
-        database = "same_#{System.unique_integer([:positive])}"
+        database = TypeDB.GRPC.Case.unique_name("same")
         :ok = adapter.create_database(conn, database)
         on_exit(fn -> adapter.delete_database(conn, database) end)
 
@@ -418,7 +418,7 @@ defmodule TypeDB.SharedBehaviourTest do
       answers =
         for adapter <- @adapters, adapter.available?() do
           {:ok, conn} = adapter.connect(:"structure_#{System.unique_integer([:positive])}")
-          database = "structure_#{System.unique_integer([:positive])}"
+          database = TypeDB.GRPC.Case.unique_name("structure")
           :ok = adapter.create_database(conn, database)
           on_exit(fn -> adapter.delete_database(conn, database) end)
           {:ok, _} = adapter.query(conn, database, @schema, :schema)
@@ -463,14 +463,14 @@ defmodule TypeDB.SharedBehaviourTest do
     test "a database that is not there is an error on both, not a false" do
       for adapter <- @adapters, adapter.available?() do
         {:ok, conn} = adapter.connect(:"get_db_#{System.unique_integer([:positive])}")
-        database = "get_db_#{System.unique_integer([:positive])}"
+        database = TypeDB.GRPC.Case.unique_name("get_db")
         :ok = adapter.create_database(conn, database)
         on_exit(fn -> adapter.delete_database(conn, database) end)
 
         assert {:ok, ^database} = adapter.get_database(conn, database)
 
         assert {:error, %TypeDB.Error{kind: :server}} =
-                 adapter.get_database(conn, "absent_#{System.unique_integer([:positive])}"),
+                 adapter.get_database(conn, TypeDB.GRPC.Case.unique_name("absent")),
                "#{adapter.name()} did not report an absent database as a server error"
       end
     end

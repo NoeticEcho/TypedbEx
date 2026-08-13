@@ -70,9 +70,10 @@ every finding below is measured against:
 
 ## Findings
 
-Nine, against the eight categories. Three major, five minor, no critical — and
-one withdrawn during the refactor, by the measurement that should have been
-taken before it was written down. See VI-7.
+Ten, against the eight categories. Four major, five minor, no critical — one
+withdrawn during the refactor, by the measurement that should have been taken
+before it was written down (VI-7), and one *found* during it, by chasing a
+failure the refactor had not caused (VI-10).
 
 | | Category | Where | Severity |
 | --- | --- | --- | --- |
@@ -85,6 +86,7 @@ taken before it was written down. See VI-7.
 | VI-7 | Efficiency | `typedb_grpc/lib/typedb/grpc/transaction.ex:900` | **withdrawn** |
 | VI-8 | Security | `typedb_grpc/lib/typedb/grpc/config.ex:111` | minor |
 | VI-9 | Requirement mismatch | `AUDIT.md:11` | minor |
+| VI-10 | Errors | `typedb_grpc/test/support/grpc_case.ex:70` | major |
 
 ### 1. Requirement mismatch
 
@@ -159,6 +161,41 @@ told the truth eventually; but between the failure and the truth the driver
 drains the entire remaining export from the server and keeps trying to write
 every part of it. On the graph this feature exists for, that is minutes of
 network and CPU spent on an outcome already decided.
+
+#### VI-10 — a test database's name is not unique across runs (major)
+
+`typedb_grpc/test/support/grpc_case.ex:70`, and the same pattern in nineteen
+places across both suites
+
+```elixir
+name = "#{prefix}_#{System.unique_integer([:positive])}"
+```
+
+`System.unique_integer/1` is unique within a VM and counts from zero in the next
+one, so two runs produce `grpc_195` twice. Creating a database that already
+exists is a **no-op on both transports** — the shared suite asserts it — so a
+leftover from a killed run is adopted silently, schema and data included.
+
+Found by chasing an intermittent failure that looked far worse than it was: the
+gRPC stream suite failed roughly two runs in five with counts *exactly doubled*
+— 50 000 rows where 25 000 were inserted, and two rows where a unique name
+should give one. Doubled writes under load is a driver defect of the worst kind,
+so it was measured before it was believed:
+
+| what was measured | result |
+| --- | --- |
+| `query_req` messages the driver sent for the insert | **1** |
+| `given` rows in that message | **25 000** |
+| rows in the database *before* the insert ran | **25 000** |
+
+The database was not new. Fifty leftover databases were sitting on the test
+server, left by runs this session's TypeDB restarts had killed mid-suite, and
+`grpc_195` was one of them.
+
+Two things make this worth a major: it produced a false *failure* that cost
+hours and pointed at innocent code, and the same mechanism can produce a false
+*pass* — a test asserting an absent database is absent will pass against a
+leftover of that name only until the day it does not.
 
 ### 3. Gaps
 

@@ -47,7 +47,7 @@ defmodule TypeDB.RecipesIntegrationTest do
 
     Process.unlink(pid)
 
-    database = "recipes_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("recipes")
 
     on_exit(fn ->
       _ = Database.delete(name, database)
@@ -236,7 +236,7 @@ defmodule TypeDB.RecipesIntegrationTest do
   test "a request body over 2 MiB is refused", %{conn: conn} do
     # Its own database: ExUnit orders tests within a module by seed, and the
     # recipes test counts every person and then deletes them all.
-    database = "recipes_size_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("recipes_size")
     on_exit(fn -> Database.delete(conn, database) end)
 
     # The bulk-load recipe batches by payload size rather than row count,

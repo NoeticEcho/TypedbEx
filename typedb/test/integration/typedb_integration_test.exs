@@ -56,7 +56,7 @@ defmodule TypeDB.IntegrationTest do
   end
 
   setup %{conn: conn} do
-    database = "driver_test_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("driver_test")
     :ok = Database.create(conn, database)
     on_exit(fn -> Database.delete(conn, database) end)
 
@@ -777,7 +777,7 @@ defmodule TypeDB.IntegrationTest do
 
   describe "users" do
     test "create, update and delete a user", %{conn: conn} do
-      username = "driver_test_user_#{System.unique_integer([:positive])}"
+      username = TypeDB.Case.unique_name("driver_test_user")
 
       assert {:ok, users} = TypeDB.User.list(conn)
       assert is_list(users)
@@ -792,7 +792,7 @@ defmodule TypeDB.IntegrationTest do
     # The stub asserts exactly these codes in test/typedb/admin_test.exs. This is
     # what stops the two from drifting apart.
     test "the error codes the stub emulates are the ones the server sends", %{conn: conn} do
-      username = "driver_dupe_user_#{System.unique_integer([:positive])}"
+      username = TypeDB.Case.unique_name("driver_dupe_user")
 
       assert {:error, %Error{status: 404, code: "SRV4"}} = TypeDB.User.get(conn, username)
       assert {:error, %Error{status: 404, code: "USU4"}} = TypeDB.User.set_password(conn, username, "x")

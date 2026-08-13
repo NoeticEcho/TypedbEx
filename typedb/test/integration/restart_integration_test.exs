@@ -72,7 +72,7 @@ defmodule TypeDB.RestartIntegrationTest do
 
     Process.unlink(pid)
 
-    database = "restart_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("restart")
     :ok = TypeDB.Database.create(name, database)
     {:ok, _} = TypeDB.query(name, database, @schema)
 

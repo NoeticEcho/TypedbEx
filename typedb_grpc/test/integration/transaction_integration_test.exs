@@ -62,7 +62,7 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
 
     test "a database that does not exist fails at open", %{conn: conn} do
       assert {:error, %TypeDB.Error{}} =
-               Transaction.open(conn, "absent_#{System.unique_integer([:positive])}", :read)
+               Transaction.open(conn, unique_name("absent"), :read)
     end
 
     test "the handle is a plain struct and works from another process", %{conn: conn, database: database} do

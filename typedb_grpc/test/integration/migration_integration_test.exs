@@ -31,7 +31,7 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
       :ok
     else
       conn = start_connection()
-      dir = Path.join(System.tmp_dir!(), "typedb_grpc_migration_#{System.unique_integer([:positive])}")
+      dir = Path.join(System.tmp_dir!(), unique_name("typedb_grpc_migration"))
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf(dir) end)
 
@@ -156,7 +156,7 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
   end
 
   defp restored_name(conn) do
-    name = "mig_restored_#{System.unique_integer([:positive])}"
+    name = unique_name("mig_restored")
     on_exit(fn -> Database.delete(conn, name) end)
     name
   end
@@ -365,7 +365,7 @@ defmodule TypeDB.GRPC.MigrationIntegrationTest do
       assert {:error, %TypeDB.Error{kind: :server}} =
                Database.export_to_files(
                  conn,
-                 "absent_#{System.unique_integer([:positive])}",
+                 unique_name("absent"),
                  schema_path,
                  data_path
                )

@@ -40,7 +40,7 @@ defmodule TypeDB.SoakIntegrationTest do
 
     Process.unlink(pid)
 
-    database = "soak_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("soak")
     :ok = Database.create(name, database)
 
     {:ok, _} =

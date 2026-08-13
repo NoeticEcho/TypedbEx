@@ -61,7 +61,7 @@ defmodule TypeDB.GRPC.StreamIntegrationTest do
     end
 
     test "the administrative delegates reach the same functions", %{conn: conn} do
-      name = "facade_#{System.unique_integer([:positive])}"
+      name = unique_name("facade")
       on_exit(fn -> TypeDB.GRPC.delete_database(conn, name) end)
 
       assert {:ok, names} = TypeDB.GRPC.databases(conn)

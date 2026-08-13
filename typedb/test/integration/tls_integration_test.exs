@@ -82,7 +82,7 @@ defmodule TypeDB.TLSIntegrationTest do
     assert {:ok, databases} = TypeDB.databases(conn)
     assert is_list(databases)
 
-    database = "tls_test_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("tls_test")
     assert :ok = TypeDB.create_database(conn, database)
 
     try do

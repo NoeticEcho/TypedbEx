@@ -48,7 +48,7 @@ defmodule TypeDB.TransactionProcessIntegrationTest do
 
     Process.unlink(pid)
 
-    database = "tx_processes_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("tx_processes")
     :ok = Database.create(name, database)
 
     {:ok, _} =

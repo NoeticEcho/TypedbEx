@@ -42,7 +42,7 @@ defmodule TypeDB.ErrorCodeIntegrationTest do
     # on_exit to drop the database through it.
     Process.unlink(pid)
 
-    database = "error_codes_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("error_codes")
     :ok = Database.create(name, database)
 
     {:ok, _} =
@@ -79,7 +79,7 @@ defmodule TypeDB.ErrorCodeIntegrationTest do
 
   describe "users" do
     setup %{conn: conn} do
-      username = "ec_user_#{System.unique_integer([:positive])}"
+      username = TypeDB.Case.unique_name("ec_user")
       :ok = User.create(conn, username, "s3cret")
       on_exit(fn -> User.delete(conn, username) end)
       {:ok, username: username}
@@ -107,7 +107,7 @@ defmodule TypeDB.ErrorCodeIntegrationTest do
       # them told to try again. Provoked here rather than asserted from the
       # stub, because a retry policy built on a code nobody checked is a retry
       # policy that silently stops working.
-      name = "conflict_#{System.unique_integer([:positive])}"
+      name = TypeDB.Case.unique_name("conflict")
       {:ok, _} = TypeDB.query(conn, database, ~s|insert $p isa person, has name "#{name}";|)
 
       {:ok, first} = Transaction.open(conn, database, :write)

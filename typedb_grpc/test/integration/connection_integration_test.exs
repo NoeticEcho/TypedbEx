@@ -197,7 +197,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
 
   describe "databases" do
     test "create, list, exists?, delete", %{conn: conn} do
-      name = "grpc_db_#{System.unique_integer([:positive])}"
+      name = unique_name("grpc_db")
 
       refute Database.exists?(conn, name)
       assert :ok = Database.create(conn, name)
@@ -217,12 +217,12 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
 
       # The difference from `exists?/3`, which cannot say "I could not ask".
       assert {:error, %TypeDB.Error{kind: :server}} =
-               Database.get(conn, "absent_#{System.unique_integer([:positive])}")
+               Database.get(conn, unique_name("absent"))
     end
 
     test "deleting one that is not there carries TypeDB's own code", %{conn: conn} do
       assert {:error, error} =
-               Database.delete(conn, "definitely_absent_#{System.unique_integer([:positive])}")
+               Database.delete(conn, unique_name("definitely_absent"))
 
       assert error.kind == :server
       assert error.code == "DBD1", "the same code the HTTP API reports for this"
@@ -244,7 +244,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     end
 
     test "create_if_not_exists is idempotent either way", %{conn: conn} do
-      name = "grpc_ine_#{System.unique_integer([:positive])}"
+      name = unique_name("grpc_ine")
       on_exit(fn -> Database.delete(conn, name) end)
 
       assert :ok = Database.create_if_not_exists(conn, name)
@@ -271,7 +271,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     end
 
     test "create, sign in as, and delete", %{conn: conn} do
-      username = "grpc_user_#{System.unique_integer([:positive])}"
+      username = unique_name("grpc_user")
       on_exit(fn -> User.delete(conn, username) end)
 
       assert :ok = User.create(conn, username, "password-one")
@@ -297,7 +297,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
       # The difference from `exists?/3`: this can be branched on rather than
       # raising, and it carries the server's own code.
       assert {:error, %TypeDB.Error{kind: :server}} =
-               User.get(conn, "ghost_#{System.unique_integer([:positive])}")
+               User.get(conn, unique_name("ghost"))
     end
 
     test "current/2 is the account this connection signed in as", %{conn: conn} do

@@ -70,10 +70,31 @@ defmodule TypeDB.GRPC.Case do
   end
 
   @doc """
+  A name no other run can produce.
+
+  See `start_database/2` for what a colliding one cost.
+  """
+  def unique_name(prefix) do
+    "#{prefix}_#{Base.encode16(:crypto.strong_rand_bytes(5), case: :lower)}_#{System.unique_integer([:positive])}"
+  end
+
+  @doc """
   Creates a database for the duration of the test.
+
+  The name has to be unique across *runs*, not only within one, and this is the
+  second attempt at that. `System.unique_integer/1` counts from zero in every
+  new VM, so two runs produce `grpc_195` twice — and `databases_create` is a
+  no-op for a database that already exists, so a leftover from a killed run was
+  adopted silently, schema and data included.
+
+  It cost half a day. The suite failed intermittently with counts exactly
+  doubled, which reads like a driver duplicating writes; the driver was sending
+  one request with 25 000 given rows and the database already held 25 000 before
+  the insert ran. Random bytes make the collision impossible instead of unlikely
+  — Audit VI, VI-10.
   """
   def start_database(conn, prefix \\ "grpc") do
-    name = "#{prefix}_#{System.unique_integer([:positive])}"
+    name = unique_name(prefix)
     :ok = TypeDB.GRPC.Database.create(conn, name)
 
     ExUnit.Callbacks.on_exit(fn ->

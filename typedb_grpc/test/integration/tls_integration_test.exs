@@ -112,7 +112,7 @@ defmodule TypeDB.GRPC.TLSIntegrationTest do
         assert {:ok, %{version: version}} = TypeDB.GRPC.version(conn)
         assert version =~ ~r/^\d+\.\d+\.\d+/
 
-        database = "tls_#{System.unique_integer([:positive])}"
+        database = TypeDB.GRPC.Case.unique_name("tls")
         on_exit(fn -> TypeDB.GRPC.delete_database(conn, database) end)
 
         assert :ok = TypeDB.GRPC.create_database(conn, database)
@@ -159,7 +159,7 @@ defmodule TypeDB.GRPC.TLSIntegrationTest do
       else
         {:ok, conn} = start(context, tls: true, tls_opts: [cacertfile: context.cacertfile])
 
-        database = "tlss_#{System.unique_integer([:positive])}"
+        database = TypeDB.GRPC.Case.unique_name("tlss")
         on_exit(fn -> TypeDB.GRPC.delete_database(conn, database) end)
         :ok = TypeDB.GRPC.create_database(conn, database)
 

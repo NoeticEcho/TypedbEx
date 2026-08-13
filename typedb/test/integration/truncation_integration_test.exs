@@ -46,7 +46,7 @@ defmodule TypeDB.TruncationIntegrationTest do
 
     Process.unlink(pid)
 
-    database = "truncation_#{System.unique_integer([:positive])}"
+    database = TypeDB.Case.unique_name("truncation")
     :ok = Database.create(name, database)
 
     {:ok, _} =

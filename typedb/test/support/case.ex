@@ -109,6 +109,19 @@ defmodule TypeDB.Case do
   def start_connection(opts), do: TypeDB.start_link(opts)
 
   @doc """
+  A name no other run can produce.
+
+  `System.unique_integer/1` counts from zero in every new VM, so two runs make
+  the same name — and creating a database that already exists is a no-op on both
+  transports, so a leftover from a killed run is adopted silently, data and all.
+  That produced intermittent failures with counts exactly doubled, which reads
+  like a driver duplicating writes and is not — Audit VI, VI-10.
+  """
+  def unique_name(prefix) do
+    "#{prefix}_#{Base.encode16(:crypto.strong_rand_bytes(5), case: :lower)}_#{System.unique_integer([:positive])}"
+  end
+
+  @doc """
   Returns the requests the stub received, filtered by path substring.
   """
   @spec requests(pid(), String.t() | nil) :: [TypeDB.Stub.request()]

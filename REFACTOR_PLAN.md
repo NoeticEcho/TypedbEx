@@ -127,6 +127,22 @@ see this.
 resolves. Nothing to test at runtime, which is why this step is last among the
 ones that are being done.
 
+## Step 7 — a test database's name becomes unique across runs (VI-10) — major
+
+**Found during the refactor, not by the audit.** Added to the plan when the
+measurements in VI-7's investigation turned up a database that already had
+25 000 rows in it before its test inserted any.
+
+**Changes.** `unique_name/1` in both packages' test support, built from random
+bytes rather than a per-VM counter, and every place a test builds a database or
+user name goes through it.
+
+**Files.** `typedb_grpc/test/support/grpc_case.ex`, `typedb/test/support/case.ex`,
+and nineteen call sites across both suites' integration and behaviour tests.
+
+**Verification.** The gRPC stream suite over ten seeds. Before: roughly two runs
+in five failed with counts exactly doubled. After: ten of ten clean.
+
 ## Not doing, and why
 
 **VI — the symlink case in `export_to_files/5`.** Comparing `Path.expand/1` does
