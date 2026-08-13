@@ -1,0 +1,151 @@
+name: Release typedb_grpc
+
+# Publishes `typedb_grpc` to hex.pm when a `typedb_grpc-vX.Y.Z` tag is pushed.
+#
+# A separate tag prefix rather than a shared one, because two packages in one
+# repository cannot both answer to `v*`: a `v0.9.0` tag would fire both
+# workflows and one of them would publish a version it does not have. The
+# sibling keeps the bare `v*` it has used since 0.1.0, so nothing about its
+# release changes.
+#
+# Requires the same `HEX_API_KEY` secret as the sibling. See CONTRIBUTING.md
+# for how the package was first created on hex.pm — the first publish is a
+# manual step, deliberately, because it claims a global name.
+on:
+  push:
+    tags: ["typedb_grpc-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+    environment: hex
+
+    env:
+      # Switches the dependency on `typedb` from a path to a version
+      # requirement — see `typedb_dependency/0` in mix.exs. Set for the whole
+      # job rather than for the publish step, so that everything gated here is
+      # gated against the package as it will be published: resolving the
+      # sibling from hex is itself something that can fail.
+      TYPEDB_GRPC_PUBLISH: "1"
+
+    permissions:
+      contents: write # to create the GitHub Release for the tag
+
+    services:
+      # Unlike the sibling's release job, this one needs a server: the package's
+      # tests are integration tests almost all the way down, because there is no
+      # stub for a bidirectional stream and writing one would test my model of
+      # TypeDB rather than TypeDB. Publishing on the unit tests alone would
+      # gate on about a fifth of the suite.
+      typedb:
+        image: typedb/typedb:3.12.1
+        ports:
+          - 8000:8000
+          - 1729:1729
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            typedb_grpc/deps
+            typedb_grpc/_build
+          key: ${{ runner.os }}-grpc-release-${{ hashFiles('**/mix.exs') }}
+          restore-keys: ${{ runner.os }}-grpc-release-
+
+      - run: mix deps.get
+
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
+
+      - name: Verify the tag matches the version in mix.exs
+        run: |
+          tag="${GITHUB_REF_NAME#typedb_grpc-v}"
+          # tail -n1: mix writes dependency and compilation progress to stdout,
+          # so anything but the last line is noise.
+          version="$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])' | tail -n1)"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $tag does not match mix.exs version $version" >&2
+            exit 1
+          fi
+
+      - name: Verify the CHANGELOG documents this version
+        run: |
+          tag="${GITHUB_REF_NAME#typedb_grpc-v}"
+          if ! grep -q "^## \[$tag\]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [$tag]' section" >&2
+            exit 1
+          fi
+
+      # Belt and braces around the switch above. `mix hex.build` refuses a path
+      # dependency outright, so a mistake here would fail the release at its
+      # last step — after the tag exists and after every check has passed,
+      # which is the most expensive moment to find out.
+      - name: Verify the dependency on typedb resolved to a version, not a path
+        run: |
+          requirement="$(mix run --no-start -e '
+            Mix.Project.config()[:deps]
+            |> Enum.find(&(elem(&1, 0) == :typedb))
+            |> inspect()
+            |> IO.puts()
+          ' | tail -n1)"
+
+          echo "typedb dependency: $requirement"
+
+          case "$requirement" in
+            *path:*)
+              echo "the dependency on :typedb is still a path; TYPEDB_GRPC_PUBLISH did not take" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Lint
+        run: mix credo --strict
+
+      - name: Typecheck
+        run: mix dialyzer
+
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "TypeDB did not become healthy in time" >&2
+          exit 1
+
+      - name: Test, including integration and the shared behaviour suite
+        env:
+          MIX_ENV: test
+          TYPEDB_GRPC_ADDRESS: localhost:1729
+          TYPEDB_GRPC_USERNAME: admin
+          TYPEDB_GRPC_PASSWORD: password
+          TYPEDB_INTEGRATION_URL: http://localhost:8000
+          TYPEDB_INTEGRATION_USERNAME: admin
+          TYPEDB_INTEGRATION_PASSWORD: password
+        run: mix test --include integration
+
+      - name: Publish to hex.pm
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: mix hex.publish --yes
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-from-tag --verify-tag

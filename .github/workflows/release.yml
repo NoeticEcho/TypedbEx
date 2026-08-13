@@ -1,8 +1,12 @@
 name: Release
 
 # Publishes to hex.pm when a version tag is pushed. Requires a HEX_API_KEY
-# secret: generate one with `mix hex.user key generate` on the maintainer
-# account and store it in the repository's Actions secrets.
+# secret with the `api:write` permission, generated in the hex.pm dashboard at
+# https://hex.pm/dashboard/keys and stored in the repository's Actions secrets.
+#
+# This used to say `mix hex.user key generate`. That command is gone in Hex 2.5
+# — `mix hex.user` now offers only whoami, auth and deauth — so following it
+# would have sent a maintainer looking for a task that does not exist.
 #
 # The gate below is deliberately the same set of checks CI runs on every push,
 # minus the integration and TypeQL jobs. Those need a TypeDB container and the

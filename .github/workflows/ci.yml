@@ -480,3 +480,217 @@ jobs:
       # schema, a filename full of shell metacharacters, and a missing shell.
       - name: Test the mix task itself
         run: mix test test/mix/typedb_check_test.exs
+
+  # ---------------------------------------------------------------------------
+  # typedb_grpc. Its own gate, mirroring the one above, plus the two things only
+  # this package can get wrong: the committed protocol modules going stale, and
+  # the two drivers drifting apart.
+  # ---------------------------------------------------------------------------
+
+  grpc_test:
+    name: gRPC unit (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # A narrower matrix than the sibling's on purpose: `:grpc` and
+        # `:protobuf` set the floor here, not this code, and widening it would
+        # be testing their support rather than ours.
+        include:
+          - elixir: "1.20"
+            otp: "29"
+          - elixir: "1.18"
+            otp: "27"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            typedb_grpc/deps
+            typedb_grpc/_build
+          key: ${{ runner.os }}-grpc-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.exs') }}
+          restore-keys: ${{ runner.os }}-grpc-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      # `typedb` is a path dependency here, so the sibling directory has to be
+      # there — it is, from the checkout above.
+      - run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile without warnings
+        run: mix compile --warnings-as-errors
+
+      # No server configured, so the integration tests skip. What runs is the
+      # error mapping and the protocol assertions, which need none.
+      - name: Run unit tests
+        run: mix test
+
+      - name: Credo
+        run: mix credo --strict
+
+      - uses: actions/cache@v4
+        if: matrix.elixir == '1.20'
+        with:
+          path: typedb_grpc/_build/dev/*.plt*
+          key: ${{ runner.os }}-grpc-plt-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-grpc-plt-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      - name: Dialyzer
+        if: matrix.elixir == '1.20'
+        env:
+          MIX_ENV: dev
+        run: mix dialyzer
+
+  grpc_generated:
+    name: Generated protocol is what the task produces
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - run: mix deps.get
+
+      - name: Install protoc-gen-elixir
+        run: |
+          mix escript.install hex protobuf --force
+          echo "$HOME/.mix/escripts" >> "$GITHUB_PATH"
+
+      # `lib/protocol` is committed so that installing this package needs no
+      # protoc. The cost of that is that it can be edited by hand, or fall
+      # behind the version it claims — both of which this catches, because the
+      # task is deterministic and the version comes from the code itself.
+      - name: Regenerate and diff
+        run: |
+          version="$(mix run --no-start -e 'IO.puts(TypeDB.GRPC.Protocol.version())' | tail -n1)"
+          echo "Regenerating from typedb-protocol $version"
+          mix typedb.grpc.gen "$version"
+          if ! git diff --exit-code -- lib/protocol; then
+            echo >&2
+            echo "lib/protocol differs from what 'mix typedb.grpc.gen $version' produces." >&2
+            echo "Either it was edited by hand, or it was generated from another version." >&2
+            echo "Run the task and commit the result." >&2
+            exit 1
+          fi
+
+  grpc_integration:
+    name: gRPC integration (TypeDB ${{ matrix.typedb }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    strategy:
+      fail-fast: false
+      matrix:
+        typedb: ["3.12.1", "latest"]
+
+    services:
+      typedb:
+        image: typedb/typedb:${{ matrix.typedb }}
+        ports:
+          - 8000:8000
+          - 1729:1729
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      # Probed over HTTP even though this package speaks gRPC: the HTTP port
+      # answers a plain GET, and a gRPC readiness probe from a shell would mean
+      # installing a gRPC client to find out whether the gRPC client works.
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "TypeDB did not become healthy in time" >&2
+          exit 1
+
+      - name: Run integration tests
+        env:
+          TYPEDB_GRPC_ADDRESS: localhost:1729
+          TYPEDB_GRPC_USERNAME: admin
+          TYPEDB_GRPC_PASSWORD: password
+        run: mix test --include integration
+
+  behaviour:
+    name: Both drivers agree (TypeDB ${{ matrix.typedb }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb_grpc
+
+    strategy:
+      fail-fast: false
+      matrix:
+        typedb: ["3.12.1", "latest"]
+
+    services:
+      typedb:
+        image: typedb/typedb:${{ matrix.typedb }}
+        ports:
+          - 8000:8000
+          - 1729:1729
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      - run: mix deps.get
+
+      - name: Wait for TypeDB
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health; then exit 0; fi
+            sleep 2
+          done
+          echo "TypeDB did not become healthy in time" >&2
+          exit 1
+
+      # The reason the two packages share a repository. Both endpoints are set
+      # deliberately: the suite warns when it runs against half the matrix, and
+      # a job that only ever exercised one transport would prove nothing about
+      # the two agreeing.
+      - name: Run the shared behaviour suite
+        env:
+          TYPEDB_INTEGRATION_URL: http://localhost:8000
+          TYPEDB_INTEGRATION_USERNAME: admin
+          TYPEDB_INTEGRATION_PASSWORD: password
+          TYPEDB_GRPC_ADDRESS: localhost:1729
+          TYPEDB_GRPC_USERNAME: admin
+          TYPEDB_GRPC_PASSWORD: password
+        run: mix test --include integration test/behaviour

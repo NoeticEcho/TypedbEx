@@ -50,10 +50,7 @@ defmodule TypeDB.GRPC.MixProject do
       # pattern match it wrote. `%TypeDB.Error{}`, `%TypeDB.Concept.Attribute{}`
       # and the rest are the same structs from the same module, so switching is
       # a line in a data-access module rather than a rewrite above it.
-      #
-      # In this repository it resolves as a path so a change to those structs is
-      # visible here without a release; `mix hex.build` uses the version.
-      {:typedb, path: "../typedb", override: true},
+      {:typedb, typedb_dependency()},
 
       # gRPC and protobuf are hard dependencies, unlike this driver's sibling
       # where every transport is optional. There is no second way to speak this
@@ -87,6 +84,26 @@ defmodule TypeDB.GRPC.MixProject do
     ]
   end
 
+  # A path in this repository, a version requirement when publishing.
+  #
+  # The path is what makes the monorepo worth having: a change to the shared
+  # structs is visible to both packages without a release. Hex refuses a path
+  # dependency outright, so the release workflow sets `TYPEDB_GRPC_PUBLISH=1`
+  # and gets the version instead.
+  #
+  # Keyed on an environment variable rather than on `Mix.env/0`, because
+  # `mix hex.build` runs in `:dev` like everything else and would otherwise
+  # build an unpublishable package that fails at the last step of a release.
+  @typedb_requirement "~> 0.8"
+
+  defp typedb_dependency do
+    if System.get_env("TYPEDB_GRPC_PUBLISH") in [nil, "", "0"] and File.exists?("../typedb/mix.exs") do
+      [path: "../typedb", override: true]
+    else
+      @typedb_requirement
+    end
+  end
+
   defp description do
     "A driver for TypeDB 3.12+ in Elixir, built on the TypeDB gRPC API. " <>
       "Streaming answers with no count limit, and transactions that pipeline."
@@ -96,7 +113,7 @@ defmodule TypeDB.GRPC.MixProject do
     [
       name: "typedb_grpc",
       licenses: ["Apache-2.0"],
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/typedb_grpc/CHANGELOG.md",
@@ -111,7 +128,7 @@ defmodule TypeDB.GRPC.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "LICENSE"],
+      extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
       # The generated protocol modules are an implementation detail with 3,000
       # lines of machine-written documentation-free structs. They are public
       # only because Elixir has no other visibility.

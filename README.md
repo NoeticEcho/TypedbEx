@@ -58,8 +58,24 @@ version requirement when published, so a change to the shared structs is visible
 to both without a release.
 
 See [`typedb/CONTRIBUTING.md`](typedb/CONTRIBUTING.md) for the gate that has to
-pass before a commit, and [`AUDIT.md`](AUDIT.md) for the state of the code and
+pass before a commit, [`typedb_grpc/CONTRIBUTING.md`](typedb_grpc/CONTRIBUTING.md)
+for what is different about the second package — including how it was first
+published to hex.pm — and [`AUDIT.md`](AUDIT.md) for the state of the code and
 why several things are the way they are.
+
+## Releasing
+
+Two packages in one repository cannot both answer to `v*`, so the tags are
+prefixed:
+
+| package | tag | workflow |
+| --- | --- | --- |
+| `typedb` | `v0.8.0` | `.github/workflows/release.yml` |
+| `typedb_grpc` | `typedb_grpc-v0.1.0` | `.github/workflows/release-grpc.yml` |
+
+CI runs each package's gate separately, and one job on top of both: the shared
+behaviour suite, against a server that speaks HTTP and gRPC at once. That job is
+the reason these two live together.
 
 ## License
 
