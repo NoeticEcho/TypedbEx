@@ -79,14 +79,14 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     test "create, list, exists?, delete", %{conn: conn} do
       name = "grpc_db_#{System.unique_integer([:positive])}"
 
-      assert {:ok, false} = Database.exists?(conn, name)
+      refute Database.exists?(conn, name)
       assert :ok = Database.create(conn, name)
-      assert {:ok, true} = Database.exists?(conn, name)
+      assert Database.exists?(conn, name)
       assert {:ok, names} = Database.list(conn)
       assert name in names
 
       assert :ok = Database.delete(conn, name)
-      assert {:ok, false} = Database.exists?(conn, name)
+      refute Database.exists?(conn, name)
     end
 
     test "deleting one that is not there carries TypeDB's own code", %{conn: conn} do
@@ -118,7 +118,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
 
       assert :ok = Database.create_if_not_exists(conn, name)
       assert :ok = Database.create_if_not_exists(conn, name)
-      assert {:ok, true} = Database.exists?(conn, name)
+      assert Database.exists?(conn, name)
     end
 
     test "the schema of a fresh database is readable and empty of types", %{conn: conn} do

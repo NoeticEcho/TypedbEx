@@ -67,6 +67,19 @@ defmodule TypeDB.GRPC.MixProject do
       {:googleapis, "~> 0.1"},
       {:protobuf, "~> 0.17"},
       {:gun, "~> 2.0"},
+
+      # Optional for the same reason and on the same terms as in the sibling
+      # package: TypeDB's `decimal` values decode to `Decimal.t()` when the host
+      # application already has the library and to a float otherwise. Declared
+      # so the version this driver is written against is visible and resolvable,
+      # never fetched on its own.
+      {:decimal, "~> 2.4 or ~> 3.0", optional: true},
+      # Test-only, and only for the shared behaviour suite: it drives `typedb`
+      # as well as this package, and `typedb`'s default transport is Finch —
+      # which is optional there, so nothing pulls it in here. Running the suite
+      # through the default adapter rather than through `:httpc` keeps it
+      # comparing what people actually use.
+      {:finch, "~> 0.23", only: [:dev, :test]},
       {:stream_data, "~> 1.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :docs, runtime: false},
       {:credo, "~> 1.7", only: [:dev], runtime: false},

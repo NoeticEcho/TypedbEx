@@ -135,6 +135,44 @@ defmodule TypeDB.GRPC.Transaction do
     call(pid, {:query_many, Enum.map(queries, &normalise/1)}, opts)
   end
 
+  @doc """
+  Sends every query pipelined and discards the answers.
+
+  This is how writes are sent fast on this transport, and it exists because of
+  a behaviour that took measuring to pin down. TypeDB aborts a write's answer
+  stream when the next write in the same transaction starts, reporting `TSV13`
+  — but the write itself runs, in order, and lands. So the answers are the only
+  thing lost, and a caller that does not want them can have the pipeline.
+
+  Measured against 3.12.1: a thousand inserts in one transaction take about
+  150 ms this way against 622 ms one at a time.
+
+  **What it does not discard is failure.** `TSV13` is ignored, because on this
+  path it means "the answer was dropped" rather than "the write failed". Every
+  other per-query error is returned — which matters most for a query that does
+  not parse, since TypeDB reports `TQL0`, *keeps the transaction usable*, and
+  simply does not run that one. A mode that swallowed every error would let a
+  malformed query vanish and commit the rest. Measured: 100 good inserts plus
+  one unparseable query commits the 100 and reports `TQL0`.
+
+  Errors that are about the data rather than the text — an unknown type, a
+  value of the wrong type, a `@key` violation — abort the stream, so the
+  transaction cannot be committed at all and nothing lands. Those cannot be
+  missed whatever this function does.
+
+      Transaction.transaction(conn, "social", :write, fn tx ->
+        Transaction.execute_many(tx, Enum.map(people, &insert_query/1))
+      end)
+  """
+  @spec execute_many(t(), [String.t() | {String.t(), keyword()}], keyword()) ::
+          :ok | {:error, Error.t()}
+  def execute_many(%__MODULE__{pid: pid}, queries, opts \\ []) when is_list(queries) do
+    case call(pid, {:execute_many, Enum.map(queries, &normalise/1)}, opts) do
+      {:ok, _} -> :ok
+      {:error, _} = error -> error
+    end
+  end
+
   @doc "Commits. The transaction is finished either way."
   @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
   def commit(%__MODULE__{pid: pid}, opts \\ []) do
@@ -364,6 +402,20 @@ defmodule TypeDB.GRPC.Transaction do
     {:noreply, %{state | pending: pending, awaiting: {from, ids, %{}}}}
   end
 
+  def handle_call({:execute_many, queries}, from, state) do
+    {reqs, pending} =
+      Enum.map_reduce(queries, state.pending, fn {query, opts}, acc ->
+        id = request_id()
+        req = %Proto.Transaction.Req{req_id: id, req: {:query_req, query_request(query, opts)}}
+        {req, Map.put(acc, id, %{new_accumulator() | discard: true})}
+      end)
+
+    ids = Enum.map(reqs, & &1.req_id)
+    send_reqs(state, reqs)
+
+    {:noreply, %{state | pending: pending, awaiting: {from, ids, %{}}}}
+  end
+
   def handle_call(:commit, from, state) do
     id = request_id()
 
@@ -433,7 +485,13 @@ defmodule TypeDB.GRPC.Transaction do
   end
 
   defp on_result(state, id, {:query_initial_res, %{res: {:error, error}}}) do
-    finish_one(state, id, {:error, query_error(error)})
+    # On a discarding call, TSV13 is not a failure: the write ran and only its
+    # answer was dropped. Every other code still is — see `execute_many/3`.
+    if discarding?(state, id) and error_code(error) == "TSV13" do
+      finish_one(state, id, {:ok, :discarded})
+    else
+      finish_one(state, id, {:error, query_error(error)})
+    end
   end
 
   defp on_result(state, id, {:query_initial_res, %{res: {:ok, ok}}}) do
@@ -462,12 +520,25 @@ defmodule TypeDB.GRPC.Transaction do
   defp on_result(state, id, {:rollback_res, _}), do: finish_one(state, id, {:ok, :ok})
   defp on_result(state, _id, _other), do: state
 
+  defp discarding?(state, id) do
+    match?(%{discard: true}, Map.get(state.pending, id))
+  end
+
+  defp error_code(%Proto.Error{error_code: code}), do: code
+  defp error_code(_), do: nil
+
   defp on_part(state, id, {:query_res, %{res: {:rows_res, %{rows: rows}}}}) do
-    update_accumulator(state, id, fn acc -> %{acc | parts: [rows | acc.parts]} end)
+    update_accumulator(state, id, fn
+      %{discard: true} = acc -> acc
+      acc -> %{acc | parts: [rows | acc.parts]}
+    end)
   end
 
   defp on_part(state, id, {:query_res, %{res: {:documents_res, %{documents: docs}}}}) do
-    update_accumulator(state, id, fn acc -> %{acc | parts: [docs | acc.parts]} end)
+    update_accumulator(state, id, fn
+      %{discard: true} = acc -> acc
+      acc -> %{acc | parts: [docs | acc.parts]}
+    end)
   end
 
   # Flow control. The signal must carry the *original* request's id — a fresh one
@@ -489,14 +560,18 @@ defmodule TypeDB.GRPC.Transaction do
   end
 
   defp on_part(state, id, {:stream_res, %{state: {:error, error}}}) do
-    finish_one(state, id, {:error, query_error(error)})
+    if discarding?(state, id) and error_code(error) == "TSV13" do
+      finish_one(state, id, {:ok, :discarded})
+    else
+      finish_one(state, id, {:error, query_error(error)})
+    end
   end
 
   defp on_part(state, _id, _other), do: state
 
   # -- accumulators ----------------------------------------------------------
 
-  defp new_accumulator, do: %{kind: :unknown, columns: [], query_type: nil, parts: []}
+  defp new_accumulator, do: %{kind: :unknown, columns: [], query_type: nil, parts: [], discard: false}
 
   defp update_accumulator(state, id, fun) do
     case Map.get(state.pending, id) do
@@ -505,6 +580,8 @@ defmodule TypeDB.GRPC.Transaction do
       acc -> %{state | pending: Map.put(state.pending, id, fun.(acc))}
     end
   end
+
+  defp build_answer(%{discard: true}), do: :discarded
 
   defp build_answer(%{kind: :rows} = acc) do
     rows =

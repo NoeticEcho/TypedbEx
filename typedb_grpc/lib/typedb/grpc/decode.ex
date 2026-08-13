@@ -144,11 +144,14 @@ defmodule TypeDB.GRPC.Decode do
     %Concept.Value{value: value(value), value_type: value_type(value)}
   end
 
-  # TypeDB sends an iid as raw bytes; the HTTP API renders it as lowercase hex,
-  # and that rendering is what applications have stored and compared against.
+  # TypeDB sends an iid as raw bytes; the HTTP API renders it as `0x` followed by
+  # lowercase hex, and that rendering is what applications have stored and
+  # compare against. The `0x` is not decoration — without it an iid read over one
+  # transport never matches the same iid read over the other, which the shared
+  # behaviour suite caught on its first run.
   defp iid(nil), do: nil
   defp iid(""), do: nil
-  defp iid(bytes) when is_binary(bytes), do: Base.encode16(bytes, case: :lower)
+  defp iid(bytes) when is_binary(bytes), do: "0x" <> Base.encode16(bytes, case: :lower)
 
   # -- values ----------------------------------------------------------------
 
@@ -214,22 +217,37 @@ defmodule TypeDB.GRPC.Decode do
 
   defp pad(n), do: String.pad_leading("#{n}", 2, "0")
 
-  # `Decimal` is optional in the sibling package, and naming it in a compile-time
-  # expansion is what breaks the build for anyone who left it out — so it is
-  # reached for at runtime and the fallback is a float, which is what the sibling
-  # does with the same value.
+  # `Decimal` is optional in the sibling package, so this driver must build
+  # against its absence. `@compile {:no_warn_undefined, ...}` is what makes
+  # naming it legal; a struct pattern or an alias would not be covered by it and
+  # the package would fail to compile for whoever left the dependency out.
+  @compile {:no_warn_undefined, Decimal}
+
   defp decimal(whole, fractional) do
-    if Code.ensure_loaded?(Decimal) do
+    if decimal_loaded?() do
       sign = if whole < 0, do: -1, else: 1
       unscaled = abs(whole) * pow10(@decimal_scale) + fractional
-
-      # Bound to a variable rather than written literally: `Decimal` is optional
-      # in the sibling package, and naming it in a compile-time expansion is
-      # what breaks the build for anyone who left it out.
-      decimal = Decimal
-      decimal.new(sign, unscaled, -@decimal_scale)
+      Decimal.new(sign, unscaled, -@decimal_scale)
     else
+      # The same fallback the sibling makes for the same value: a float, which
+      # loses precision the type exists to keep, but decodes.
       whole + fractional / pow10(@decimal_scale)
+    end
+  end
+
+  # Asked once per VM rather than once per value, for the reason the sibling
+  # records: `Code.ensure_loaded?/1` is a cached lookup for a module that is
+  # loaded and a code-server round trip for one that is not, so the cost lands
+  # on exactly the people the optional dependency exists for.
+  defp decimal_loaded? do
+    case :persistent_term.get({__MODULE__, :decimal?}, :unasked) do
+      :unasked ->
+        loaded? = Code.ensure_loaded?(Decimal)
+        :persistent_term.put({__MODULE__, :decimal?}, loaded?)
+        loaded?
+
+      loaded? ->
+        loaded?
     end
   end
 

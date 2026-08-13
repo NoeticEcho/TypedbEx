@@ -6,12 +6,11 @@ defmodule TypeDB.GRPC.Database do
   `%TypeDB.Error{}` — so that switching transports does not rewrite the code
   that manages databases either.
 
-  One behaviour differs from the HTTP API and is *not* smoothed over here:
-  creating a database that already exists succeeds over gRPC, where the HTTP
-  API rejects it. Measured against 3.12.1. `create/3` therefore reports what the
-  server did rather than inventing a rejection, and `create_if_not_exists/3`
-  exists on both so that callers who want the idempotent behaviour ask for it
-  by name.
+  Creating a database that already exists succeeds here, and — contrary to what
+  this module used to claim — it succeeds over the HTTP API too. TypeDB 3.x
+  treats it as a no-op on both. `create_if_not_exists/3` exists so that callers
+  who mean the idempotent thing say so, not because the two transports disagree;
+  the shared behaviour suite asserts that they do not.
   """
 
   alias TypeDB.Error
@@ -36,31 +35,38 @@ defmodule TypeDB.GRPC.Database do
     end
   end
 
-  @doc "Whether `name` exists."
-  @spec exists?(Connection.t(), String.t(), keyword()) :: {:ok, boolean()} | {:error, Error.t()}
+  @doc """
+  Whether `name` exists.
+
+  Raises `TypeDB.Error` for anything other than a clean answer — the same
+  contract as `TypeDB.Database.exists?/3`, and for the reason recorded there: a
+  boolean cannot express "I could not ask", and answering `false` to that is
+  what makes `unless exists?(conn, x), do: create(conn, x)` try to create while
+  the server is down.
+  """
+  @spec exists?(Connection.t(), String.t(), keyword()) :: boolean()
   def exists?(conn, name, opts \\ []) when is_binary(name) do
-    with {:ok, reply} <-
-           Connection.unary(
-             conn,
-             fn channel, md ->
-               Proto.TypeDB.Stub.databases_contains(
-                 channel,
-                 %Proto.DatabaseManager.Contains.Req{name: name},
-                 metadata: md,
-                 timeout: timeout(conn, opts)
-               )
-             end,
-             "checking whether database #{inspect(name)} exists"
-           ) do
-      {:ok, reply.contains}
+    case Connection.unary(
+           conn,
+           fn channel, md ->
+             Proto.TypeDB.Stub.databases_contains(
+               channel,
+               %Proto.DatabaseManager.Contains.Req{name: name},
+               metadata: md,
+               timeout: timeout(conn, opts)
+             )
+           end,
+           "checking whether database #{inspect(name)} exists"
+         ) do
+      {:ok, reply} -> reply.contains
+      {:error, error} -> raise error
     end
   end
 
   @doc """
   Creates a database.
 
-  Note that TypeDB accepts this for a database that already exists, unlike the
-  HTTP API — see the module doc.
+  A no-op for one that already exists, on this transport and over HTTP alike.
   """
   @spec create(Connection.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
   def create(conn, name, opts \\ []) when is_binary(name) do
@@ -84,11 +90,7 @@ defmodule TypeDB.GRPC.Database do
   @doc "Creates a database unless it is already there."
   @spec create_if_not_exists(Connection.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
   def create_if_not_exists(conn, name, opts \\ []) when is_binary(name) do
-    case exists?(conn, name, opts) do
-      {:ok, true} -> :ok
-      {:ok, false} -> create(conn, name, opts)
-      {:error, _} = error -> error
-    end
+    if exists?(conn, name, opts), do: :ok, else: create(conn, name, opts)
   end
 
   @doc "Deletes a database and everything in it."

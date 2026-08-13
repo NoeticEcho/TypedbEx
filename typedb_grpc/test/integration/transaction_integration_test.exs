@@ -194,6 +194,84 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
       assert count_like(conn, database, "^batch-") == 0, "the bracket must not commit after a failure"
     end
 
+    # Everything below is `execute_many/3`, which exists because TSV13 turned out
+    # to mean "the answer was dropped" rather than "the write failed" — measured
+    # across five shapes of batch before any of it was written. The tests are
+    # the measurements, kept.
+    test "execute_many pipelines writes and they all land", %{conn: conn, database: database} do
+      assert :ok =
+               Transaction.transaction(conn, database, :write, fn tx ->
+                 Transaction.execute_many(
+                   tx,
+                   for(i <- 1..500, do: ~s|insert $p isa person, has name "fast-#{i}";|),
+                   timeout: 120_000
+                 )
+               end)
+
+      assert count_like(conn, database, "^fast-") == 500
+    end
+
+    test "writes in a pipelined batch still see each other, in order", %{conn: conn, database: database} do
+      # The finding that makes the mode usable for anything but independent
+      # rows: the batch is pipelined but TypeDB still executes it in order, so a
+      # write that matches on an earlier one in the same batch finds it.
+      queries =
+        Enum.flat_map(1..50, fn i ->
+          [
+            ~s|insert $p isa person, has name "dep-#{i}";|,
+            ~s|match $p isa person, has name == "dep-#{i}"; insert $p has age #{i};|
+          ]
+        end)
+
+      assert :ok =
+               Transaction.transaction(conn, database, :write, fn tx ->
+                 Transaction.execute_many(tx, queries, timeout: 120_000)
+               end)
+
+      assert count_like(conn, database, "^dep-") == 50
+
+      {:ok, answer} =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          Transaction.query(
+            tx,
+            ~s|match $p isa person, has name $n, has age $a; $n like "^dep-"; reduce $c = count;|
+          )
+        end)
+
+      assert answer |> TypeDB.Answer.rows() |> hd() |> TypeDB.ConceptRow.typed_value("c") == 50,
+             "every dependent write found the row the previous one had just inserted"
+    end
+
+    test "a query that does not parse is reported, not swallowed", %{conn: conn, database: database} do
+      # The one failure that does NOT abort the stream: TypeDB reports TQL0,
+      # keeps the transaction usable, and simply does not run that query. A mode
+      # that ignored every error would commit the rest and lose this one
+      # silently, which is why only TSV13 is ignored.
+      queries =
+        for(i <- 1..50, do: ~s|insert $p isa person, has name "tql-#{i}";|) ++
+          ["this is not typeql at all"]
+
+      assert {:error, %TypeDB.Error{code: "TQL0"}} =
+               Transaction.transaction(conn, database, :write, fn tx ->
+                 Transaction.execute_many(tx, queries, timeout: 120_000)
+               end)
+
+      assert count_like(conn, database, "^tql-") == 0, "the bracket must not commit past a reported failure"
+    end
+
+    test "a failure about the data aborts the whole transaction", %{conn: conn, database: database} do
+      queries =
+        for(i <- 1..50, do: ~s|insert $p isa person, has name "typed-#{i}";|) ++
+          ["insert $x isa unicorn;"]
+
+      assert {:error, %TypeDB.Error{}} =
+               Transaction.transaction(conn, database, :write, fn tx ->
+                 Transaction.execute_many(tx, queries, timeout: 120_000)
+               end)
+
+      assert count_like(conn, database, "^typed-") == 0
+    end
+
     test "the same writes, sent one at a time, all land", %{conn: conn, database: database} do
       assert :ok =
                Transaction.transaction(conn, database, :write, fn tx ->
