@@ -61,6 +61,7 @@ defmodule TypeDB.GRPC.Transaction do
 
   use GenServer
 
+  use TypeDB.GRPC.Bang
   alias TypeDB.{Answer, Error}
   alias TypeDB.GRPC.{Connection, Decode, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
@@ -1086,4 +1087,35 @@ defmodule TypeDB.GRPC.Transaction do
 
   defp message_from([_ | _] = trace, _code), do: Enum.join(trace, "\n")
   defp message_from(_, code), do: "TypeDB rejected the query with #{code}"
+
+  # -- `!` twins ---------------------------------------------------------------
+  #
+  # The convention `CLAUDE.md` states and the sibling enforces mechanically:
+  # every failing operation has a twin that raises. Generated through macros
+  # rather than a shared function so each keeps its own success typing — see
+  # `TypeDB.GRPC.Bang`.
+
+  @doc "Opens a transaction, raising on failure."
+  @spec open!(term(), term(), term(), term()) :: t()
+  def open!(conn, database, type, opts \\ []), do: unwrap!(open(conn, database, type, opts))
+
+  @doc "Runs a query, raising on failure."
+  @spec query!(term(), term(), term()) :: Answer.t()
+  def query!(tx, query, opts \\ []), do: unwrap!(query(tx, query, opts))
+
+  @doc "Runs several queries, raising on failure."
+  @spec query_many!(term(), term(), term()) :: [Answer.t()]
+  def query_many!(tx, queries, opts \\ []), do: unwrap!(query_many(tx, queries, opts))
+
+  @doc "Sends queries discarding answers, raising on failure."
+  @spec execute_many!(term(), term(), term()) :: :ok
+  def execute_many!(tx, queries, opts \\ []), do: ok!(execute_many(tx, queries, opts))
+
+  @doc "Commits, raising on failure."
+  @spec commit!(term(), term()) :: :ok
+  def commit!(tx, opts \\ []), do: ok!(commit(tx, opts))
+
+  @doc "Discards writes, raising on failure."
+  @spec rollback!(term(), term()) :: :ok
+  def rollback!(tx, opts \\ []), do: ok!(rollback(tx, opts))
 end

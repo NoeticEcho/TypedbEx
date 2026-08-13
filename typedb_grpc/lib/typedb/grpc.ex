@@ -38,6 +38,7 @@ defmodule TypeDB.GRPC do
       wanted. See that function for why.
   """
 
+  use TypeDB.GRPC.Bang
   alias TypeDB.{Answer, Error}
   alias TypeDB.GRPC.{Connection, Database, Server, Transaction}
 
@@ -178,4 +179,36 @@ defmodule TypeDB.GRPC do
   @doc "Deletes a database and everything in it."
   @spec delete_database(conn(), String.t(), keyword()) :: :ok | {:error, Error.t()}
   defdelegate delete_database(conn, name, opts \\ []), to: Database, as: :delete
+
+  # -- `!` twins ---------------------------------------------------------------
+  #
+  # The convention `CLAUDE.md` states and the sibling enforces mechanically:
+  # every failing operation has a twin that raises. Generated through macros
+  # rather than a shared function so each keeps its own success typing — see
+  # `TypeDB.GRPC.Bang`.
+
+  @doc "Server reachability, raising on failure."
+  @spec health!(term(), term()) :: :ok
+  def health!(conn, opts \\ []), do: ok!(health(conn, opts))
+
+  @doc "The server's version, raising on failure."
+  @spec version!(term(), term()) :: map()
+  def version!(conn, opts \\ []), do: unwrap!(version(conn, opts))
+
+  @doc "Every database, raising on failure."
+  @spec databases!(term(), term()) :: [String.t()]
+  def databases!(conn, opts \\ []), do: unwrap!(databases(conn, opts))
+
+  @doc "Creates a database, raising on failure."
+  @spec create_database!(term(), term(), term()) :: :ok
+  def create_database!(conn, name, opts \\ []), do: ok!(create_database(conn, name, opts))
+
+  @doc "Creates a database unless it is there, raising on failure."
+  @spec create_database_if_not_exists!(term(), term(), term()) :: :ok
+  def create_database_if_not_exists!(conn, name, opts \\ []),
+    do: ok!(create_database_if_not_exists(conn, name, opts))
+
+  @doc "Deletes a database, raising on failure."
+  @spec delete_database!(term(), term(), term()) :: :ok
+  def delete_database!(conn, name, opts \\ []), do: ok!(delete_database(conn, name, opts))
 end

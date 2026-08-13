@@ -136,7 +136,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     test "the bootstrap admin is there", %{conn: conn} do
       assert {:ok, users} = User.list(conn)
       assert "admin" in users
-      assert {:ok, true} = User.exists?(conn, "admin")
+      assert User.exists?(conn, "admin")
     end
 
     test "create, sign in as, and delete", %{conn: conn} do
@@ -144,7 +144,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
       on_exit(fn -> User.delete(conn, username) end)
 
       assert :ok = User.create(conn, username, "password-one")
-      assert {:ok, true} = User.exists?(conn, username)
+      assert User.exists?(conn, username)
 
       # The credentials have to actually work, which listing does not prove.
       as_them = start_connection(username: username, password: "password-one")
@@ -156,7 +156,7 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
       assert {:error, %TypeDB.Error{kind: :unauthenticated}} = Connection.token(stale)
 
       assert :ok = User.delete(conn, username)
-      assert {:ok, false} = User.exists?(conn, username)
+      refute User.exists?(conn, username)
     end
   end
 

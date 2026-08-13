@@ -3,6 +3,7 @@ defmodule TypeDB.GRPC.Server do
   What the server is, and whether this driver was built for it.
   """
 
+  use TypeDB.GRPC.Bang
   alias TypeDB.Error
   alias TypeDB.GRPC.{Connection, Protocol}
   alias Typedb.Protocol, as: Proto
@@ -69,4 +70,23 @@ defmodule TypeDB.GRPC.Server do
       end
     end
   end
+
+  # -- `!` twins ---------------------------------------------------------------
+  #
+  # The convention `CLAUDE.md` states and the sibling enforces mechanically:
+  # every failing operation has a twin that raises. Generated through macros
+  # rather than a shared function so each keeps its own success typing — see
+  # `TypeDB.GRPC.Bang`.
+
+  @doc "The server's version, raising on failure."
+  @spec version!(term(), term()) :: %{distribution: String.t(), version: String.t()}
+  def version!(conn, opts \\ []), do: unwrap!(version(conn, opts))
+
+  @doc "Server reachability, raising on failure."
+  @spec health!(term(), term()) :: :ok
+  def health!(conn, opts \\ []), do: ok!(health(conn, opts))
+
+  @doc "Checks the protocol version, raising on a mismatch."
+  @spec check_protocol!(term(), term()) :: :ok
+  def check_protocol!(conn, opts \\ []), do: ok!(check_protocol(conn, opts))
 end

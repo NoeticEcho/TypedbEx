@@ -13,6 +13,7 @@ defmodule TypeDB.GRPC.Database do
   the shared behaviour suite asserts that they do not.
   """
 
+  use TypeDB.GRPC.Bang
   alias TypeDB.Error
   alias TypeDB.GRPC.Connection
   alias Typedb.Protocol, as: Proto
@@ -161,4 +162,35 @@ defmodule TypeDB.GRPC.Database do
   end
 
   defp timeout(conn, opts), do: Keyword.get(opts, :timeout, Connection.config(conn).timeout)
+
+  # -- `!` twins ---------------------------------------------------------------
+  #
+  # The convention `CLAUDE.md` states and the sibling enforces mechanically:
+  # every failing operation has a twin that raises. Generated through macros
+  # rather than a shared function so each keeps its own success typing — see
+  # `TypeDB.GRPC.Bang`.
+
+  @doc "Every database on the server, raising on failure."
+  @spec list!(term(), term()) :: [String.t()]
+  def list!(conn, opts \\ []), do: unwrap!(list(conn, opts))
+
+  @doc "Creates a database, raising on failure."
+  @spec create!(term(), term(), term()) :: :ok
+  def create!(conn, name, opts \\ []), do: ok!(create(conn, name, opts))
+
+  @doc "Creates a database unless it is there, raising on failure."
+  @spec create_if_not_exists!(term(), term(), term()) :: :ok
+  def create_if_not_exists!(conn, name, opts \\ []), do: ok!(create_if_not_exists(conn, name, opts))
+
+  @doc "Deletes a database, raising on failure."
+  @spec delete!(term(), term(), term()) :: :ok
+  def delete!(conn, name, opts \\ []), do: ok!(delete(conn, name, opts))
+
+  @doc "The database's schema, raising on failure."
+  @spec schema!(term(), term(), term()) :: String.t()
+  def schema!(conn, name, opts \\ []), do: unwrap!(schema(conn, name, opts))
+
+  @doc "The type schema, raising on failure."
+  @spec type_schema!(term(), term(), term()) :: String.t()
+  def type_schema!(conn, name, opts \\ []), do: unwrap!(type_schema(conn, name, opts))
 end
