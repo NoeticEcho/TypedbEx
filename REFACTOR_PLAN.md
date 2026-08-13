@@ -1,4 +1,8 @@
-# Refactor plan IV — Audit VI, both packages
+# Refactor plan IV — Audit VI, both packages (executed at `fc5c3a6`)
+
+Executed. Step 3 was withdrawn — the finding behind it was wrong — and step 7
+was added during execution, when the investigation that withdrew step 3 turned
+up a real defect the audit had missed. The outcome table is in `AUDIT.md`.
 
 Nine findings: four major, five minor, no critical. Ordered by severity, then by
 how much of the codebase a step touches. Each step leaves both packages working

@@ -8,7 +8,7 @@ efficiency, stability and security as categories of their own.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
-| [Audit VI](#audit-vi--both-packages-at-a4a2e23) | `a4a2e23`, both packages | 8: 0 critical, 4 major, 4 minor | planned, see `REFACTOR_PLAN.md` |
+| [Audit VI](#audit-vi--both-packages-at-a4a2e23) | `a4a2e23`, both packages | 10: 0 critical, 4 major, 5 minor, 1 withdrawn | 8 fixed, 1 documented, 1 withdrawn — `fc5c3a6` |
 | [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | all fixed, `bb08ff1` |
 | [Audit IV](#audit-iv--080-through-a-callers-post-mortems) | `447ff97` (0.8.0), through `newgen-elixir`'s own post-mortems | 4 claims tested: 2 held, 2 did not | shipped in 0.8.0 |
 | [Audit III](#audit-iii--060-through-a-real-caller) | `41a526b` (0.6.0), through `newgen-elixir` | 2: 1 major, 1 minor | both fixed |
@@ -69,6 +69,63 @@ every finding below is measured against:
    never hidden.
 10. **Ship nothing unmeasured.** Every performance claim in a README or a
     moduledoc is a number somebody produced against a live server.
+
+
+## Outcome
+
+Executed at `fc5c3a6`, six steps, each committed on its own and each gated with
+`mix format --check-formatted`, `credo --strict`, `dialyzer`, the unit suites
+(the sibling's once per HTTP adapter) and the integration suites against a live
+3.12.1 — plus the console interop and the TLS suite where the step touched them.
+
+| | What | Outcome |
+| --- | --- | --- |
+| VI-2 | A failed export leaves a file it opened | **Fixed**, step 1. Test written first, failed on the old code |
+| VI-3 | A write failure does not stop the export | **Fixed**, step 1 |
+| VI-4 | A corrupt data file is read into memory before it is rejected | **Fixed**, step 2. A 190 MiB corrupt file is now refused in 5 ms, after one 64 KiB chunk |
+| VI-7 | The streamed-read buffer is quadratic | **Withdrawn**, step 3. The finding was wrong; see above |
+| VI-8 | Plaintext to a remote server, silently | **Fixed**, step 4. The default is unchanged and now says so once, for a non-loopback address |
+| VI-5 | An abandoned streamed read is never collected | **Fixed**, step 5 |
+| VI-10 | A test database's name is not unique across runs | **Fixed**, step 7. Ten seeds clean where two in five failed |
+| VI-1 | The moduledoc denies a feature the module has | **Fixed**, step 6 |
+| VI-6 | "Pipelining" sends one message per request | **Documented**, step 6. Batching is `tdb-2v6`, deliberately not a tidy-up |
+| VI-9 | The index links to an audit this file does not contain | **Fixed**, step 6. Audit IV is now above |
+
+Final state: `typedb` 517 unit × 3 adapters and 597 integration; `typedb_grpc`
+225 including the console interop and 7 TLS; the shared behaviour suite 36
+through both drivers. Both gates clean.
+
+### What remains, and why
+
+* **Batching `Transaction.Client.reqs`** (`tdb-2v6`). Real, and a behaviour
+  change: it alters how requests reach the server and could interact with the
+  TSV13 write behaviour the transaction moduledoc documents at length. It needs
+  its own before-and-after measurement, not a line in a documentation step.
+* **The symlink case in `export_to_files/5`.** Two paths that are the same file
+  through a link are not caught. Rust compares paths too, the failure is loud
+  and immediate, and catching it properly costs a `File.stat` on every export to
+  prevent a mistake nobody has made. Decided against rather than overlooked.
+* **`typedb_grpc`'s `gun` and `googleapis`.** A release behind, both pinned
+  there by `grpc` and `grpc_core`, not by us. Moves when `grpc` moves.
+
+### Risks that want a decision
+
+1. **The plaintext default.** Step 4 warns; it does not refuse. `tls: false`
+   still means a password crosses the network in clear text if somebody ignores
+   the warning. The alternative — requiring an explicit TLS choice, as Rust does
+   — is a breaking change to every existing configuration. Worth doing at 1.0,
+   where breaking changes belong; not worth doing quietly before it.
+2. **The 64 MiB item ceiling** is a number chosen from what TypeDB's items are,
+   not from a limit the protocol states. If a future TypeDB grows an item kind
+   that can legitimately exceed it, imports of those dumps fail with a clear
+   error and the constant moves. That is the trade: a bounded, loud failure
+   instead of an unbounded, quiet one.
+3. **Audit VI found one of its own findings wrong** (VI-7) and one real finding
+   that the audit had missed entirely (VI-10), both during execution. Neither is
+   an argument against auditing; both are an argument for the rule that a
+   finding is a hypothesis until it has been run. It is worth deciding whether
+   future audits should measure *every* finding before writing it down, at the
+   cost of a slower audit — this one measured four of nine.
 
 ## Findings
 
