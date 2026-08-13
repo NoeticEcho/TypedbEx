@@ -44,6 +44,94 @@ defmodule TypeDB.GRPC.Server do
     with {:ok, _} <- version(conn, opts), do: :ok
   end
 
+  @typedoc """
+  One server in the cluster, in the shape `TypeDB.Server.servers/2` returns.
+
+  String keys rather than atoms, and `"address"` rather than `:address`,
+  because the sibling hands back TypeDB's JSON decoded as-is and a caller that
+  switches transports should not have to rewrite its pattern matches. A stock
+  single-server CE deployment reports `%{"address" => nil}` on both.
+
+  `"replication_status"` is present only when the server sends one — the HTTP
+  API has no such field at all, so inventing a `nil` for it would be a
+  difference between the transports rather than a fact about the server.
+  """
+  @type server :: %{optional(String.t()) => term()}
+
+  @doc """
+  Lists the servers in the cluster.
+
+  A single-server deployment reports one entry. The same caveat as the
+  sibling's `TypeDB.Server.servers/2`: fields vary by distribution, so what the
+  server said is what you get.
+  """
+  @spec servers(Connection.t(), keyword()) :: {:ok, [server()]} | {:error, Error.t()}
+  def servers(conn, opts \\ []) do
+    with {:ok, reply} <-
+           Connection.unary(
+             conn,
+             fn channel, md ->
+               Proto.TypeDB.Stub.servers_all(channel, %Proto.ServerManager.All.Req{},
+                 metadata: md,
+                 timeout: timeout(conn, opts)
+               )
+             end,
+             "listing the servers in the cluster",
+             operation: :servers_all
+           ) do
+      {:ok, Enum.map(reply.servers, &decode_server/1)}
+    end
+  end
+
+  @doc """
+  The one server this connection is talking to.
+
+  `servers/2` asks about the cluster; this asks about the node on the other end
+  of this channel, which is the one whose replication role decides whether a
+  write here is a write at all. The sibling has no counterpart — the HTTP API
+  exposes only the list.
+  """
+  @spec server(Connection.t(), keyword()) :: {:ok, server()} | {:error, Error.t()}
+  def server(conn, opts \\ []) do
+    with {:ok, reply} <-
+           Connection.unary(
+             conn,
+             fn channel, md ->
+               Proto.TypeDB.Stub.servers_get(channel, %Proto.ServerManager.Get.Req{},
+                 metadata: md,
+                 timeout: timeout(conn, opts)
+               )
+             end,
+             "reading this server",
+             operation: :servers_get
+           ) do
+      {:ok, decode_server(reply.server)}
+    end
+  end
+
+  defp decode_server(nil), do: %{}
+
+  defp decode_server(%Proto.Server{} = server) do
+    case server.replication_status do
+      nil -> %{"address" => server.address}
+      status -> %{"address" => server.address, "replication_status" => replication_status(status)}
+    end
+  end
+
+  defp replication_status(%Proto.Server.ReplicationStatus{} = status) do
+    %{"id" => status.id, "role" => role(status.role), "term" => status.term}
+  end
+
+  # The enum arrives as an atom named exactly as the protocol spells it, and the
+  # protocol spells it `Primary`. Passing the atom through would make callers
+  # write `:Primary`, which nobody expects in Elixir; a string keeps it in the
+  # same register as every other value in this map.
+  defp role(nil), do: nil
+  defp role(role) when is_atom(role), do: Atom.to_string(role)
+  defp role(role), do: role
+
+  defp timeout(conn, opts), do: Keyword.get(opts, :timeout, Connection.config(conn).timeout)
+
   @doc """
   Checks the server against the protocol version this driver was generated from.
 
@@ -89,4 +177,12 @@ defmodule TypeDB.GRPC.Server do
   @doc "Checks the protocol version, raising on a mismatch."
   @spec check_protocol!(term(), term()) :: :ok
   def check_protocol!(conn, opts \\ []), do: ok!(check_protocol(conn, opts))
+
+  @doc "The servers in the cluster, raising on failure."
+  @spec servers!(term(), term()) :: [server()]
+  def servers!(conn, opts \\ []), do: unwrap!(servers(conn, opts))
+
+  @doc "This server, raising on failure."
+  @spec server!(term(), term()) :: server()
+  def server!(conn, opts \\ []), do: unwrap!(server(conn, opts))
 end

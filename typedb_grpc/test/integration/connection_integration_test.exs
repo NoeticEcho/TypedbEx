@@ -45,6 +45,37 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
     end
   end
 
+  describe "the cluster" do
+    test "servers/2 answers in the shape the sibling answers in", %{conn: conn} do
+      assert {:ok, [_ | _] = servers} = Server.servers(conn)
+
+      # String keys, and `"address"` spelled as the HTTP API spells it — the
+      # point of the shape is that a caller switching transports keeps its
+      # pattern matches. A stock single-server CE reports a nil address on both.
+      assert Enum.all?(servers, &is_map_key(&1, "address"))
+
+      # Present only when the server sends one. Inventing a nil here would be a
+      # difference between the transports rather than a fact about the server.
+      for server <- servers, status = server["replication_status"] do
+        assert is_integer(status["id"])
+        assert status["role"] in [nil, "Primary", "Candidate", "Secondary"]
+      end
+    end
+
+    test "server/2 is one of the servers servers/2 lists", %{conn: conn} do
+      assert {:ok, one} = Server.server(conn)
+      assert {:ok, all} = Server.servers(conn)
+
+      assert Map.has_key?(one, "address")
+      assert Enum.any?(all, &(&1["address"] == one["address"]))
+    end
+
+    test "the ! twins hand back the same thing", %{conn: conn} do
+      assert Server.servers!(conn) == elem(Server.servers(conn), 1)
+      assert Server.server!(conn) == elem(Server.server(conn), 1)
+    end
+  end
+
   describe "authentication" do
     test "a token is minted once and reused", %{conn: conn} do
       assert {:ok, token} = Connection.token(conn)
