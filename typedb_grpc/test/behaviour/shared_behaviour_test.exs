@@ -407,6 +407,25 @@ defmodule TypeDB.SharedBehaviourTest do
         assert adapter.database_exists?(conn, database)
       end
     end
+
+    test "the cluster looks the same through both" do
+      # `servers/2` is the one call that describes the deployment rather than
+      # the data, and it landed on gRPC long after HTTP had it. The shape is the
+      # thing worth pinning: string keys and "address", so that a caller
+      # switching transports keeps its pattern matches.
+      answers =
+        for adapter <- @adapters, adapter.available?() do
+          {:ok, conn} = adapter.connect(:"servers_#{System.unique_integer([:positive])}")
+          assert {:ok, [_ | _] = servers} = adapter.servers(conn)
+          assert Enum.all?(servers, &is_map_key(&1, "address")), "#{adapter.name()} omitted \"address\""
+          servers
+        end
+
+      if length(answers) == 2 do
+        [http, grpc] = answers
+        assert Enum.map(http, & &1["address"]) == Enum.map(grpc, & &1["address"])
+      end
+    end
   end
 
   defp skip_or(context, fun) do
