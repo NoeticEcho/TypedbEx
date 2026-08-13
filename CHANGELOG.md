@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-13
+
 Audit IV, and the same method as Audit III: read the driver through
 `NoeticEcho/newgen-elixir`, now on 0.7.0, and treat what its authors had to
 learn the hard way as evidence about this driver. The material this time was
@@ -866,7 +868,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.5.0...v0.5.1
