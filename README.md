@@ -20,14 +20,19 @@ against TypeDB 3.12.1 on one machine, driver and server on loopback:
 | workload | `typedb` | `typedb_grpc` | |
 | --- | ---: | ---: | --- |
 | 20 000 answers in one read | 1004 ms | **248 ms** | gRPC 4× |
-| 1 000 operations in one transaction | 861 ms | **141 ms** | gRPC 6.1× |
+| 1 000 writes in one transaction | 861 ms | **622 ms** | gRPC 1.4× |
+| 200 reads pipelined in one transaction | not possible | **47 ms** | — |
 | 200 independent point reads | **213 ms** | 249 ms | HTTP 1.17× |
 
 The last row is the shape a request-serving application has, and gRPC loses it:
 the protocol has no one-shot query, so every independent query pays to set up a
-transaction stream. The first two are the shape a batch job has, and HTTP loses
+transaction stream. The first rows are the shape a batch job has, and HTTP loses
 them — it materialises one answer, caps it at 10 000, and spends a third of the
 wall clock turning JSON into terms.
+
+Pipelining is the third row and it is **reads only**. TypeDB aborts a write's
+answer stream when the next write in the same transaction starts, with `TSV13`,
+so writes go one at a time — which is what the second row measures.
 
 The cap is the difference that is not about speed. TypeDB's own
 `answerCountLimit` exists only in the HTTP API; over gRPC answers arrive as a

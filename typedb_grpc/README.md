@@ -23,9 +23,12 @@ cap to raise. A read of 20 000 answers takes 248 ms here against 1004 ms over
 HTTP — and over HTTP only after raising the limit, since the default truncates
 at 10 000 and sets a warning.
 
-**A transaction pipelines.** `Transaction.Client` carries a repeated field, so
-requests go out without waiting for the previous reply. A thousand operations
-in one transaction take 141 ms here against 861 ms over HTTP.
+**Reads pipeline.** `Transaction.Client` carries a repeated field, so requests
+go out without waiting for the previous reply: 200 reads sent together answer in
+47 ms. Writes cannot be pipelined — TypeDB aborts a write's answer stream when
+the next write in the same transaction starts, with `TSV13` — so they go one at
+a time, and a thousand of them in one transaction take 622 ms here against
+861 ms over HTTP.
 
 ## Why not this one
 
