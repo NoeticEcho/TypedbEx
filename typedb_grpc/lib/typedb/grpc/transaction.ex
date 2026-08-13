@@ -173,6 +173,75 @@ defmodule TypeDB.GRPC.Transaction do
     end
   end
 
+  @doc """
+  Reads a query as a `Stream`, pulling from the server as it is consumed.
+
+  The reason this transport is worth having for large reads. A batch is held at
+  a time and the next one is asked for only when the consumer wants it, so
+  memory follows the batch rather than the answer — and stopping early stops the
+  server:
+
+      Transaction.stream(tx, "match $p isa person, has name $n; select $n;")
+      |> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+      |> Enum.take(10)
+
+  That takes one batch out of however many the query would have produced,
+  because the continuation signal TypeDB waits on is sent by the consumer's
+  demand and never sent again.
+
+  The stream is tied to this transaction and does not close it — use
+  `TypeDB.GRPC.stream/4` when the transaction exists only for the read.
+  """
+  @spec stream(t(), String.t(), keyword()) :: Enumerable.t()
+  def stream(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
+    timeout = Keyword.get(opts, :timeout, 60_000)
+
+    Stream.resource(
+      fn ->
+        case stream_start(tx, query, opts) do
+          {:ok, ref} -> ref
+          {:error, error} -> raise error
+        end
+      end,
+      fn ref ->
+        case stream_next(tx, ref, timeout) do
+          {:rows, rows} -> {rows, ref}
+          :done -> {:halt, ref}
+          {:error, error} -> raise error
+        end
+      end,
+      fn ref -> stream_cancel(tx, ref) end
+    )
+  end
+
+  @doc false
+  @spec stream_start(t(), String.t(), keyword()) :: {:ok, reference() | binary()} | {:error, Error.t()}
+  def stream_start(%__MODULE__{pid: pid}, query, opts) do
+    call(pid, {:stream_start, query, opts}, opts)
+  end
+
+  @doc false
+  @spec stream_next(t(), binary(), timeout()) :: {:rows, [term()]} | :done | {:error, Error.t()}
+  def stream_next(%__MODULE__{pid: pid}, ref, timeout) do
+    GenServer.call(pid, {:stream_next, ref}, timeout)
+  catch
+    :exit, {:timeout, _} ->
+      {:error, Error.new(:timeout, "the next batch of a streamed read did not arrive within #{timeout}ms")}
+
+    :exit, {:noproc, _} ->
+      {:error, Error.new(:server, "no open transaction", code: "TSV12", status: 404)}
+
+    :exit, reason ->
+      {:error, GRPCError.from_reason(reason, "streaming a read")}
+  end
+
+  @doc false
+  @spec stream_cancel(t(), binary()) :: :ok
+  def stream_cancel(%__MODULE__{pid: pid}, ref) do
+    if Process.alive?(pid), do: GenServer.cast(pid, {:stream_cancel, ref})
+    :ok
+  end
+
   @doc "Commits. The transaction is finished either way."
   @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
   def commit(%__MODULE__{pid: pid}, opts \\ []) do
@@ -416,6 +485,38 @@ defmodule TypeDB.GRPC.Transaction do
     {:noreply, %{state | pending: pending, awaiting: {from, ids, %{}}}}
   end
 
+  def handle_call({:stream_start, query, opts}, _from, state) do
+    id = request_id()
+    send_reqs(state, [%Proto.Transaction.Req{req_id: id, req: {:query_req, query_request(query, opts)}}])
+
+    accumulator = %{
+      mode: :stream,
+      columns: [],
+      query_type: nil,
+      buffer: [],
+      waiting: nil,
+      status: :open,
+      # True once TypeDB has paused the answer and is waiting to be told to go
+      # on. Nothing tells it until a consumer asks — that is the back pressure.
+      paused: false
+    }
+
+    {:reply, {:ok, id}, %{state | pending: Map.put(state.pending, id, accumulator)}}
+  end
+
+  def handle_call({:stream_next, id}, from, state) do
+    case Map.get(state.pending, id) do
+      nil ->
+        {:reply, :done, state}
+
+      %{mode: :stream} = acc ->
+        {:noreply, serve_stream(state, id, %{acc | waiting: from})}
+
+      _ ->
+        {:reply, {:error, Error.new(:config, "#{inspect(id)} is not a streamed read")}, state}
+    end
+  end
+
   def handle_call(:commit, from, state) do
     id = request_id()
 
@@ -439,6 +540,14 @@ defmodule TypeDB.GRPC.Transaction do
   # its slot in `pending` is a marker rather than a collector.
   defp awaiting(state, from, id) do
     %{state | awaiting: {from, [id], %{}}, pending: Map.put(state.pending, id, :unit)}
+  end
+
+  @impl GenServer
+  def handle_cast({:stream_cancel, id}, state) do
+    # The server keeps whatever it has queued, and never hears from us again for
+    # this request. It is collected when the transaction ends, which is the only
+    # thing that ends a stream on this protocol.
+    {:noreply, %{state | pending: Map.delete(state.pending, id)}}
   end
 
   @impl GenServer
@@ -485,40 +594,130 @@ defmodule TypeDB.GRPC.Transaction do
   end
 
   defp on_result(state, id, {:query_initial_res, %{res: {:error, error}}}) do
-    # On a discarding call, TSV13 is not a failure: the write ran and only its
-    # answer was dropped. Every other code still is — see `execute_many/3`.
-    if discarding?(state, id) and error_code(error) == "TSV13" do
-      finish_one(state, id, {:ok, :discarded})
-    else
-      finish_one(state, id, {:error, query_error(error)})
-    end
+    terminate_request(state, id, error)
   end
 
   defp on_result(state, id, {:query_initial_res, %{res: {:ok, ok}}}) do
-    case ok.ok do
-      {:done, %{query_type: query_type}} ->
-        finish_one(state, id, {:ok, %Answer.Ok{query_type: query_type(query_type)}})
-
-      {:concept_row_stream, header} ->
-        update_accumulator(state, id, fn acc ->
-          %{
-            acc
-            | kind: :rows,
-              columns: header.column_variable_names,
-              query_type: query_type(header.query_type)
-          }
-        end)
-
-      {:concept_document_stream, header} ->
-        update_accumulator(state, id, fn acc ->
-          %{acc | kind: :documents, query_type: query_type(header.query_type)}
-        end)
-    end
+    if streaming?(state, id), do: stream_header(state, id, ok.ok), else: collect_header(state, id, ok.ok)
   end
 
   defp on_result(state, id, {:commit_res, _}), do: finish_one(state, id, {:ok, :ok})
   defp on_result(state, id, {:rollback_res, _}), do: finish_one(state, id, {:ok, :ok})
   defp on_result(state, _id, _other), do: state
+
+  # A streamed read keeps only the column names — the rows are decoded as they
+  # arrive rather than at the end, which is what makes the memory constant.
+  defp stream_header(state, id, {:concept_row_stream, header}) do
+    state
+    |> put_stream(id, fn acc ->
+      %{acc | columns: header.column_variable_names, query_type: query_type(header.query_type)}
+    end)
+    |> serve_if_streaming(id)
+  end
+
+  defp stream_header(state, id, {:concept_document_stream, header}) do
+    state
+    |> put_stream(id, fn acc -> %{acc | query_type: query_type(header.query_type)} end)
+    |> serve_if_streaming(id)
+  end
+
+  defp stream_header(state, id, {:done, %{query_type: query_type}}) do
+    # A streamed query that answers nothing. It ends at once rather than waiting
+    # for parts that will never come.
+    state
+    |> put_stream(id, fn acc -> %{acc | status: :done, query_type: query_type(query_type)} end)
+    |> serve_if_streaming(id)
+  end
+
+  defp collect_header(state, id, {:done, %{query_type: query_type}}) do
+    finish_one(state, id, {:ok, %Answer.Ok{query_type: query_type(query_type)}})
+  end
+
+  defp collect_header(state, id, {:concept_row_stream, header}) do
+    update_accumulator(state, id, fn acc ->
+      %{
+        acc
+        | kind: :rows,
+          columns: header.column_variable_names,
+          query_type: query_type(header.query_type)
+      }
+    end)
+  end
+
+  defp collect_header(state, id, {:concept_document_stream, header}) do
+    update_accumulator(state, id, fn acc ->
+      %{acc | kind: :documents, query_type: query_type(header.query_type)}
+    end)
+  end
+
+  # How a request ends, whichever mode it is in.
+  defp terminate_request(state, id, error) do
+    cond do
+      streaming?(state, id) ->
+        state
+        |> put_stream(id, fn acc -> %{acc | status: {:error, query_error(error)}} end)
+        |> serve_if_streaming(id)
+
+      # On a discarding call TSV13 is not a failure: the write ran and only its
+      # answer was dropped. Every other code still is — see `execute_many/3`.
+      discarding?(state, id) and error_code(error) == "TSV13" ->
+        finish_one(state, id, {:ok, :discarded})
+
+      true ->
+        finish_one(state, id, {:error, query_error(error)})
+    end
+  end
+
+  defp streaming?(state, id), do: match?(%{mode: :stream}, Map.get(state.pending, id))
+
+  defp put_stream(state, id, fun) do
+    case Map.get(state.pending, id) do
+      %{mode: :stream} = acc -> %{state | pending: Map.put(state.pending, id, fun.(acc))}
+      _ -> state
+    end
+  end
+
+  defp serve_if_streaming(state, id) do
+    if streaming?(state, id), do: serve_stream(state, id, Map.fetch!(state.pending, id)), else: state
+  end
+
+  # The whole of the back pressure, in one function.
+  #
+  # A consumer waiting with rows available gets them. A consumer waiting with
+  # nothing available, on a stream TypeDB has paused, is what finally sends the
+  # continuation signal — so the server produces the next batch because somebody
+  # asked for it, and not before. Everything else is recorded and waited on.
+  defp serve_stream(state, id, %{waiting: nil} = acc), do: store(state, id, acc)
+
+  defp serve_stream(state, id, %{buffer: [_ | _]} = acc) do
+    GenServer.reply(acc.waiting, {:rows, acc.buffer})
+    store(state, id, %{acc | buffer: [], waiting: nil})
+  end
+
+  defp serve_stream(state, id, %{status: {:error, error}} = acc) do
+    GenServer.reply(acc.waiting, {:error, error})
+    %{state | pending: Map.delete(state.pending, id)}
+  end
+
+  defp serve_stream(state, id, %{status: :done} = acc) do
+    GenServer.reply(acc.waiting, :done)
+    %{state | pending: Map.delete(state.pending, id)}
+  end
+
+  # The one clause that is the back pressure: a consumer is waiting, there is
+  # nothing to give it, and TypeDB has paused — so it is told to go on now,
+  # because somebody asked, and never on arrival.
+  defp serve_stream(state, id, %{paused: true} = acc) do
+    send_reqs(state, [
+      %Proto.Transaction.Req{req_id: id, req: {:stream_req, %Proto.Transaction.StreamSignal.Req{}}}
+    ])
+
+    store(state, id, %{acc | paused: false})
+  end
+
+  defp serve_stream(state, id, acc), do: store(state, id, acc)
+
+  defp store(state, id, acc), do: %{state | pending: Map.put(state.pending, id, acc)}
 
   defp discarding?(state, id) do
     match?(%{discard: true}, Map.get(state.pending, id))
@@ -528,43 +727,69 @@ defmodule TypeDB.GRPC.Transaction do
   defp error_code(_), do: nil
 
   defp on_part(state, id, {:query_res, %{res: {:rows_res, %{rows: rows}}}}) do
-    update_accumulator(state, id, fn
-      %{discard: true} = acc -> acc
-      acc -> %{acc | parts: [rows | acc.parts]}
-    end)
+    if streaming?(state, id) do
+      # Decoded here rather than at the end: a streamed read never holds the
+      # undecoded parts, which is the whole point of it.
+      state
+      |> put_stream(id, fn acc ->
+        %{acc | buffer: acc.buffer ++ Enum.map(rows, &Decode.row(&1, acc.columns))}
+      end)
+      |> serve_if_streaming(id)
+    else
+      update_accumulator(state, id, fn
+        %{discard: true} = acc -> acc
+        acc -> %{acc | parts: [rows | acc.parts]}
+      end)
+    end
   end
 
   defp on_part(state, id, {:query_res, %{res: {:documents_res, %{documents: docs}}}}) do
-    update_accumulator(state, id, fn
-      %{discard: true} = acc -> acc
-      acc -> %{acc | parts: [docs | acc.parts]}
-    end)
+    if streaming?(state, id) do
+      state
+      |> put_stream(id, fn acc -> %{acc | buffer: acc.buffer ++ Enum.map(docs, &document/1)} end)
+      |> serve_if_streaming(id)
+    else
+      update_accumulator(state, id, fn
+        %{discard: true} = acc -> acc
+        acc -> %{acc | parts: [docs | acc.parts]}
+      end)
+    end
   end
 
   # Flow control. The signal must carry the *original* request's id — a fresh one
   # names no stream, and the server simply stops sending, which reads as a hang
   # rather than as an error.
+  #
+  # For a collected answer it goes out at once, because the caller is waiting for
+  # all of it anyway. For a streamed one it does not: `serve_stream/3` sends it
+  # when a consumer asks for the next batch, and that is the back pressure.
   defp on_part(state, id, {:stream_res, %{state: {:continue, _}}}) do
-    send_reqs(state, [
-      %Proto.Transaction.Req{req_id: id, req: {:stream_req, %Proto.Transaction.StreamSignal.Req{}}}
-    ])
+    if streaming?(state, id) do
+      state |> put_stream(id, fn acc -> %{acc | paused: true} end) |> serve_if_streaming(id)
+    else
+      send_reqs(state, [
+        %Proto.Transaction.Req{req_id: id, req: {:stream_req, %Proto.Transaction.StreamSignal.Req{}}}
+      ])
 
-    state
+      state
+    end
   end
 
   defp on_part(state, id, {:stream_res, %{state: {:done, _}}}) do
-    case Map.get(state.pending, id) do
-      nil -> state
-      acc -> finish_one(state, id, {:ok, build_answer(acc)})
+    cond do
+      streaming?(state, id) ->
+        state |> put_stream(id, fn acc -> %{acc | status: :done} end) |> serve_if_streaming(id)
+
+      Map.has_key?(state.pending, id) ->
+        finish_one(state, id, {:ok, build_answer(Map.fetch!(state.pending, id))})
+
+      true ->
+        state
     end
   end
 
   defp on_part(state, id, {:stream_res, %{state: {:error, error}}}) do
-    if discarding?(state, id) and error_code(error) == "TSV13" do
-      finish_one(state, id, {:ok, :discarded})
-    else
-      finish_one(state, id, {:error, query_error(error)})
-    end
+    terminate_request(state, id, error)
   end
 
   defp on_part(state, _id, _other), do: state

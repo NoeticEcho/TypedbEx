@@ -20,6 +20,7 @@ against TypeDB 3.12.1 on one machine, driver and server on loopback:
 | workload | `typedb` | `typedb_grpc` | |
 | --- | ---: | ---: | --- |
 | 20 000 answers in one read | 1004 ms | **248 ms** | gRPC 4× |
+| 50 000 answers, streamed | not possible | **753 ms**, no memory retained | — |
 | 1 000 writes in one transaction | 861 ms | **622 ms** | gRPC 1.4× |
 | 200 reads pipelined in one transaction | not possible | **47 ms** | — |
 | 200 independent point reads | **213 ms** | 249 ms | HTTP 1.17× |
@@ -36,7 +37,11 @@ so writes go one at a time — which is what the second row measures.
 
 The cap is the difference that is not about speed. TypeDB's own
 `answerCountLimit` exists only in the HTTP API; over gRPC answers arrive as a
-flow-controlled stream with no ceiling to raise.
+flow-controlled stream with no ceiling to raise — and `TypeDB.GRPC.stream/4`
+hands that stream to the caller, asking the server for the next batch only when
+the consumer wants it. The same 50 000 rows collected into a list retain 80 MiB
+and take 1439 ms; streamed they retain nothing and take 753 ms, and
+`Enum.take(5)` over them costs one batch rather than all of it.
 
 ## Working in this repository
 

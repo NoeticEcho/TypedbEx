@@ -23,6 +23,19 @@ cap to raise. A read of 20 000 answers takes 248 ms here against 1004 ms over
 HTTP — and over HTTP only after raising the limit, since the default truncates
 at 10 000 and sets a warning.
 
+`TypeDB.GRPC.stream/4` gives that stream to the caller rather than collecting
+it:
+
+```elixir
+TypeDB.GRPC.stream(conn, "social", "match $p isa person, has name $n; select $n;")
+|> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+|> Enum.each(&IO.puts/1)
+```
+
+The continuation signal TypeDB waits on is sent by the consumer's demand, so
+50 000 rows stream in 753 ms retaining nothing where collecting them costs
+1439 ms and 80 MiB — and `Enum.take(5)` reads one batch rather than all of it.
+
 **Reads pipeline.** `Transaction.Client` carries a repeated field, so requests
 go out without waiting for the previous reply: 200 reads sent together answer in
 47 ms. Writes cannot be pipelined — TypeDB aborts a write's answer stream when
