@@ -31,6 +31,9 @@ jobs:
   compat:
     name: TypeDB ${{ matrix.typedb }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
     continue-on-error: true
 
     strategy:

@@ -127,6 +127,19 @@ bd prime                # Refresh Beads context
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
 
+## Repository layout
+
+Two packages live here, each a self-contained Mix project. There is no umbrella
+and no Mix project at the root — every `mix` command below runs from inside a
+package directory.
+
+| directory | package | transport |
+| --- | --- | --- |
+| `typedb/` | `typedb` | HTTP API v1 |
+| `typedb_grpc/` | `typedb_grpc` | gRPC |
+
+Paths in this file are relative to `typedb/` unless said otherwise.
+
 ## Build & Test
 
 ```bash

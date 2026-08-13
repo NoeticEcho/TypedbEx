@@ -15,6 +15,9 @@ jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     strategy:
       fail-fast: false
@@ -42,8 +45,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
+            typedb/deps
+            typedb/_build
           key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.exs') }}
           restore-keys: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
@@ -90,7 +93,7 @@ jobs:
         if: matrix.lint
         uses: actions/cache@v4
         with:
-          path: _build/dev/*.plt*
+          path: typedb/_build/dev/*.plt*
           key: ${{ runner.os }}-plt-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-plt-${{ matrix.elixir }}-${{ matrix.otp }}-
 
@@ -103,6 +106,9 @@ jobs:
   integration:
     name: Integration (TypeDB ${{ matrix.typedb }})
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     strategy:
       fail-fast: false
@@ -175,6 +181,9 @@ jobs:
   token_renewal:
     name: Token renewal (five-second tokens)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     steps:
       - uses: actions/checkout@v4
@@ -224,6 +233,9 @@ jobs:
   tls:
     name: TLS defaults
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     steps:
       - uses: actions/checkout@v4
@@ -298,6 +310,9 @@ jobs:
   restart:
     name: Server restart
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     steps:
       - uses: actions/checkout@v4
@@ -351,6 +366,9 @@ jobs:
   windows:
     name: Windows (compile and unit tests)
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     steps:
       - uses: actions/checkout@v4
@@ -385,6 +403,9 @@ jobs:
   optional_deps:
     name: Optional dependencies (${{ matrix.name }})
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     strategy:
       fail-fast: false
@@ -412,7 +433,7 @@ jobs:
       # OTP. `@compile {:no_warn_undefined, ...}` does not cover a struct
       # pattern, because that is expanded at compile time.
       - name: Compile and run a consumer application
-        working-directory: test/support/consumer
+        working-directory: typedb/test/support/consumer
         env:
           TYPEDB_PATH: ${{ github.workspace }}
           WITH_OPTIONAL: ${{ matrix.with_optional }}
@@ -424,6 +445,9 @@ jobs:
   typeql:
     name: TypeQL syntax
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
 
     steps:
       - uses: actions/checkout@v4

@@ -1,24 +1,28 @@
-/_build/
-/cover/
-/deps/
-/doc/
-/.fetch
+# Two packages live here — typedb/ and typedb_grpc/ — so the build directories
+# are per-package rather than at the root. The leading `/` is gone deliberately:
+# these names are ignored wherever they appear.
+_build/
+cover/
+deps/
+doc/
+.fetch
 erl_crash.dump
 *.ez
 *.beam
-/config/*.secret.exs
+config/*.secret.exs
 .elixir_ls/
 .lexical/
 /typedb-data/
 
 # `typeql-check` drops this next to the working directory when a check fails.
-/typeql-check.FAILED
+typeql-check.FAILED
 
 # `mix hex.build` drops the package tarball in the project root.
-/typedb-*.tar
+typedb-*.tar
+typedb_grpc-*.tar
 
 # ExUnit's :tmp_dir tag writes here.
-/tmp/
+tmp/
 
 # Beads / Dolt files (added by bd init)
 .dolt/
@@ -28,6 +32,6 @@ erl_crash.dump
 
 # The consumer application CI builds to prove the driver compiles and runs with
 # its optional dependencies absent. Its build is per-run, never committed.
-/test/support/consumer/_build/
-/test/support/consumer/deps/
-/test/support/consumer/mix.lock
+test/support/consumer/_build/
+test/support/consumer/deps/
+test/support/consumer/mix.lock

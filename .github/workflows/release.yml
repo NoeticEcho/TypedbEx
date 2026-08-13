@@ -19,6 +19,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typedb
     environment: hex
 
     permissions:
@@ -35,8 +38,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
+            typedb/deps
+            typedb/_build
           key: ${{ runner.os }}-release-${{ hashFiles('**/mix.exs') }}
           restore-keys: ${{ runner.os }}-release-
 

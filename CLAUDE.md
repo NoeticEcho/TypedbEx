@@ -59,6 +59,19 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 <!-- END BEADS INTEGRATION -->
 
 
+## Repository layout
+
+Two packages live here, each a self-contained Mix project. There is no umbrella
+and no Mix project at the root — every `mix` command below runs from inside a
+package directory.
+
+| directory | package | transport |
+| --- | --- | --- |
+| `typedb/` | `typedb` | HTTP API v1 |
+| `typedb_grpc/` | `typedb_grpc` | gRPC |
+
+Paths in this file are relative to `typedb/` unless said otherwise.
+
 ## Build & Test
 
 ```bash
