@@ -445,6 +445,47 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
     end
   end
 
+  describe "include_query_structure" do
+    test "the structure arrives only when it is asked for", %{conn: conn, database: database} do
+      insert_people(conn, database, 2)
+      query = "match $p isa person, has name $n; select $n;"
+
+      {:ok, plain} =
+        Transaction.transaction(conn, database, :read, fn tx -> Transaction.query(tx, query) end)
+
+      # Not paid for, not sent. The option is what turns it on, and a driver
+      # that always asked would make every read carry an analysis nobody wanted.
+      assert plain.query_structure == nil
+
+      {:ok, answer} =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          Transaction.query(tx, query, include_query_structure: true)
+        end)
+
+      assert %{"conjunctions" => [_ | _], "stages" => [_ | _]} = answer.query_structure
+
+      assert answer.query_structure["variableInfo"] |> Map.values() |> Enum.map(& &1["name"]) |> Enum.sort() ==
+               ["n", "p"]
+    end
+
+    test "each row says which conjunctions produced it", %{conn: conn, database: database} do
+      insert_people(conn, database, 3)
+
+      {:ok, answer} =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          Transaction.query(tx, "match $p isa person, has name $n; select $n;", include_query_structure: true)
+        end)
+
+      # `involved_blocks` is the bitmap half, and it was already decoded before
+      # the structure was — which made it useless, because there was nothing to
+      # look the block numbers up in.
+      rows = TypeDB.Answer.rows(answer)
+      assert length(rows) == 3
+      assert Enum.all?(rows, &(&1.involved_blocks == [0]))
+      assert length(answer.query_structure["conjunctions"]) > 0
+    end
+  end
+
   describe "analyze" do
     test "describes the query without running it", %{conn: conn, database: database} do
       insert_people(conn, database, 3)

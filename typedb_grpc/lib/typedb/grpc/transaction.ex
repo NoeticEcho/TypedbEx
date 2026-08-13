@@ -115,6 +115,15 @@ defmodule TypeDB.GRPC.Transaction do
     * `:timeout` — how long to wait for the answer
     * `:include_instance_types` — ask the server to attach the type of every
       instance in the answer
+    * `:include_query_structure` — ask for the analysed pipeline alongside the
+      rows. It arrives as `query_structure` on `%TypeDB.Answer.ConceptRows{}`,
+      and `involved_blocks` on each row then says which of its conjunctions
+      produced that row. The same option, the same two fields and the same
+      purpose as the sibling's; the tree is rendered the way `analyze/3`
+      renders one, so the caveat there applies here — the transports describe
+      the same analysis and do not spell it identically
+    * `:prefetch_size` — how many answers the server sends before waiting to be
+      asked for more
   """
   @spec query(t(), String.t(), keyword()) :: {:ok, Answer.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
@@ -803,7 +812,8 @@ defmodule TypeDB.GRPC.Transaction do
         acc
         | kind: :rows,
           columns: header.column_variable_names,
-          query_type: query_type(header.query_type)
+          query_type: query_type(header.query_type),
+          query_structure: query_structure(header.query_structure)
       }
     end)
   end
@@ -960,7 +970,15 @@ defmodule TypeDB.GRPC.Transaction do
 
   # -- accumulators ----------------------------------------------------------
 
-  defp new_accumulator, do: %{kind: :unknown, columns: [], query_type: nil, parts: [], discard: false}
+  # Present only when the query asked for it with `include_query_structure`.
+  # Rendered by the same walk `analyze/3` uses, because it is the same message —
+  # the server sends an `AnalyzedQuery.Pipeline` in both places.
+  defp query_structure(nil), do: nil
+  defp query_structure(pipeline), do: Decode.message(pipeline)
+
+  defp new_accumulator do
+    %{kind: :unknown, columns: [], query_type: nil, parts: [], discard: false, query_structure: nil}
+  end
 
   defp update_accumulator(state, id, fun) do
     case Map.get(state.pending, id) do
@@ -979,7 +997,12 @@ defmodule TypeDB.GRPC.Transaction do
       |> Enum.concat()
       |> Enum.map(&Decode.row(&1, acc.columns))
 
-    %Answer.ConceptRows{query_type: acc.query_type, rows: rows, warning: nil}
+    %Answer.ConceptRows{
+      query_type: acc.query_type,
+      rows: rows,
+      warning: nil,
+      query_structure: acc.query_structure
+    }
   end
 
   defp build_answer(%{kind: :documents} = acc) do
@@ -1069,11 +1092,14 @@ defmodule TypeDB.GRPC.Transaction do
     }
   end
 
+  @query_option_keys [:include_instance_types, :prefetch_size, :include_query_structure]
+
   defp query_options(opts) do
-    if opts[:include_instance_types] != nil or opts[:prefetch_size] != nil do
+    if Enum.any?(@query_option_keys, &(opts[&1] != nil)) do
       %Proto.Options.Query{
         include_instance_types: opts[:include_instance_types],
-        prefetch_size: opts[:prefetch_size]
+        prefetch_size: opts[:prefetch_size],
+        include_query_structure: opts[:include_query_structure]
       }
     end
   end

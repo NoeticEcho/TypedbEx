@@ -408,6 +408,58 @@ defmodule TypeDB.SharedBehaviourTest do
       end
     end
 
+    test "the query structure comes back through both, shaped the same at the top" do
+      # `include_query_structure` existed only over HTTP until the parity pass:
+      # the gRPC side ignored the option and dropped the header the server was
+      # already sending. The trees are not identical below the top level — the
+      # two transports render the same analysis differently, which their docs
+      # say — but the pipeline they describe has the same parts, and a caller
+      # reaching for `conjunctions` must find it on both.
+      answers =
+        for adapter <- @adapters, adapter.available?() do
+          {:ok, conn} = adapter.connect(:"structure_#{System.unique_integer([:positive])}")
+          database = "structure_#{System.unique_integer([:positive])}"
+          :ok = adapter.create_database(conn, database)
+          on_exit(fn -> adapter.delete_database(conn, database) end)
+          {:ok, _} = adapter.query(conn, database, @schema, :schema)
+
+          {:ok, answer} =
+            adapter.query_with_structure(
+              conn,
+              database,
+              "match $p isa person, has name $n; select $n;"
+            )
+
+          structure = answer.query_structure
+
+          assert is_map(structure), "#{adapter.name()} returned no query structure"
+          assert is_list(structure["conjunctions"]), "#{adapter.name()} has no conjunctions"
+          structure
+        end
+
+      if length(answers) == 2 do
+        [http, grpc] = answers
+
+        # Three of the four parts are named the same on both. The fourth is not,
+        # and it is the *server* that names it differently — `variables` in the
+        # HTTP API's JSON, `variable_info` in the protobuf schema — so this
+        # records the difference instead of hiding it behind a rename that would
+        # break the rule both renderings follow (the schema's own names).
+        for key <- ~w(conjunctions stages outputs) do
+          assert Map.has_key?(http, key) and Map.has_key?(grpc, key), "#{key} is missing on one side"
+        end
+
+        assert Map.keys(http) -- Map.keys(grpc) == ["variables"]
+        assert Map.keys(grpc) -- Map.keys(http) == ["variableInfo"]
+
+        # Same information under those two names: which variable is called what.
+        # Ids are strings over HTTP and integers over gRPC, for the same reason.
+        names = fn map -> map |> Map.values() |> Enum.map(& &1["name"]) |> Enum.sort() end
+        assert names.(http["variables"]) == names.(grpc["variableInfo"])
+        assert names.(http["variables"]) == ["n", "p"]
+      end
+    end
+
     test "the cluster looks the same through both" do
       # `servers/2` is the one call that describes the deployment rather than
       # the data, and it landed on gRPC long after HTTP had it. The shape is the

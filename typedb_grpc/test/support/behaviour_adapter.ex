@@ -47,6 +47,16 @@ defmodule TypeDB.Behaviour.Adapter do
   @callback servers(conn()) :: {:ok, [map()]} | {:error, TypeDB.Error.t()}
 
   @doc """
+  Runs a read with `include_query_structure` and returns the answer.
+
+  Its own callback rather than an option on `query/4`: the structure is the
+  thing under test, and a caller that forgot the option would get `nil` and a
+  passing test.
+  """
+  @callback query_with_structure(conn(), String.t(), String.t()) ::
+              {:ok, TypeDB.Answer.t()} | {:error, TypeDB.Error.t()}
+
+  @doc """
   Whether `variable` names a server to run against.
 
   Empty is unset. `System.get_env/1` returns `""` for a variable exported with
@@ -101,6 +111,11 @@ defmodule TypeDB.Behaviour.Adapter.HTTP do
   @impl true
   def query(conn, database, query, type) do
     TypeDB.query(conn, database, query, transaction_type: type)
+  end
+
+  @impl true
+  def query_with_structure(conn, database, query) do
+    TypeDB.query(conn, database, query, transaction_type: :read, include_query_structure: true)
   end
 
   @impl true
@@ -169,6 +184,13 @@ defmodule TypeDB.Behaviour.Adapter.GRPC do
   @impl true
   def query(conn, database, query, type) do
     Transaction.transaction(conn, database, type, fn tx -> Transaction.query(tx, query) end)
+  end
+
+  @impl true
+  def query_with_structure(conn, database, query) do
+    Transaction.transaction(conn, database, :read, fn tx ->
+      Transaction.query(tx, query, include_query_structure: true)
+    end)
   end
 
   @impl true
