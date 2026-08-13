@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`TypeDB.User.current/2`** — the account this connection signed in as. Rust's
+  `users().get_current()`, and the same implementation: there is no endpoint for
+  it, so the name comes from the connection's credentials and is then looked up,
+  which makes it a live answer rather than an echo of the config. A connection
+  configured with only a `:token` has no username and says so.
+
+- **`TypeDB.Concept.category/1`, `instance?/1`, `type?/1` and `value?/1`** — what
+  kind of thing a concept is, in one atom, and the three questions the struct
+  name alone does not answer. Rust has thirty-odd such methods; these four are
+  the ones that survive translation into a language with pattern matching, and
+  `TypeDB.Concept`'s docs say why the rest do not.
+
 ### Changed
 
 - **Every telemetry event now carries `:transport`**, set to `:http`. The new

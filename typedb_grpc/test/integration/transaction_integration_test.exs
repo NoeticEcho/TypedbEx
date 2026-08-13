@@ -524,7 +524,7 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
       rows = TypeDB.Answer.rows(answer)
       assert length(rows) == 3
       assert Enum.all?(rows, &(&1.involved_blocks == [0]))
-      assert length(answer.query_structure["conjunctions"]) > 0
+      assert answer.query_structure["conjunctions"] != []
     end
   end
 

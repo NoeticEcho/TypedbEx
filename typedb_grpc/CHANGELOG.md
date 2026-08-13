@@ -34,6 +34,22 @@ Then the four things neither driver had:
   * **`Server.servers/2` and `server/2`**, in the shape the sibling's `/servers`
     returns.
 
+Then a pass against the Rust driver, taken as the reference for coverage:
+
+  * **`tls: true` now verifies against the machine's trust store.** It could not
+    connect to a server with a publicly-signed certificate before, because
+    `:ssl` has no default store — measured, not assumed. `:tls_root_ca` names a
+    private CA's PEM file, and `:tls_opts` still overrides both.
+  * **`include_query_structure`**, with the analysed pipeline on
+    `%TypeDB.Answer.ConceptRows{}` and `involved_blocks` on each row — the
+    sibling has had it since 0.x; this side ignored the option and dropped the
+    header the server was already sending.
+  * **`User.get/3` and `User.current/2`**, and **`Database.get/3`** — absence as
+    an error carrying the server's code, rather than a boolean.
+  * **No `on_close` callback**, deliberately: a transaction is a process, so
+    `Process.monitor(tx.pid)` is the answer, and `TypeDB.GRPC.Transaction`'s docs
+    explain why it is the better one.
+
 Nothing released yet. The package is being built; see the repository's
 `AUDIT.md` and the `Монорепо и gRPC-драйвер` epic in `bd` for what is done and
 what is not.

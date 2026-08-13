@@ -36,8 +36,9 @@ defmodule TypeDB.GRPC.TLSOptionsTest do
 
       case :ssl.connect(host, 443, [verify: :verify_peer], 10_000) do
         {:error, _} ->
-          assert {:ok, socket} =
-                   :ssl.connect(host, 443, [verify: :verify_peer, cacerts: :public_key.cacerts_get()], 10_000),
+          trusted = [verify: :verify_peer, cacerts: :public_key.cacerts_get()]
+
+          assert {:ok, socket} = :ssl.connect(host, 443, trusted, 10_000),
                  "the machine's trust store did not verify a public certificate"
 
           :ssl.close(socket)
