@@ -70,7 +70,9 @@ every finding below is measured against:
 
 ## Findings
 
-Nine, against the eight categories. Four major, five minor, no critical.
+Nine, against the eight categories. Three major, five minor, no critical — and
+one withdrawn during the refactor, by the measurement that should have been
+taken before it was written down. See VI-7.
 
 | | Category | Where | Severity |
 | --- | --- | --- | --- |
@@ -80,7 +82,7 @@ Nine, against the eight categories. Four major, five minor, no critical.
 | VI-4 | Gaps | `typedb_grpc/lib/typedb/grpc/migration.ex:76` | major |
 | VI-5 | Gaps | `typedb_grpc/lib/typedb/grpc/transaction.ex:290` | minor |
 | VI-6 | Quality | `typedb_grpc/lib/typedb/grpc/transaction.ex:1103` | minor |
-| VI-7 | Efficiency | `typedb_grpc/lib/typedb/grpc/transaction.ex:900` | major |
+| VI-7 | Efficiency | `typedb_grpc/lib/typedb/grpc/transaction.ex:900` | **withdrawn** |
 | VI-8 | Security | `typedb_grpc/lib/typedb/grpc/config.ex:111` | minor |
 | VI-9 | Requirement mismatch | `AUDIT.md:11` | minor |
 
@@ -236,28 +238,44 @@ explanation is the thing that must not be wrong.
 
 ### 7. Efficiency and stability
 
-#### VI-7 — the streamed-read buffer is quadratic in the number of parts (major)
+#### VI-7 — WITHDRAWN: the streamed-read buffer is not quadratic in practice
 
 `typedb_grpc/lib/typedb/grpc/transaction.ex:900`, `on_part/3`
 
-```elixir
-%{acc | buffer: acc.buffer ++ Enum.map(rows, &Decode.row(&1, acc.columns))}
-```
+**The finding as written was wrong, and the way it was wrong is worth keeping.**
 
-`++` copies the left list. Between two `stream_next/3` calls the server can send
-many parts, and each one copies everything already buffered — so the cost of a
-batch is quadratic in the number of parts it arrives in.
+What was observed is real: reading 20 000 rows through `TypeDB.GRPC.stream/4`
+takes 477 ms at the default prefetch and 838 ms with `prefetch_size: 20_000`.
+What was *asserted* — that the cause is `acc.buffer ++ …` copying the buffer on
+every part — was reasoned from the code and never measured. It is false.
 
-**Measured**, 20 000 rows through `TypeDB.GRPC.stream/4` against a live 3.12.1:
+Instrumenting `on_part/3` to count parts and the buffer length at each append:
 
-| `prefetch_size` | time |
-| --- | ---: |
-| default | 477 ms |
-| 20 000 | 838 ms |
+| `prefetch_size` | parts | rows | longest buffer at append | time |
+| --- | ---: | ---: | ---: | ---: |
+| default | 626 | 20 000 | **0** | 432 ms |
+| 20 000 | **2** | 20 000 | **0** | 985 ms |
 
-Raising the prefetch — the option whose entire purpose is to make a large read
-faster by asking for more at a time — makes it **1.76× slower**. The fix is the
-standard one: prepend, and reverse when the buffer is served.
+The buffer is empty every single time a part arrives, so `++` never copies
+anything: its left operand is always `[]`. That is not luck, it is the
+back-pressure design — a part only arrives because a consumer asked for one, and
+`serve_stream/3` hands it over the moment it lands. And the slow case is the one
+with *two* parts, which no quadratic can explain.
+
+The real cause is the server. `prefetch_size: 20_000` tells it to produce
+twenty thousand answers before sending anything, so it sends two parts of ten
+thousand, and the driver's decoding no longer overlaps with the server's work
+the way it does across 626 small parts. Nothing in the driver is at fault, and
+the fix drafted for it — prepend and reverse on serve — was written, measured to
+change nothing (913 ms against 838 ms, noise), and reverted.
+
+What survives is a fact worth telling users, and it is now in
+`Transaction.query/3`'s documentation: raising `:prefetch_size` makes a streamed
+read **slower**, not faster.
+
+This is the audit's own method failing and then catching itself. A finding
+reasoned from code is a hypothesis; it is worth exactly as much as the
+measurement that follows it.
 
 Also examined and clean: `build_answer/1` already prepends and reverses;
 `Migration.items/1` streams in bounded chunks; the transaction's reader process

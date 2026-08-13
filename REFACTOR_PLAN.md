@@ -53,7 +53,16 @@ than the file — measured as bytes actually consumed, not as wall clock. Plus t
 existing round-trip and console-interop tests, unchanged, to prove the ceiling
 refuses nothing real.
 
-## Step 3 — the streamed-read buffer stops being quadratic (VI-7) — major
+## Step 3 — WITHDRAWN: the streamed-read buffer is not quadratic (VI-7)
+
+Executed, measured to change nothing, reverted. The mechanism the finding named
+is never exercised — the buffer is empty every time a part arrives — and the
+slowdown that prompted it belongs to the server. See VI-7 in `AUDIT.md` for the
+numbers. What survives is a documentation note, folded into step 6.
+
+The original step, for the record:
+
+### Step 3 as planned — the streamed-read buffer stops being quadratic (VI-7) — major
 
 **Changes.** `on_part/3` prepends decoded rows to the buffer and `serve_stream/3`
 reverses when it hands them over, which is the shape `build_answer/1` already
