@@ -281,6 +281,40 @@ defmodule TypeDB.GRPC.Transaction do
     :ok
   end
 
+  @doc """
+  Analyses a query without running it.
+
+  The sibling's `TypeDB.Transaction.analyze/3`, on this transport. TypeDB parses
+  and type-checks the query and describes what it would do — the conjunctions,
+  the constraints, the variable annotations — which is what makes it useful for
+  validating a generated query before it touches data.
+
+  ## Options
+
+    * `:include_plan` — ask for the execution plan as well as the structure
+    * `:timeout` — how long to wait
+
+  ## The two transports do not return the same tree
+
+  Both return `{:ok, map}` and both describe the same analysis, but the server
+  renders it twice: the HTTP API emits hand-written JSON, and gRPC emits a
+  protobuf message this driver walks into maps. The conventions were matched
+  where matching them costs nothing — `json_name` keys, so `"textSpan"` rather
+  than `"text_span"`, and a `"tag"` on every `oneof` — and they still differ in
+  detail, starting with a variable id that is a string over there and an integer
+  here.
+
+  So this is a debugging and validation tool, not a portability point. Code that
+  reads the analysis is code that knows which transport it is on.
+  """
+  @spec analyze(t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def analyze(%__MODULE__{} = tx, query, opts \\ []) when is_binary(query) do
+    case call(tx, {:analyze, query, opts}, opts) do
+      {:ok, [structure]} -> {:ok, structure}
+      {:error, _} = error -> error
+    end
+  end
+
   @doc "Commits. The transaction is finished either way."
   @spec commit(t(), keyword()) :: :ok | {:error, Error.t()}
   def commit(%__MODULE__{} = tx, opts \\ []) do
@@ -421,6 +455,7 @@ defmodule TypeDB.GRPC.Transaction do
   defp operation_name({:query_many, _}), do: :query_many
   defp operation_name({:execute_many, _}), do: :execute_many
   defp operation_name({:stream_start, _, _}), do: :stream
+  defp operation_name({:analyze, _, _}), do: :analyze
   defp operation_name(atom) when is_atom(atom), do: atom
 
   defp put_query_count(metadata, {op, queries}) when op in [:query_many, :execute_many] do
@@ -617,6 +652,15 @@ defmodule TypeDB.GRPC.Transaction do
     end
   end
 
+  def handle_call({:analyze, query, opts}, from, state) do
+    id = request_id()
+
+    request = %Proto.Analyze.Req{query: query, options: analyze_options(opts)}
+    send_reqs(state, [%Proto.Transaction.Req{req_id: id, req: {:analyze_req, request}}])
+
+    {:noreply, awaiting(state, from, id)}
+  end
+
   def handle_call(:commit, from, state) do
     id = request_id()
 
@@ -709,6 +753,16 @@ defmodule TypeDB.GRPC.Transaction do
 
   defp on_result(state, id, {:query_initial_res, %{res: {:ok, ok}}}) do
     if streaming?(state, id), do: stream_header(state, id, ok.ok), else: collect_header(state, id, ok.ok)
+  end
+
+  # An analysis answers once and whole: there is no stream behind it, so it goes
+  # straight to the caller rather than through an accumulator.
+  defp on_result(state, id, {:analyze_res, %{result: {:ok, analyzed}}}) do
+    finish_one(state, id, {:ok, Decode.message(analyzed)})
+  end
+
+  defp on_result(state, id, {:analyze_res, %{result: {:err, error}}}) do
+    finish_one(state, id, {:error, query_error(error)})
   end
 
   defp on_result(state, id, {:commit_res, _}), do: finish_one(state, id, {:ok, :ok})
@@ -1024,6 +1078,12 @@ defmodule TypeDB.GRPC.Transaction do
     end
   end
 
+  defp analyze_options(opts) do
+    if opts[:include_plan] != nil do
+      %Proto.Options.Analyze{include_plan: opts[:include_plan]}
+    end
+  end
+
   defp given_rows(nil), do: nil
   defp given_rows([]), do: nil
 
@@ -1121,6 +1181,10 @@ defmodule TypeDB.GRPC.Transaction do
   @doc "Sends queries discarding answers, raising on failure."
   @spec execute_many!(term(), term(), term()) :: :ok
   def execute_many!(tx, queries, opts \\ []), do: ok!(execute_many(tx, queries, opts))
+
+  @doc "Analyses a query, raising on failure."
+  @spec analyze!(term(), term(), term()) :: map()
+  def analyze!(tx, query, opts \\ []), do: unwrap!(analyze(tx, query, opts))
 
   @doc "Commits, raising on failure."
   @spec commit!(term(), term()) :: :ok

@@ -263,6 +263,81 @@ defmodule TypeDB.GRPC.Decode do
 
   defp pow10(n), do: Integer.pow(10, n)
 
+  # -- generic messages ------------------------------------------------------
+
+  @doc """
+  Any protobuf message as a tree of plain maps.
+
+  For `analyze`, and only for it. Every other reply in this driver decodes into
+  a struct `typedb` already defines, because a caller has something to do with
+  it; a query analysis is a description of the query, arbitrarily shaped, deep,
+  and different in every TypeDB release. Hand-mapping it would be a hundred
+  clauses that fall behind the protocol, so this walks the message's own
+  reflection instead.
+
+  The rendering follows the sibling's JSON rather than protobuf convention:
+  keys are the schema's `json_name`, so `text_span` reads as `"textSpan"`, and a
+  `oneof` becomes a `"tag"` alongside its inlined fields, which is exactly how
+  the HTTP API renders the same tree. It does **not** follow proto3's JSON
+  mapping, on purpose: that one omits fields holding their type's default, and
+  in an analysis that would silently drop every reference to variable `0`.
+  """
+  @spec message(struct()) :: map()
+  def message(%module{} = message) do
+    props = module.__message_props__()
+
+    props.field_props
+    |> Map.values()
+    |> Enum.reject(& &1.oneof)
+    |> Map.new(&{&1.json_name, field(Map.fetch!(message, &1.name_atom), &1)})
+    |> put_oneofs(message, props)
+  end
+
+  defp put_oneofs(rendered, message, props) do
+    Enum.reduce(props.oneof, rendered, fn {group, _index}, acc ->
+      case Map.fetch!(message, group) do
+        nil -> acc
+        {name, value} -> put_oneof(acc, props.field_props[props.field_tags[name]], value)
+      end
+    end)
+  end
+
+  # An embedded message is spread into its parent beside the tag — `{"tag":
+  # "isa", "instance": …}` — because that is what the HTTP API does and what
+  # makes the two readable side by side. Unless spreading would overwrite a
+  # field the parent already has, in which case the value keeps its own key: a
+  # rendering that loses data to look tidy is worse than an untidy one.
+  defp put_oneof(rendered, props, %_{} = value) do
+    inner = message(value)
+    tagged = Map.put(rendered, "tag", props.json_name)
+
+    if Enum.any?(Map.keys(inner), &is_map_key(tagged, &1)) do
+      Map.put(tagged, props.json_name, inner)
+    else
+      Map.merge(tagged, inner)
+    end
+  end
+
+  defp put_oneof(rendered, props, value) do
+    rendered
+    |> Map.put("tag", props.json_name)
+    |> Map.put(props.json_name, field(value, props))
+  end
+
+  defp field(nil, _props), do: nil
+
+  defp field(values, %{map?: true} = props) when is_map(values) do
+    Map.new(values, fn {key, value} -> {key, field(value, %{props | map?: false})} end)
+  end
+
+  defp field(values, %{repeated?: true} = props) when is_list(values) do
+    Enum.map(values, &field(&1, %{props | repeated?: false}))
+  end
+
+  defp field(value, %{enum?: true}) when is_atom(value), do: Atom.to_string(value)
+  defp field(%_{} = value, %{embedded?: true}), do: message(value)
+  defp field(value, _props), do: value
+
   # -- names -----------------------------------------------------------------
 
   defp value_type_name(:boolean), do: "boolean"

@@ -445,6 +445,80 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
     end
   end
 
+  describe "analyze" do
+    test "describes the query without running it", %{conn: conn, database: database} do
+      insert_people(conn, database, 3)
+
+      {:ok, structure} =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          Transaction.analyze(tx, "match $p isa person, has name $n; select $n;")
+        end)
+
+      assert structure["source"] == "match $p isa person, has name $n; select $n;"
+
+      constraints = structure["query"]["conjunctions"] |> hd() |> Map.fetch!("constraints")
+      tags = Enum.map(constraints, & &1["tag"])
+      assert "isa" in tags
+      assert "has" in tags
+
+      # The variable ids the constraints refer to are the ones the analysis
+      # names, including id 0 — which is the whole reason this driver does not
+      # render analyses through proto3's JSON mapping.
+      assert %{"0" => %{"name" => "p"}, "1" => %{"name" => "n"}} =
+               Map.new(structure["query"]["variableInfo"], fn {k, v} -> {to_string(k), v} end)
+
+      isa = Enum.find(constraints, &(&1["tag"] == "isa"))
+      assert isa["instance"] == %{"tag" => "variable", "id" => 0}
+    end
+
+    test "a query the server rejects comes back as a TypeDB error, not a structure", %{
+      conn: conn,
+      database: database
+    } do
+      result =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          Transaction.analyze(tx, "match $p isa there_is_no_such_type;")
+        end)
+
+      assert {:error, %TypeDB.Error{kind: :server} = error} = result
+      assert error.code == "INF2"
+    end
+
+    test "the transaction survives an analysis it rejected", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      assert {:error, _} = Transaction.analyze(tx, "match $p isa there_is_no_such_type;")
+
+      # Analysis does not execute anything, so a rejected one is a parse error
+      # and not a state the transaction has to be abandoned over.
+      assert Transaction.open?(tx)
+      assert {:ok, _} = Transaction.analyze(tx, "match $p isa person;")
+    end
+
+    test "analyze! hands back the same structure", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      query = "match $p isa person;"
+      assert Transaction.analyze!(tx, query) == elem(Transaction.analyze(tx, query), 1)
+    end
+
+    test "several analyses on one transaction do not collide", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :read)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      queries = ["match $p isa person;", "match $a isa age;", "match $n isa name;"]
+
+      results =
+        queries
+        |> Enum.map(fn query -> Task.async(fn -> Transaction.analyze(tx, query) end) end)
+        |> Task.await_many(30_000)
+
+      assert Enum.map(results, fn {:ok, structure} -> structure["source"] end) == queries
+    end
+  end
+
   defp count_like(conn, database, pattern) do
     {:ok, answer} =
       Transaction.transaction(conn, database, :read, fn tx ->
