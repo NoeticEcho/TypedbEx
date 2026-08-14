@@ -1,5 +1,9 @@
 # TypeDB over gRPC, for Elixir
 
+[![Hex.pm](https://img.shields.io/hexpm/v/typedb_grpc.svg)](https://hex.pm/packages/typedb_grpc)
+[![Documentation](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/typedb_grpc)
+[![License](https://img.shields.io/hexpm/l/typedb_grpc.svg)](LICENSE)
+
 A driver for TypeDB 3.12+ built on the gRPC API — the protocol TypeDB's own
 Rust, Java, Python and Node drivers speak.
 
