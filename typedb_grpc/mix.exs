@@ -18,6 +18,7 @@ defmodule TypeDB.GRPC.MixProject do
       elixirc_options: [debug_info: Mix.env() != :prod],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
       description: description(),
       package: package(),
       docs: docs(),
@@ -38,6 +39,20 @@ defmodule TypeDB.GRPC.MixProject do
 
   def application do
     [extra_applications: [:logger]]
+  end
+
+  # `TYPEDB_GRPC_PUBLISH=1` changes what `:typedb` *is* — a path dependency in
+  # this repository, a Hex package when published — so `deps/` has to be fetched
+  # again under the same variable. Forgetting that is not a subtle failure but it
+  # is an unhelpful one: `mix hex.publish` builds documentation, the docs
+  # environment finds no Hex copy of `typedb`, and the message says
+  # "run mix deps.get" without saying that the variable has to be set for it too.
+  #
+  # So the fetch and the build travel together, and the irreversible step stays
+  # separate and deliberate: this prepares and shows the artefact, and publishing
+  # it is still a thing a person types.
+  defp aliases do
+    ["publish.prepare": ["deps.get", "hex.build"]]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]

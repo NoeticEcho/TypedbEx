@@ -94,8 +94,13 @@ structs is visible here without a release. To see the package as it will be
 published:
 
 ```sh
-TYPEDB_GRPC_PUBLISH=1 mix hex.build
+TYPEDB_GRPC_PUBLISH=1 mix publish.prepare   # deps.get, then hex.build
+mix deps.get                                # and back to the path dependency
 ```
+
+Both halves matter. The variable changes what `:typedb` is, so `deps/` has to be
+fetched again under it — and fetched *back* afterwards, or this repository
+quietly develops against the published sibling instead of the one next door.
 
 Bumping the sibling's floor is a deliberate act. `@typedb_requirement` in
 `mix.exs` is the one place to change it, and it should be raised when this
@@ -170,9 +175,24 @@ That authorizes the local machine and stores a key for it.
 unusable without them and nothing at install time can regenerate them:
 
 ```sh
-TYPEDB_GRPC_PUBLISH=1 mix hex.build
+TYPEDB_GRPC_PUBLISH=1 mix publish.prepare
 tar -xOf typedb_grpc-*.tar contents.tar.gz | tar -tz | sort
 ```
+
+`publish.prepare` is `deps.get` and then `hex.build`, and the first half is the
+point. `TYPEDB_GRPC_PUBLISH=1` changes what `:typedb` **is** — a path dependency
+in this repository, a Hex package when published — so `deps/` has to be fetched
+again under the same variable. Running `mix deps.get` without it and
+`mix hex.publish` with it fails like this, several steps later and in a
+different environment:
+
+```
+Unchecked dependencies for environment docs:
+* typedb (Hex package)
+  the dependency is not available, run "mix deps.get"
+```
+
+which is true and unhelpful: the fetch it asks for has to carry the variable too.
 
 Confirm that `lib/protocol/` is present, that the dependency on `typedb` shows
 a version rather than a path, and that nothing private crept in.
@@ -184,7 +204,20 @@ TYPEDB_GRPC_PUBLISH=1 mix hex.publish
 ```
 
 It prints the package, its dependencies and its files, and asks for
-confirmation. It publishes the docs alongside, from the `:docs` environment.
+confirmation. It publishes the docs alongside, from the `:docs` environment —
+which is why step 3's fetch matters: that environment compiles the project, and
+it needs the Hex copy of `typedb` rather than the path.
+
+**Then put the working copy back:**
+
+```sh
+mix deps.get
+```
+
+Without the variable, so `deps/` returns to the path dependency. Skipping this
+leaves the repository developing against the *published* sibling instead of the
+one next door, which is precisely what the monorepo exists to avoid — and it
+fails silently, because both compile.
 
 **5. Check what landed.** Hexdocs builds separately from the package and can
 fail on its own:
