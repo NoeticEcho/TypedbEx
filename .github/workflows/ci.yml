@@ -435,7 +435,12 @@ jobs:
       - name: Compile and run a consumer application
         working-directory: typedb/test/support/consumer
         env:
-          TYPEDB_PATH: ${{ github.workspace }}
+          # The packages live in `typedb/` and `typedb_grpc/`; the workspace
+          # root has no mix.exs, so pointing the consumer's path dependency at
+          # it fails before the driver is even compiled. The default in the
+          # consumer's own mix.exs — `"../../.."` — is already right; only this
+          # override was wrong.
+          TYPEDB_PATH: ${{ github.workspace }}/typedb
           WITH_OPTIONAL: ${{ matrix.with_optional }}
         run: |
           mix deps.get
@@ -537,7 +542,13 @@ jobs:
       - name: Run unit tests
         run: mix test
 
+      # MIX_ENV: dev, overriding the workflow-level `test`, for the same reason
+      # the Dialyzer step below and the sibling `typedb` job both do it: credo
+      # is an `only: [:dev]` dependency, so under `test` the task does not
+      # exist and the step fails with "The task could not be found".
       - name: Credo
+        env:
+          MIX_ENV: dev
         run: mix credo --strict
 
       - uses: actions/cache@v4
@@ -731,12 +742,11 @@ jobs:
             -p 8443:8443 -p 1730:1730 \
             -v "$PWD/tls:/tls:ro" \
             typedb/typedb:3.12.1 \
-            typedb server \
-              --server.http.enabled true --server.http.listen-address 0.0.0.0:8443 \
-              --server.address 0.0.0.0:1730 \
-              --server.encryption.enabled true \
-              --server.encryption.certificate /tls/server.pem \
-              --server.encryption.certificate-key /tls/server.key
+            --server.http.enabled true --server.http.listen-address 0.0.0.0:8443 \
+            --server.address 0.0.0.0:1730 \
+            --server.encryption.enabled true \
+            --server.encryption.certificate /tls/server.pem \
+            --server.encryption.certificate-key /tls/server.key
 
           for i in $(seq 1 60); do
             if openssl s_client -connect 127.0.0.1:1730 -CAfile tls/ca.pem </dev/null 2>&1 \
