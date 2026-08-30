@@ -133,10 +133,70 @@ defmodule TypeDB.GRPC.ErrorTest do
       rpc = %GRPC.RPCError{status: 13, message: "Internal", details: nil}
       error = GRPCError.from_rpc_error(rpc, "opening a transaction")
 
-      assert error.kind == :server
+      # The kind here used to be `:server` and is now `:transport` — see the
+      # INTERNAL clause in `kind/1`. What this test is about is unchanged: with
+      # nothing from the server to say, the context is what names the operation.
+      assert error.kind == :transport
       assert error.code == nil
       assert error.status == 500
       assert error.message == "opening a transaction: Internal"
+    end
+
+    # TypeDB attaches ErrorInfo and DebugInfo to every error it generates —
+    # measured against 3.12.1, deleting an absent database arrives as status 3
+    # carrying both. An INTERNAL with neither did not come from TypeDB: it is
+    # the gRPC stack reporting its own connection failure, and calling that
+    # `:server` says the server answered when nothing answered at all.
+    test "an INTERNAL with no details is the connection failing, not the server" do
+      rpc = %GRPC.RPCError{
+        status: 13,
+        message: "connection_error: protocol_error, Invalid connection preface received",
+        details: nil
+      }
+
+      error = GRPCError.from_rpc_error(rpc, "opening a connection")
+
+      assert error.kind == :transport
+      assert error.code == nil
+      assert error.reason == {:grpc_status, 13}
+      assert TypeDB.Error.retryable?(error)
+    end
+
+    test "an INTERNAL with an empty detail list is the same failure" do
+      rpc = %GRPC.RPCError{status: 13, message: "Internal", details: []}
+
+      assert GRPCError.from_rpc_error(rpc, "querying").kind == :transport
+    end
+
+    # The other half, and the one that keeps the rule narrow: an INTERNAL that
+    # TypeDB itself generated carries its details, and stays `:server`.
+    test "an INTERNAL TypeDB itself generated stays :server" do
+      rpc = %GRPC.RPCError{
+        status: 13,
+        message: "Request generated error",
+        details: [
+          %Google.Protobuf.Any{
+            type_url: "type.googleapis.com/google.rpc.ErrorInfo",
+            value: Google.Rpc.ErrorInfo.encode(%Google.Rpc.ErrorInfo{reason: "SRV13"})
+          }
+        ]
+      }
+
+      error = GRPCError.from_rpc_error(rpc, "querying")
+
+      assert error.kind == :server
+      assert error.code == "SRV13"
+      assert error.status == 500
+    end
+
+    test "a status that is not INTERNAL is unaffected by the details it carries" do
+      # The rule is about INTERNAL alone. A rejection is a rejection whether or
+      # not the server bothered to explain it.
+      assert GRPCError.from_rpc_error(%GRPC.RPCError{status: 3, message: "x", details: nil}, "c").kind ==
+               :server
+
+      assert GRPCError.from_rpc_error(%GRPC.RPCError{status: 9, message: "x", details: []}, "c").kind ==
+               :server
     end
 
     test "a detail this build has no schema for does not cost the error" do
