@@ -49,6 +49,8 @@ start_link(keyword()) :: GenServer.on_start()
 stop(conn() | pid(), term(), timeout()) :: :ok
 stop/1
 stop/2
+stream(conn(), String.t(), String.t(), keyword()) :: Enumerable.t()
+stream/3
 transaction(
   conn(),
   String.t(),

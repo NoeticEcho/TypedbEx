@@ -1,6 +1,6 @@
 # Audit — TypeDB Elixir driver
 
-Seven audits, newest first, and all seven are here — Audit IV's section was
+Eight audits, newest first, and all eight are here — Audit IV's section was
 written during Audit VI, which found the index pointing at nothing. Audits I–IV
 cover `typedb`, Audit V covers `typedb_grpc`, Audit VI is the first to sweep
 both — and the first to audit efficiency, stability and security as categories
@@ -9,6 +9,7 @@ writing it down.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
+| [Audit VIII](#audit-viii--typedb-against-the-native-drivers-at-56475a0) | `56475a0`, the HTTP package, against the HTTP API and the Rust driver | 6: 1 major, 2 minor, 3 not-ours | 2 fixed, 1 deferred, 3 recorded |
 | [Audit VII](#audit-vii--typedb-efficiency-at-1b1f8b6) | `1b1f8b6` (0.9.0), the HTTP package, efficiency only | 8: 0 critical, 1 major, 4 minor, 3 withdrawn | 2 fixed, 3 documented, 3 withdrawn — `94bb372` |
 | [Audit VI](#audit-vi--both-packages-at-a4a2e23) | `a4a2e23`, both packages | 10: 0 critical, 4 major, 5 minor, 1 withdrawn | 8 fixed, 1 documented, 1 withdrawn — `fc5c3a6` |
 | [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | all fixed, `bb08ff1` |
@@ -38,6 +39,209 @@ Audit VII is the first held to that rule, and the rule earned its keep on the
 first pass: of eight findings, **three were withdrawn by the measurement that
 was supposed to confirm them**, and a fourth shipped at a third of the size it
 was first written down as.
+
+---
+
+# Audit VIII — `typedb` against the native drivers, at `56475a0`
+
+Audited at `56475a0`, the HTTP package, on Erlang/OTP 29.0.5 and Elixir 1.20.4.
+One question: **is this driver worse than the ones TypeDB ships, and where?**
+Measured against two references — the HTTP API this driver speaks, and the Rust
+driver, which speaks gRPC and is the richest of them.
+
+The rule from Audit VII holds and earned its keep again: one finding was
+withdrawn by the measurement meant to confirm it, and the finding that mattered
+most was only worth writing down *after* three separate probes said it could be
+built honestly.
+
+## Stage 1 — the surface, endpoint by endpoint
+
+Every endpoint the published HTTP API reference documents, against what the
+driver calls:
+
+| | endpoints | covered |
+| --- | ---: | --- |
+| `signin` | 1 | ✅ |
+| `version`, `health` | 2 | ✅ |
+| databases — list, get, create, delete, schema, type-schema | 6 | ✅ |
+| users — list, get, create, update, delete | 5 | ✅ |
+| transactions — open, close, commit, rollback, query, analyze | 6 | ✅ |
+| one-shot `query` | 1 | ✅ |
+| **total** | **21** | **21** |
+
+Plus two the reference does not list: `GET /servers` (`Server.servers/1`), and
+`User.current/1`, which has no endpoint at all — it is the configured username
+handed to `get/3`. **There is no endpoint this driver cannot reach.**
+
+## Stage 2 — against Rust, in three honest piles
+
+Rust rides gRPC, so a flat feature diff would be dishonest. Sorted by *why* the
+difference exists.
+
+**Not expressible over HTTP — not this driver's gap**
+
+* `export_to_file` / `import_from_file`. No endpoints exist; `typedb_grpc` has
+  them.
+* `QueryOptions.prefetch_size`. A knob on a stream the HTTP API does not have.
+* `ConceptRow.get_index()` and column order — **withdrawn, see VIII-6.**
+
+**Declined on purpose, already recorded**
+
+* Rust's thirty-odd `try_get_*` accessors against one `typed_value/1` plus
+  `category/1` — Audit I's reasoning, restated in Audit VI.
+* `AnalyzedQuery` is a typed struct in Rust and a raw map here, documented in
+  `Transaction.analyze/3` as the one return value SemVer does not cover.
+
+**Real gaps** — VIII-1, VIII-2, VIII-3 below.
+
+## Outcome
+
+| | What | Outcome |
+| --- | --- | --- |
+| VIII-1 | No way to read an answer larger than the server's cap | **Fixed** — `TypeDB.stream/4` |
+| VIII-2 | No `Transaction.open?/1`, which Rust has | **Deferred** — see below |
+| VIII-3 | No cluster failover; Rust has `primary_failover_retries` | **Recorded, not attempted** |
+| VIII-4 | `stream/4` needed `offset`/`limit` to compose, and `fetch` to be ruled out | **Measured**, both |
+| VIII-5 | A full page might have warned "truncated" on every page | **Measured** — it does not |
+| VIII-6 | `select` order should be exposed as Rust exposes it | **Withdrawn** — the server does not send it |
+
+## Findings
+
+### VIII-1 — an answer larger than the cap could not be read at all (major)
+
+`typedb/lib/typedb.ex`, `query/4`
+
+TypeDB caps a read at 10,000 answers over HTTP. `Answer.truncated?/1` says so
+honestly, and `guides/recipes.md` carries a hand-rolled paging recipe — which is
+the shape of the gap: the driver told you it had failed to give you the answer
+and handed you a recipe. Rust streams.
+
+**Measured**, 25,000 rows on 3.12.1:
+
+| | |
+| --- | --- |
+| `query/4` | 10,000 rows, `truncated? == true` |
+| `stream/4` | **25,000 rows in 998 ms** |
+
+The fix is `TypeDB.stream/4`, a lazy `Stream` of `ConceptRow` built on
+`Stream.resource/3`: one `:read` transaction for the whole walk, `offset` and
+`limit` appended as the query's last two stages, the transaction closed when the
+stream ends — including when a consumer halts early or raises.
+
+**Why it is honest and not merely convenient.** Paging across transactions would
+hand out a torn answer. Paging inside one is a snapshot, and that was measured
+twice before a line was written: a walk collecting 25,000 rows saw none of the
+5,000 a concurrent transaction inserted while it walked, and the database held
+30,000 at the end.
+
+It raises rather than returning `{:error, _}`, because a lazy stream has nowhere
+to put a tuple — the failure happens inside `Enum.to_list/1`, long after the
+call returned. That also means no `stream!/4`: there is nothing for it to do
+differently, and `api_convention_test.exs` agrees, because a spec without
+`{:error, _}` is not a fallible function.
+
+**What it cannot do, and says so.** `offset` and `limit` after a `fetch` stage
+are `400 TQL0` — measured — so this walks `conceptRows` only. And paging is
+meaningless without a total order: a query with no `sort` may hand you a row
+twice. The driver does not go looking for the word `sort` in your query; that
+check would be wrong the first time somebody sorted in a sub-pipeline.
+
+### VIII-2 — there is no way to ask whether a transaction is still open (minor)
+
+`typedb/lib/typedb/transaction.ex`
+
+Rust has `Transaction::is_open()`. Here a transaction is a plain struct, and the
+only way to find out is to use it: after `close/1`, a query comes back as a
+server error rather than as anything naming the real state.
+
+Deferred rather than fixed, and the reason is not effort. The transaction is a
+struct precisely so it can cross process boundaries, so `open?/1` can only ever
+be a question to the *server* — a round trip, racy by the time it answers, and
+the driver already documents that a transport failure ends a transaction without
+telling anyone. A local flag would be a lie and a request would be a lie with
+latency. It wants its own decision, not a line in a streaming pass.
+
+### VIII-3 — no cluster failover (minor, out of scope)
+
+Rust's `DriverOptions::primary_failover_retries`, `TypeDBDriver::servers()` and
+`primary_server()` steer a client around a cluster. This driver reads
+`Server.servers/1` and connects to exactly one URL.
+
+Recorded and deliberately not attempted: it is only meaningful against TypeDB
+Cluster, which this audit had no instance of, and the rule of this document is
+that nothing goes in unmeasured. Building failover blind would be the worst way
+to close a gap nobody here can test.
+
+### VIII-4 — the two facts `stream/4` is built on
+
+Both measured before the design was fixed, because the API depended on them.
+
+* **`offset`/`limit` compose as pipeline stages.** `offset 0/5/20/24 limit 5`
+  over 25 rows returned 5, 5, 5 and 1. A caller's own `limit` still wins:
+  `limit 5; offset 0; limit 10` returns 5, so a bounded query stays bounded when
+  the stream appends to it.
+* **`fetch` cannot be paged.** `offset`/`limit` after a `fetch` stage is a
+  syntax error, `400 TQL0`. That is why `stream/4` is documented as
+  `conceptRows` only rather than discovering it at the caller's expense.
+
+### VIII-5 — a full page does not warn about truncation
+
+The hazard was specific: `stream/4` sets each page's `:answer_count_limit` to the
+page size, and `TypeDB.Log.answer_warning/2` logs at `:warning` whenever the
+server attaches one. A page that filled exactly would then have logged on every
+page of every walk.
+
+**Measured**: `limit 10` with `answer_count_limit: 10` over 40 rows returns 10
+with `truncated? == false`, and the same at 40/40. The server warns when it
+really had more *after* the pipeline, and the `limit` stage runs first. No noise.
+
+### VIII-6 — WITHDRAWN: the server does not send the `select` order
+
+Rust's `ConceptRow::get_index()` and `get_column_names()` imply ordered columns,
+and this driver's `variables/1` returns `Map.keys/1` — sorted, not the order the
+query asked for. That looked like a gap.
+
+The first probe agreed, and was wrong: `select $b, $c, $p` came back as
+`["b", "c", "p"]`, which is the select order **and** alphabetical, and Elixir
+stores a map of that size sorted by key. The test proved nothing.
+
+Re-run with an order that is not alphabetical, `select $zeta, $alpha, $mid`, the
+raw response body reads:
+
+```
+"alpha":{…},"mid":{…},"zeta":{…}
+```
+
+**The server sends them sorted.** The order a query asked for does not survive
+to the client, so there is nothing for this driver to expose and `get_index()`
+has no meaning over this transport. `variables/1` returning sorted names is the
+honest maximum.
+
+Kept in full because of how nearly it went the other way: a first measurement
+that confirms a finding is worth as little as no measurement, when the input was
+chosen badly.
+
+## Where this driver is ahead, and why
+
+Not a consolation list — these are things the native drivers structurally cannot
+do, and all of them fall out of OTP.
+
+* **Requests run in the caller's process.** The connection owns a token and an
+  adapter state in a read-concurrent ETS table and is not on the path of any
+  request. A driver object that every call passes through cannot be anything but
+  a throughput ceiling; this one has no such object.
+* **It is a child spec.** Restart, isolation and shutdown are the supervisor's,
+  not the driver's, and `running?/1` answers what a request actually needs
+  rather than what `Process.whereis/1` knows.
+* **Three interchangeable transports** behind one behaviour, with a CI matrix
+  that runs the whole suite through each — the only thing that makes
+  "interchangeable" true rather than aspirational.
+* **`{:error, %TypeDB.Error{}}` and a `!` twin on everything**, enforced
+  mechanically rather than by review.
+* **`Enumerable` on answers and `to_struct/3`** — and now a `Stream`, which
+  composes with `Flow` and `GenStage` for free.
+* **Parameterisation is safe by construction**, not by discipline: `given` rows
+  are emitted in the tagged wire form, so a value cannot be read as syntax.
 
 ---
 

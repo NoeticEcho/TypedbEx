@@ -297,6 +297,132 @@ defmodule TypeDB do
     end
   end
 
+  @default_page_size 1_000
+
+  @doc """
+  Walks a read query one page at a time, as a lazy `Stream` of `TypeDB.ConceptRow`.
+
+  `query/4` gives you what fits: the HTTP API caps a read at 10,000 answers by
+  default, and `TypeDB.Answer.truncated?/1` is how you find out it happened. This
+  walks the whole answer instead, and it is the only way to read one larger than
+  the cap over this transport.
+
+      conn
+      |> TypeDB.stream("social", \"""
+           match $p isa person, has name $n;
+           sort $n;
+           select $n;
+         \""")
+      |> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+      |> Enum.each(&IO.puts/1)
+
+  Being a `Stream`, it composes with everything that takes one — `Stream.filter/2`,
+  `Enum.take/2`, `Flow`, `GenStage` — and nothing is fetched until something
+  demands it.
+
+  ## One transaction, one snapshot
+
+  The whole walk runs inside a single `:read` transaction, which is what makes
+  the pages add up to one answer rather than to several. Measured against 3.12.1:
+  a walk that collected 30 rows saw none of the 30 a concurrent transaction
+  inserted while it was walking, and the database held 60 at the end.
+
+  The transaction is closed when the stream finishes, and also when a consumer
+  stops early — `Enum.take/2`, a `Stream.filter/2` that finds what it wanted, an
+  exception in the middle. That is `Stream.resource/3` doing its job.
+
+  ## Sort, or the pages will not line up
+
+  Paging is `offset` and `limit`, appended to your query as its last two stages.
+  Those are only meaningful against a **total order**, so a query without a
+  `sort` stage may hand you a row twice and never hand you another. The driver
+  cannot check this for you: TypeQL is the server's language, and a driver that
+  went looking for the word `sort` in your query would be wrong the first time
+  someone sorted in a sub-pipeline.
+
+  Sort on something unique. `sort $n` where `$n` is a `@key` is the easy case.
+
+  ## What it does not do
+
+  **`fetch` pipelines cannot be paged.** `offset` and `limit` after a `fetch`
+  stage are a syntax error — measured, `400 TQL0` — so this streams
+  `conceptRows` and nothing else. A `fetch` query reaches you as the server's own
+  parse error rather than as anything this driver invented.
+
+  **It raises rather than returning `{:error, _}`.** A lazy stream has no place to
+  put an error tuple: the failure happens inside `Enum.to_list/1`, long after this
+  function returned. Every failure is a `TypeDB.Error`, the same one `query/4`
+  would have returned, so `rescue`/`try` works as it does everywhere else. This is
+  why there is no `stream!/4` — there is nothing for it to do differently.
+
+  ## Options
+
+  Query and transaction options (see `TypeDB.Options`), plus:
+
+    * `:page_size` — rows per request. Defaults to `#{@default_page_size}`. It is
+      also used as the `:answer_count_limit` of each page unless you set that
+      yourself, so a page can never be silently truncated.
+    * `:timeout` — bounds each page's request, not the walk.
+    * `:deadline` — the same, per request. A stream has no wall-clock budget of
+      its own; the consumer decides when to stop.
+
+  `:transaction_type` is not among them. A walk that wrote would be a walk whose
+  pages moved underneath it.
+  """
+  @spec stream(conn(), String.t(), String.t(), keyword()) :: Enumerable.t()
+  def stream(conn, database, query, opts \\ []) do
+    database = Wire.string!(database, "database name")
+    query = Wire.string!(query, "query")
+    CallOptions.validate!(opts, CallOptions.stream(), "TypeDB.stream/4")
+
+    page_size = Keyword.get(opts, :page_size, @default_page_size)
+    open_opts = Keyword.take(opts, [:timeout, :deadline] ++ Options.transaction_keys())
+
+    query_opts =
+      opts
+      |> Keyword.take([:timeout, :deadline] ++ Options.query_keys())
+      |> Keyword.put_new(:answer_count_limit, page_size)
+
+    Stream.resource(
+      fn -> {Transaction.open!(conn, database, :read, open_opts), 0} end,
+      &next_page(&1, query, page_size, query_opts),
+      &close_walk/1
+    )
+  end
+
+  # `:done` rather than a boolean beside the offset: the halt has to survive one
+  # more trip through here, because `Stream.resource/3` calls the next function
+  # again after it emits the last element.
+  defp next_page({tx, :done}, _query, _page_size, _opts), do: {:halt, {tx, :done}}
+
+  defp next_page({tx, offset}, query, page_size, opts) do
+    rows =
+      tx
+      |> Transaction.query!(page_query(query, offset, page_size), opts)
+      |> Answer.rows()
+
+    # A short page is the end of the answer. A full one might be, and costs one
+    # more request to find out — which is the price of a cursor the API does not
+    # give us.
+    if length(rows) < page_size do
+      {rows, {tx, :done}}
+    else
+      {rows, {tx, offset + length(rows)}}
+    end
+  end
+
+  defp page_query(query, offset, page_size) do
+    "#{String.trim_trailing(query)} offset #{offset}; limit #{page_size};"
+  end
+
+  # Best effort, and deliberately not `close!/2`: the walk is over either way,
+  # and a stream that raised on the way out would replace the caller's own
+  # exception with one about cleanup.
+  defp close_walk({tx, _offset}) do
+    _ = Transaction.close(tx)
+    :ok
+  end
+
   @doc """
   Runs `fun` inside a transaction, committing on success.
 
