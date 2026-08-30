@@ -26,6 +26,9 @@ defmodule TypeDB.CallOptions do
   @doc "Options accepted by `TypeDB.transaction/5` and `TypeDB.Transaction.open/4`."
   def open, do: @request ++ Options.transaction_keys()
 
+  @doc "Options accepted by `TypeDB.stream/4`."
+  def stream, do: [:page_size] ++ shared()
+
   @doc "Options accepted by a call that only makes a request — commit, rollback, close, analyze."
   def request, do: @request
 
@@ -76,6 +79,7 @@ defmodule TypeDB.CallOptions do
     timeout: {&__MODULE__.timeout?/1, "a positive integer in milliseconds, or :infinity"},
     deadline: {&__MODULE__.timeout?/1, "a positive integer in milliseconds, or :infinity"},
     commit: {&is_boolean/1, "true or false"},
+    page_size: {&__MODULE__.positive_integer?/1, "a positive integer"},
     include_instance_types: {&is_boolean/1, "true or false"},
     include_query_structure: {&is_boolean/1, "true or false"}
   }

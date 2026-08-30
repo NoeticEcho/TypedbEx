@@ -19,6 +19,12 @@ defmodule TypeDB.CallOptionsTest do
        fn opts -> TypeDB.query(conn, "social", "match $p isa person;", opts) end},
       {"TypeDB.transaction/5", CallOptions.open(),
        fn opts -> TypeDB.transaction(conn, "social", :read, fn _tx -> :ok end, opts) end},
+      # `stream/4` is lazy, so the options have to be validated when it is called
+      # rather than when it is walked — a typo that only surfaced at `Enum.to_list/1`
+      # would name the wrong line in the caller's source. Forced with `Enum.take/2`
+      # so the check runs either way.
+      {"TypeDB.stream/4", CallOptions.stream(),
+       fn opts -> conn |> TypeDB.stream("social", "match $p isa person;", opts) |> Enum.take(0) end},
       {"TypeDB.Transaction.open/4", CallOptions.open(),
        fn opts -> Transaction.open(conn, "social", :read, opts) end},
       {"TypeDB.Transaction.query/3", CallOptions.transaction_query(),
@@ -359,6 +365,7 @@ defmodule TypeDB.CallOptionsTest do
   defp value_for(:include_instance_types), do: true
   defp value_for(:include_query_structure), do: false
   defp value_for(:answer_count_limit), do: 10
+  defp value_for(:page_size), do: 10
   defp value_for(:transaction_timeout_millis), do: 5_000
   defp value_for(:schema_lock_acquire_timeout_millis), do: 5_000
 end

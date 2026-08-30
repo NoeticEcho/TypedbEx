@@ -20,6 +20,34 @@ failing, so the naive version of this is wrong in a way you will not notice:
   transaction_type: :read)
 ```
 
+`TypeDB.stream/4` is the answer, and it is one call:
+
+```elixir
+conn
+|> TypeDB.stream("social", """
+     match $p isa person, has name $n;
+     sort $n;
+     select $n;
+   """)
+|> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+|> Enum.each(&IO.puts/1)
+```
+
+25,000 rows in **998ms**, lazily, with no cap — and being a `Stream` it composes
+with `Stream.filter/2`, `Enum.take/2`, `Flow` and `GenStage` for free.
+
+The whole walk runs in one `:read` transaction, so the pages add up to one
+answer rather than to several: measured, a walk collecting 25,000 rows saw none
+of the 5,000 a concurrent transaction inserted while it walked. The transaction
+closes when the stream ends, and also when you stop early. **`sort` is still
+yours to write** — see below for why.
+
+The rest of this section is what `stream/4` does for you. Read it if you need
+to page by hand: a cursor of your own, pages served to a client, or a `fetch`
+pipeline, which cannot be paged at all — `offset` after `fetch` is `400 TQL0`.
+
+## Paging by hand
+
 Page it. TypeQL has `offset` and `limit`, and **`sort` is not optional** — a
 `match` makes no promise about order, so paging without one is free to skip rows
 and repeat others between calls:
