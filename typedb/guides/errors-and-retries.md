@@ -172,14 +172,20 @@ Codes worth knowing, all verified against a live server:
 | `CNT9` | 400 | a constraint such as `@key` was violated |
 | `AUT1` / `AUT3` | 401 | bad credentials / rejected token |
 | `STC2` | 400 | isolation conflict — re-run the transaction |
-| `HSR2` | 400 | the request body is over TypeDB's 2 MiB limit |
+| `HSR2` | 400 | the request body is over the server's size limit — 2 MiB on 3.12, unenforced on 3.13 |
 
-A request far past that 2 MiB limit does not get `HSR2` at all: the server
-closes the socket, and the driver can only report a `:transport` failure, which
-`retryable?/1` calls retryable and `:max_retries` will re-send. There is no way
-for the driver to tell that apart from a network blip — so a bulk load that
-reproducibly "times out" is a batch that is too big. See
-[Recipes](recipes.html#load-a-lot-of-rows) for batching by payload size.
+That limit is a server's, not this driver's, and it moved: bisected to the KiB
+through this driver, 3.12.1 accepts 2047 KiB and refuses 2048 KiB, while
+3.13.0-rc0 accepted every size tried up to 512 MiB and refused none.
+
+On a server that enforces it, a request far past the limit does not get `HSR2`
+at all: the server closes the socket, and the driver can only report a
+`:transport` failure, which `retryable?/1` calls retryable and `:max_retries`
+will re-send. There is no way for the driver to tell that apart from a network
+blip — so a bulk load that reproducibly "times out" against 3.12 is a batch
+that is too big. See [Recipes](recipes.html#load-a-lot-of-rows) for batching by
+payload size, which is worth doing on 3.13 too: it is what keeps the same code
+working against both.
 
 ## When the server restarts
 

@@ -204,11 +204,27 @@ defmodule TypeDB.Transaction do
   the accepted types and explains why the driver encodes them rather than
   forwarding raw JSON.
 
-  **TypeDB refuses a request body over 2 MiB**, which is a limit on bytes rather
-  than rows and has no server-side flag: measured against 3.12.1, 2047 KiB is
-  accepted and 2048 KiB comes back as `400 HSR2`. Batch large loads by payload
-  size — see [Recipes](recipes.html#load-a-lot-of-rows), which also explains why
-  a body *far* over the limit presents as a `:transport` failure instead.
+  **A request body has a size limit on TypeDB 3.12, and does not on 3.13.** It
+  is a limit on bytes rather than rows and there is no server-side flag for it.
+  Bisected to the KiB, through this driver, against both servers:
+
+  | | 3.12.1 | 3.13.0-rc0 |
+  | --- | --- | --- |
+  | largest body accepted | 2047 KiB | **512 MiB, the largest tried** |
+  | smallest body refused | 2048 KiB — `400 HSR2` | none found |
+
+  On 3.12 a body a little over the line is `400 HSR2` and a body far over it
+  presents as a `:transport` failure instead — see
+  [Recipes](recipes.html#load-a-lot-of-rows). On 3.13.0-rc0 neither happens: the
+  same sweep that stops at 2 MiB on 3.12.1 was accepted at 1, 2, 4, 8, 16, 32,
+  64, 128, 256 and 512 MiB.
+
+  **Batch large loads by payload size anyway.** The advice is unchanged and is
+  now about portability rather than about a limit: code written against 3.13
+  that sends a 4 MiB body fails on every 3.12 server it ever meets, and the
+  failure arrives as a `:transport` timeout rather than as anything that names
+  the cause. 512 MiB is also not a size a request should be — it is where the
+  measurement stopped, not a recommendation.
 
   ## Raises
 

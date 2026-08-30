@@ -194,11 +194,22 @@ end)
 
 20,000 rows in batches of 2,000: **2468ms**, about 8,100 rows a second.
 
-**The ceiling is bytes, not rows.** TypeDB refuses a request body over
-**2 MiB** — bisected against 3.12.1, 2047 KiB is accepted and 2048 KiB is not —
-and there is no server flag for it. 2,000 rows of two short attributes is
-620 KiB and comfortable; the same 2,000 rows carrying a kilobyte of text each is
-not. Batch on the size of what you are sending:
+**The ceiling is bytes, not rows — and on 3.12 there is one.** Bisected to the
+KiB through this driver, against both servers:
+
+| | 3.12.1 | 3.13.0-rc0 |
+| --- | --- | --- |
+| largest body accepted | 2047 KiB | **512 MiB, the largest tried** |
+| smallest body refused | 2048 KiB | none found |
+
+There is no server flag for it either way. 2,000 rows of two short attributes is
+620 KiB and comfortable on both; the same 2,000 rows carrying a kilobyte of text
+each is over the line on 3.12 and fine on 3.13.
+
+**Batch on the size of what you are sending regardless.** On 3.12 it is a limit;
+on 3.13 it is portability — a load written against 3.13 that sends 4 MiB bodies
+breaks on every 3.12 server it meets, and breaks in the ugly way described
+below. The batching is the same code either way:
 
 ```elixir
 people
@@ -227,11 +238,12 @@ people
 end)
 ```
 
-Being wrong about it fails in two different ways, and only one of them is
-obvious. A body a little over the line comes back as `400 HSR2` — *"Failed to
-buffer the request body: length limit exceeded"* — which says what happened. A
-body far over it (15 MiB, say) makes the server close the socket instead, and
-the driver can only report that as a `:transport` failure, which
+On a server that enforces the limit, being wrong about it fails in two different
+ways, and only one of them is obvious. A body a little over the line comes back
+as `400 HSR2` — *"Failed to buffer the request body: length limit exceeded"* —
+which says what happened. A body far over it (15 MiB, say) makes the server
+close the socket instead, and the driver can only report that as a
+`:transport` failure, which
 `TypeDB.Error.retryable?/1` calls retryable, so `:max_retries` will send the
 whole thing again to no purpose. **A bulk load that "times out" or reports a
 closed socket, reproducibly, is a batch that is too big rather than a network
