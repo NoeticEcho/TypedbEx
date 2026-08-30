@@ -233,17 +233,23 @@ defmodule TypeDB.RecipesIntegrationTest do
     assert count(conn, database) == 0
   end
 
-  test "a request body over 2 MiB is refused", %{conn: conn} do
+  test "the request body size limit is what the guides say it is", %{conn: conn} do
     # Its own database: ExUnit orders tests within a module by seed, and the
     # recipes test counts every person and then deletes them all.
     database = TypeDB.Case.unique_name("recipes_size")
     on_exit(fn -> Database.delete(conn, database) end)
 
-    # The bulk-load recipe batches by payload size rather than row count,
-    # because this limit is on bytes and has no server-side flag. Bisected
-    # against 3.12.1: 2047 KiB accepted, 2048 KiB not. Pinned here so that a
-    # server that moves it fails a build rather than a reader's bulk load —
-    # the `latest` job in the matrix is the one to watch.
+    # The bulk-load recipe batches by payload size rather than row count. On
+    # 3.12 that is a limit; on 3.13 it is portability. Both halves are bisected
+    # to the KiB through this driver and written down in `guides/recipes.md`,
+    # `guides/errors-and-retries.md` and `TypeDB.Transaction.query/3`:
+    #
+    #   3.12.1      2047 KiB accepted, 2048 KiB refused with 400 HSR2
+    #   3.13.0-rc0  every size tried accepted, up to 512 MiB; none refused
+    #
+    # This test asserts whichever of the two the server in front of it is, so a
+    # server that moves the limit again fails a build rather than a reader's
+    # bulk load. The `latest` job in the integration matrix is the one to watch.
     assert :ok = Database.create_if_not_exists(conn, database)
     assert {:ok, _} = TypeDB.query(conn, database, @schema)
 
@@ -253,26 +259,43 @@ defmodule TypeDB.RecipesIntegrationTest do
     """
 
     # Rows of a known size, so the body can be aimed either side of the line.
-    rows = fn count ->
-      for i <- 1..count, do: %{"n" => "big-#{i}", "t" => String.duplicate("x", 1_000)}
+    rows = fn prefix, count ->
+      for i <- 1..count, do: %{"n" => "#{prefix}-#{i}", "t" => String.duplicate("x", 1_000)}
     end
 
-    under = rows.(1_800)
-    over = rows.(2_100)
+    under = rows.("under", 1_800)
+    over = rows.("over", 2_100)
 
     assert body_bytes(query, under) < 2 * 1024 * 1024
     assert body_bytes(query, over) > 2 * 1024 * 1024
 
+    # Under 2 MiB is accepted by every server this driver supports.
     assert {:ok, _} = TypeDB.query(conn, database, query, transaction_type: :write, given_rows: under)
 
-    assert {:error, %TypeDB.Error{status: 400, code: "HSR2"} = error} =
-             TypeDB.query(conn, database, query, transaction_type: :write, given_rows: over)
-
-    assert error.message =~ "length limit exceeded"
-
-    # And the rows from the accepted batch are all there, so "under the limit"
-    # means the whole batch landed rather than part of it.
+    # And the rows from that batch are all there, so "accepted" means the whole
+    # batch landed rather than part of it.
     assert count(conn, database, ~s|, has note $t|) == 1_800
+
+    result = TypeDB.query(conn, database, query, transaction_type: :write, given_rows: over)
+
+    if enforces_body_limit?(conn) do
+      assert {:error, %TypeDB.Error{status: 400, code: "HSR2"} = error} = result
+      assert error.message =~ "length limit exceeded"
+    else
+      assert {:ok, _} = result
+      assert count(conn, database, ~s|, has note $t|) == 1_800 + 2_100
+    end
+  end
+
+  # TypeDB 3.13 stopped enforcing a request body limit. Compared on major and
+  # minor alone: the server reports `3.13.0-rc0`, and `Version.match?/2` reads a
+  # pre-release as *below* `3.13.0`, which would put a release candidate on the
+  # wrong side of the very line it moved.
+  defp enforces_body_limit?(conn) do
+    {:ok, %{version: version}} = TypeDB.Server.version(conn)
+    %Version{major: major, minor: minor} = Version.parse!(version)
+
+    {major, minor} < {3, 13}
   end
 
   # What the driver will actually send: the tagged wire form, not the maps.
