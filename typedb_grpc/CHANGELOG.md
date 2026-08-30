@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-30
+
+A minor under the 0.x rule, and for one reason: an error that used to arrive as
+`kind: :server` now arrives as `kind: :transport`. No signature changes.
+
+### Changed
+
+- **A gRPC `INTERNAL` carrying no details is now `:transport`, not `:server`.**
+  It is what a connection-level protocol failure looks like — the peer hung up,
+  TLS did not come up, the stream broke — and TypeDB's own failures always carry
+  details, because that is where the `TSVn`/`TQLn` code lives. Classifying the
+  empty case as `:server` said "the server considered your request and refused
+  it" about a request the server may never have seen.
+
+  It was found as a flaky test, not as a code review: the TLS suite failed about
+  one run in four, reproducibly 5 times in 20, because a connection that failed
+  during the handshake reported as a server answer. After the change, 25 runs in
+  a row are clean.
+
+  **Callers branching on `kind`** — a supervisor that retries `:transport` and
+  gives up on `:server`, say — will see this class move, which is the point.
+  Callers matching on `code` are unaffected: an `INTERNAL` with no details has no
+  code either way.
+
+- **The requirement on `typedb` is pinned to its minor: `~> 0.10.0`.** It was
+  `~> 0.8`, which admits every 0.x minor of the sibling — and this repository's
+  own rule is that while `typedb` is in 0.x a minor carries anything a 1.x would
+  call breaking. This package pattern-matches the sibling's structs, so that is
+  precisely the kind of change it would meet. Pinning it means a sibling release
+  is a deliberate bump here rather than a silent resolution.
+
+  It also brings in `TypeDB.stream/4`, new in `typedb` 0.10.0.
+
+  The cost of the pin is an ordering rule: **`typedb` has to be on hex.pm before
+  this package is tagged**, because until it is, the publishable shape does not
+  resolve at all. Written down in CONTRIBUTING and in the release workflow's own
+  header, because the thing it costs is a spent tag.
+
+### Fixed
+
+- **Every "source" link in this package's published documentation was a 404**,
+  and doubly so: `source_ref` was `v0.1.0`, which is not this package's tag —
+  its tags are prefixed `typedb_grpc-v` — and the path lacked the
+  `typedb_grpc/` subdirectory that a two-package repository puts it behind.
+  `test/typedb/grpc/release_test.exs` fails now if either regresses.
+
+### Documentation
+
+- **The comparison against the HTTP sibling is honest about `stream/4`.** The
+  README's case for this transport included "over HTTP only after raising the
+  limit, since the default truncates at 10 000", which was written when the
+  sibling had no way past the cap. It has one now. The advantage that remains is
+  measured rather than asserted: a real stream with no cap and no per-page round
+  trip, against paging inside one transaction.
+
 ## [0.1.0] - 2026-08-13
 
 The first release: TypeDB over gRPC, the protocol TypeDB's own Rust, Java,
@@ -93,5 +148,6 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...HEAD
+[0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/typedb_grpc-v0.1.0

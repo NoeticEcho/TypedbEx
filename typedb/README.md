@@ -38,7 +38,7 @@ rather than a patch.
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.9.0"},
+    {:typedb, "~> 0.10.0"},
     # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
     {:finch, "~> 0.23"}
   ]
@@ -164,6 +164,44 @@ and a one-shot query left on the default waits the whole second for it, while
 the same query with `transaction_type: :read` returns in a millisecond. An
 integration test pins both halves. Left on the default, your queries queue
 behind each other and behind every schema change in the system.
+
+### Reading more than fits
+
+TypeDB caps a read at 10,000 answers. `TypeDB.stream/4` walks past that, one page
+at a time, as a lazy `Stream` of rows:
+
+```elixir
+conn
+|> TypeDB.stream("social", """
+     match $p isa person, has name $n;
+     sort $n;
+     select $n;
+   """)
+|> Stream.map(&TypeDB.ConceptRow.typed_value(&1, "n"))
+|> Enum.each(&IO.puts/1)
+```
+
+Measured against 3.12.1 over 25,000 rows: `query/4` returns 10,000 of them with
+`TypeDB.Answer.truncated?/1` true, and `stream/4` returns all 25,000 in 998 ms.
+The whole walk runs in one `:read` transaction, so it reads one snapshot rather
+than several — a walk that collected 25,000 rows saw none of the 5,000 inserted
+concurrently while it ran.
+
+Three things to know before you use it:
+
+- **`sort` is yours to write.** Paging is `offset` and `limit` appended as the
+  query's last stages, and those are only meaningful against a total order.
+  Without one a row can arrive twice and another never. Sort on something
+  unique.
+- **The walk has a deadline**, and it is the transaction's:
+  `transaction_timeout_millis`, 300,000 ms by default, counted from the moment
+  the walk starts and not reset by asking for the next page. A slow consumer
+  raises `TSV12` mid-stream; raise the option for a long walk.
+- **`fetch` pipelines cannot be paged** — `offset` after `fetch` is a syntax
+  error in TypeQL — so this streams `conceptRows` only.
+
+It raises instead of returning `{:error, _}`, because a lazy stream has nowhere
+to put an error tuple: the failure happens inside whatever consumes it.
 
 ### Multi-statement transactions
 
@@ -575,12 +613,18 @@ or telemetry event carries it.
 None of these are bugs. All of them are surprises if you meet them for the
 first time in production.
 
-**Answers arrive whole.** The HTTP API does not stream, so an answer is
+**One answer arrives whole.** The HTTP API does not stream, so an answer is
 materialised on the server, shipped, and decoded into one term in your process.
-There is no cursor to page through and none can be built on this API.
 `bench/answer_size.exs` measures the cost: for rows of two attributes,
-**488 bytes per row on the wire and 897 bytes decoded** — so a million rows
-would be about 0.8 GiB of term memory, in one process, at once.
+**488 bytes per row on the wire and 897 bytes decoded** — so a million rows in
+one answer would be about 0.8 GiB of term memory, in one process, at once.
+
+`TypeDB.stream/4` is the way out of that and of the cap below: it pages the
+answer inside one transaction, so what is materialised at once is a page rather
+than the whole result. It is paging, not streaming — the transport still ships
+one complete response per request — and it costs a round trip per page and a
+`sort` you have to write yourself. See
+[Reading more than fits](#reading-more-than-fits).
 
 TypeDB caps a read at 10,000 answers by default rather than letting you find
 that out, and attaches a warning saying so. Raise the cap with

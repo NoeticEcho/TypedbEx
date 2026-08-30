@@ -465,6 +465,65 @@ jobs:
           mix compile --warnings-as-errors
           mix run smoke.exs
 
+  package:
+    name: Package builds (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: typedb
+            publish_env: ""
+          - package: typedb_grpc
+            # Switches the dependency on the sibling from a path to a version
+            # requirement — see `typedb_dependency/0` in typedb_grpc/mix.exs.
+            # Hex refuses a path dependency outright, so without this the build
+            # here would pass and the release would fail at its last step.
+            publish_env: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+
+      # Dependencies are fetched in the *repository* shape, with `typedb` as the
+      # path next door, deliberately. Between bumping `@typedb_requirement` and
+      # the sibling's release there is a window in which the published shape
+      # cannot resolve at all — measured, `mix deps.get` fails with "typedb
+      # ~> 0.10.0 which doesn't match any versions" — and a job that is red for
+      # the length of that window teaches people to ignore it.
+      - run: mix deps.get
+
+      # What actually goes to hex.pm is a `:files` list, not the working tree.
+      # A new directory that nobody added to it is invisible to every other job
+      # here and to the release workflow alike — the release's own `mix
+      # hex.publish` would ship without it. `hex.build` needs no resolved
+      # dependency tree, so it still runs in the publishable shape, and it
+      # refuses a path dependency outright — which is what proves on every push
+      # that `TYPEDB_GRPC_PUBLISH` still switches what it is supposed to switch.
+      - name: Build the publishable artefact
+        env:
+          TYPEDB_GRPC_PUBLISH: ${{ matrix.publish_env }}
+        run: mix hex.build
+
+      # No `TYPEDB_GRPC_PUBLISH` here: `mix run` needs a resolved dependency
+      # tree, and the version it prints is the same in either shape.
+      - name: The package carries the code it claims to
+        run: |
+          version="$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:version])' | tail -n1)"
+          tar -tf "${{ matrix.package }}-$version.tar" > /dev/null
+          tar -xOf "${{ matrix.package }}-$version.tar" contents.tar.gz \
+            | tar -tzf - \
+            | grep -q '^lib/' \
+            || { echo "the package contains no lib/ — check :files in mix.exs" >&2; exit 1; }
+
   typeql:
     name: TypeQL syntax
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 defmodule TypeDB.GRPC.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/NoeticEcho/TypedbEx"
 
   def project do
@@ -109,7 +109,12 @@ defmodule TypeDB.GRPC.MixProject do
   # Keyed on an environment variable rather than on `Mix.env/0`, because
   # `mix hex.build` runs in `:dev` like everything else and would otherwise
   # build an unpublishable package that fails at the last step of a release.
-  @typedb_requirement "~> 0.8"
+  #
+  # Pinned to the sibling's *minor*, not just below 1.0: `~> 0.10` would admit
+  # 0.11, and this repository's own rule is that while `typedb` is in 0.x a minor
+  # carries anything a 1.x would call breaking. This package pattern-matches the
+  # sibling's structs, so that is exactly the kind of change it would meet.
+  @typedb_requirement "~> 0.10.0"
 
   defp typedb_dependency do
     if System.get_env("TYPEDB_GRPC_PUBLISH") in [nil, "", "0"] and File.exists?("../typedb/mix.exs") do
@@ -141,8 +146,13 @@ defmodule TypeDB.GRPC.MixProject do
   defp docs do
     [
       main: "readme",
-      source_ref: "v#{@version}",
+      # This package's tags are prefixed — two packages in one repository cannot
+      # both answer to `v*` — and ex_doc builds source links relative to the Mix
+      # project root, which here is one level below the repository root. 0.1.0
+      # got both wrong, so every "source" link it published was a 404.
+      source_ref: "typedb_grpc-v#{@version}",
       source_url: @source_url,
+      source_url_pattern: "#{@source_url}/blob/typedb_grpc-v#{@version}/typedb_grpc/%{path}#L%{line}",
       extras: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE"],
       # The generated protocol modules are an implementation detail with 3,000
       # lines of machine-written documentation-free structs. They are public

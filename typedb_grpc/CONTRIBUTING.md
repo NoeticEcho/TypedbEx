@@ -118,7 +118,11 @@ Tags are prefixed, because two packages in one repository cannot both answer to
 | `typedb_grpc` | `typedb_grpc-v0.1.0` | `.github/workflows/release-grpc.yml` |
 
 To cut a release: bump `@version` in `mix.exs`, move `## [Unreleased]` in
-`CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, commit, then
+`CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD`, add its link at the bottom of that
+file, update the README's installation snippet, and — when the sibling's minor
+has moved — bump `@typedb_requirement` to match. Every one of those is asserted
+by `test/typedb/release_test.exs`, so run `mix test` after the bump and let it
+tell you what is still missing. Then commit and
 
 ```sh
 git tag -a typedb_grpc-v0.1.0 -m "0.1.0"
@@ -127,6 +131,19 @@ git push origin typedb_grpc-v0.1.0
 
 The workflow re-runs the gate against the publishable shape of the package,
 publishes, and creates the GitHub Release.
+
+**Publish the sibling first.** `@typedb_requirement` names an exact minor of
+`typedb`, so between bumping it here and that version appearing on hex.pm the
+publishable shape cannot resolve at all — measured, `TYPEDB_GRPC_PUBLISH=1 mix
+deps.get` fails with *"typedb ~> 0.10.0 which doesn't match any versions"*. The
+release workflow fetches before it does anything else, so a tag pushed in that
+window dies on its first step and has to be deleted and re-cut. Wait for
+`typedb X.Y.Z` to be live on hex.pm, then tag this one.
+
+The CI `package` job does not have that problem, and deliberately: it resolves
+dependencies from the path next door and only *builds* in the publishable
+shape, because `mix hex.build` needs no resolved tree and still refuses a path
+dependency.
 
 ## Creating the package on hex.pm the first time
 
