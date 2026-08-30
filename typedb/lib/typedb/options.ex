@@ -15,10 +15,22 @@ defmodule TypeDB.Options do
 
   ## Transaction options
 
-    * `:transaction_timeout_millis` — how long the server keeps an idle
-      transaction alive before killing it. This is a server-side setting and is
-      passed straight through; how long the driver itself waits for a response
-      is `:timeout`, on the connection or on the individual call.
+    * `:transaction_timeout_millis` — how long the server lets a transaction
+      live at all, counted from the moment it opens. This is a server-side
+      setting and is passed straight through; how long the driver itself waits
+      for a response is `:timeout`, on the connection or on the individual call.
+
+      **It is a lifetime, not an idle timer, and requests do not reset it.**
+      Measured against 3.12.1: a transaction opened with
+      `transaction_timeout_millis: 5_000` and given a query every two seconds
+      answered at 2 s and at 4 s and was gone at 6 s. Left alone, the default is
+      exactly **300 000 ms** — a transaction polled every ten seconds, so never
+      idle for longer than that, died at 300 096 ms.
+
+      What it costs you is `TSV12` — *"no open transaction"* — on the first
+      request after the budget runs out, on a transaction that had been
+      answering normally. Anything holding one transaction across a long unit of
+      work has to raise this, `TypeDB.stream/4` above all.
     * `:schema_lock_acquire_timeout_millis` — how long a `schema` transaction
       waits for the exclusive schema lock.
 
