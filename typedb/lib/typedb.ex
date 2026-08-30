@@ -331,6 +331,37 @@ defmodule TypeDB do
   stops early — `Enum.take/2`, a `Stream.filter/2` that finds what it wanted, an
   exception in the middle. That is `Stream.resource/3` doing its job.
 
+  ## The walk has a deadline, and it belongs to the transaction
+
+  One transaction is also one budget. `transaction_timeout_millis` is a
+  **lifetime counted from the moment the transaction opens**, not an idle timer,
+  and asking for the next page does not extend it — measured, a transaction
+  opened with 5 000 ms and queried every two seconds was gone at 6 s. Left
+  unset, the server's default is **300 000 ms**, so an unconfigured walk has
+  five minutes to finish, however fast its pages arrive.
+
+  Fast consumers never meet this. Measured against 3.12.1 over 3,000 rows at
+  `page_size: 200` — sixteen requests:
+
+  | consumer | `transaction_timeout_millis` | outcome |
+  | --- | ---: | --- |
+  | as fast as it can | 4 000 | 3,000 rows in 279 ms |
+  | 2 ms per row | 4 000 | raises `TSV12` at 4 282 ms, mid-walk |
+  | 2 ms per row | 30 000 | 3,000 rows in 9 198 ms |
+
+  So the thing that runs out is wall-clock time between opening and the last
+  page, and what spends it is usually the consumer rather than the driver. If a
+  walk might take longer than five minutes — a slow consumer, a costly `sort`,
+  or simply a great many rows — pass `transaction_timeout_millis` to say how
+  long, and pass it generously: an over-long budget costs what an abandoned
+  transaction always costs — server-side resources held until it elapses — and a
+  short one costs you the whole walk.
+
+  The failure is `TypeDB.Error` with code `TSV12` and kind `:server`, raised
+  from inside whatever is consuming the stream. `TypeDB.Error.retryable?/1`
+  answers `true` for it, which is honest — but a retry restarts the walk from
+  the first page, because the snapshot it was reading is gone.
+
   ## Sort, or the pages will not line up
 
   Paging is `offset` and `limit`, appended to your query as its last two stages.
@@ -363,8 +394,8 @@ defmodule TypeDB do
       also used as the `:answer_count_limit` of each page unless you set that
       yourself, so a page can never be silently truncated.
     * `:timeout` — bounds each page's request, not the walk.
-    * `:deadline` — the same, per request. A stream has no wall-clock budget of
-      its own; the consumer decides when to stop.
+    * `:deadline` — the same, per request. Neither bounds the walk; the walk is
+      bounded by `:transaction_timeout_millis`, above.
 
   `:transaction_type` is not among them. A walk that wrote would be a walk whose
   pages moved underneath it.
