@@ -1,13 +1,15 @@
 # Audit — TypeDB Elixir driver
 
-Six audits, newest first, and all six are here — Audit IV's section was written
-during Audit VI, which found the index pointing at nothing. Audits I–IV cover
-`typedb`, Audit V covers
-`typedb_grpc`, and Audit VI is the first to sweep both — and the first to audit
-efficiency, stability and security as categories of their own.
+Seven audits, newest first, and all seven are here — Audit IV's section was
+written during Audit VI, which found the index pointing at nothing. Audits I–IV
+cover `typedb`, Audit V covers `typedb_grpc`, Audit VI is the first to sweep
+both — and the first to audit efficiency, stability and security as categories
+of their own — and Audit VII is the first to measure every finding before
+writing it down.
 
 | | At | Findings | Status |
 | --- | --- | --- | --- |
+| [Audit VII](#audit-vii--typedb-efficiency-at-1b1f8b6) | `1b1f8b6` (0.9.0), the HTTP package, efficiency only | 8: 0 critical, 1 major, 4 minor, 3 withdrawn | 2 fixed, 3 documented, 3 withdrawn — `94bb372` |
 | [Audit VI](#audit-vi--both-packages-at-a4a2e23) | `a4a2e23`, both packages | 10: 0 critical, 4 major, 5 minor, 1 withdrawn | 8 fixed, 1 documented, 1 withdrawn — `fc5c3a6` |
 | [Audit V](#audit-v--typedb_grpc) | `3e6b986`, the gRPC package | 9: 2 critical, 3 major, 4 minor | all fixed, `bb08ff1` |
 | [Audit IV](#audit-iv--080-through-a-callers-post-mortems) | `447ff97` (0.8.0), through `newgen-elixir`'s own post-mortems | 4 claims tested: 2 held, 2 did not | shipped in 0.8.0 |
@@ -31,6 +33,352 @@ So, from Audit VII onwards: **measure before writing it down, or mark it
 unmeasured in the finding itself.** A slower audit with nine true findings beats
 a faster one with eight true and one that costs a day. The cost is real and it is
 smaller than it looks — the counter that refuted VI-7 took two minutes.
+
+Audit VII is the first held to that rule, and the rule earned its keep on the
+first pass: of eight findings, **three were withdrawn by the measurement that
+was supposed to confirm them**, and a fourth shipped at a third of the size it
+was first written down as.
+
+---
+
+# Audit VII — `typedb`, efficiency, at `1b1f8b6`
+
+Audited at `1b1f8b6` (0.9.0), the HTTP package only, on Erlang/OTP 29.0.5 and
+Elixir 1.20.4 — a toolchain a release ahead of the one the repository pins, on
+which the whole gate is green: `mix format --check-formatted`, `credo --strict`
+(905 mods/funs, no issues), `mix dialyzer` (0 errors), and 512 tests through
+each of the three HTTP adapters.
+
+This audit has one category, **efficiency**, and one question: *where does the
+time and the memory actually go, and what of it is the driver's doing?* Audits
+I–VI covered correctness, errors, gaps, security. None of them profiled
+anything.
+
+## The rule, applied
+
+Every finding below was run before it was written down. Three did not survive
+being run, and they are kept in full because what they cost to disprove is the
+argument for the rule.
+
+## Stage 1 — the number that sets the scale
+
+Everything in this audit is measured against one payload: a `conceptRows`
+answer of **10,000 rows** — the server's own default cap — carrying an entity,
+a string attribute and an integer attribute per row, with instance types
+included. 4,504,516 bytes on the wire.
+
+| stage | median of 7 |
+| --- | ---: |
+| `JSON.decode/1` — parsing the body | **129.24 ms** |
+| `Answer.decode/1` — terms into structs | 12–18 ms |
+
+**About 88% of what a large answer costs is the JSON parse, which is not this
+driver's code.** Every micro-optimisation available inside `Answer.decode/1`
+divides the remaining 12%. That is the frame for the whole audit, and it is why
+the two findings worth acting on are not in the decode path at all.
+
+A second measurement, taken because `TypeDB.JSON` documents the codec order
+without ever saying which is faster:
+
+| codec | median of 7 |
+| --- | ---: |
+| built-in `JSON` (the default) | **129.24 ms** |
+| `Jason` (optional, opt-in) | 180.29 ms |
+
+The default is also the faster one, by 1.4×, on this payload. The moduledoc
+explains why `Jason` is unreachable without configuration; it does not say that
+reaching for it costs 40%.
+
+## Outcome
+
+Executed at `94bb372`, two steps, each committed on its own and each gated with
+`mix format --check-formatted`, `credo --strict`, `mix dialyzer` and the unit
+suite once per HTTP adapter. 519 tests through each adapter afterwards, against
+512 before.
+
+| | What | Outcome |
+| --- | --- | --- |
+| VII-1 | `include_instance_types` is documented without a number | **Documented** |
+| VII-2 | The wire names of options are rebuilt on every request | **Fixed**, step 1. 12.4× |
+| VII-3 | `to_struct/3` rebuilds its field mapping once per row | **Fixed**, step 2. 11.9% |
+| VII-4 | Response headers are lowercased twice, and read once | **Documented**, not fixed |
+| VII-5 | A token renewal is paid on a caller's critical path | **Documented**, not fixed |
+| VII-6 | A decoded answer retains the whole response body | **Withdrawn** — it does not |
+| VII-7 | Repeated small binaries should be interned | **Withdrawn** — 5× slower |
+| VII-8 | `Config.url/2` concatenates three binaries per request | **Withdrawn** — free |
+
+### What remains, and why
+
+* **`Answer.to_structs/3`, or whatever it would be called.** VII-3 was fixed
+  with a cache because the shape of the API forces one: `to_struct/3` sees one
+  row, so anything shared across rows has to outlive the call. A function that
+  took the *answer* would build the mapping once with no cache, no validation
+  and no staleness to reason about — and it is the call the moduledoc already
+  tells people to write by hand. It is also a public API addition, which is a
+  SemVer event and belongs to the `Freeze the public API` epic rather than to
+  an efficiency pass.
+* **VII-4, the double lowercasing.** Real, measured, and 0.013% of a request.
+  Removing it means either deleting work from all three adapters and making
+  lowercase a documented part of the `TypeDB.HTTP` contract — a change to a
+  public extension point for one microsecond — or leaving `Transport.header/2`
+  defensive and deleting nothing. Neither trade is worth making for the number.
+* **VII-5, the renewal on the critical path.** Bounded, measured, and the
+  collapsing works. Moving it off the path means a timer in the connection
+  process, which is a new failure mode (a renewal nobody is waiting for, and
+  what a failing one should do) for a tail effect of one sign-in per token
+  lifetime.
+
+### Risks that want a decision
+
+1. **VII-1 is guidance, not code, and guidance is the largest lever this audit
+   found.** `include_instance_types: false` is worth more than everything else
+   here put together, and it is a per-query decision only the caller can make.
+   If it stays a clause in a moduledoc it will keep being missed. The question
+   is whether the numbers belong somewhere a reader reaches before their first
+   slow query — the recipes, or the `TypeDB.query/4` documentation — rather
+   than in `TypeDB.Options`.
+2. **VII-3 shipped at 11.9% after being written down as 32%.** The first figure
+   came from benchmarking a stand-in that skipped `CallOptions.validate!/3`,
+   which every real call pays. It was caught by re-measuring against the
+   *shipped* code rather than against the prototype. Prototype numbers are not
+   findings; that should be explicit in the rule, and now is.
+
+## Findings
+
+Eight. One major, four minor, three withdrawn — and the three withdrawn are the
+reason this section is worth reading.
+
+| | Category | Where | Severity |
+| --- | --- | --- | --- |
+| VII-1 | Efficiency / documentation | `typedb/lib/typedb/options.ex:27` | **major** |
+| VII-2 | Efficiency | `typedb/lib/typedb/options.ex:129` | minor |
+| VII-3 | Efficiency | `typedb/lib/typedb/concept_row.ex:211` | minor |
+| VII-4 | Efficiency | `typedb/lib/typedb/http/finch.ex:202` | minor |
+| VII-5 | Efficiency / stability | `typedb/lib/typedb/connection.ex:170` | minor |
+| VII-6 | Efficiency | `typedb/lib/typedb/transport.ex:524` | **withdrawn** |
+| VII-7 | Efficiency | `typedb/lib/typedb/concept.ex:121` | **withdrawn** |
+| VII-8 | Efficiency | `typedb/lib/typedb/config.ex:324` | **withdrawn** |
+
+### 1. Efficiency
+
+#### VII-1 — the largest available saving is documented without a number (major)
+
+`typedb/lib/typedb/options.ex:27`
+
+> `:include_instance_types` — attach the type to every returned instance.
+> Costs an extra type lookup per concept; turn it off for hot read paths where
+> you already know the shape.
+
+True, and it undersells the option by an order of magnitude. The same 10,000
+rows, built both ways:
+
+| | `true` | `false` |
+| --- | ---: | ---: |
+| bytes on the wire | 4,504,516 | 2,684,516 (**−40.4%**) |
+| `JSON.decode` + `Answer.decode` | 212.48 ms | **94.96 ms** |
+| decoded answer, `size_shared` | 8.16 MiB | 5.71 MiB (**−30%**) |
+
+It is 2.2× on the whole decode path, and it is available today, to every
+caller, with no change to this driver. Nothing else in this audit is within an
+order of magnitude of it — the two findings that were *fixed* are worth 12.4×
+on 1.8 microseconds and 11.9% on a helper.
+
+"An extra type lookup per concept" describes the server's work. What the reader
+needs to know is that the types are 40% of the bytes and half the decode.
+
+#### VII-2 — the wire name of an option is rebuilt on every request (minor)
+
+`typedb/lib/typedb/options.ex:129`, `camelize/1`
+
+```elixir
+defp camelize(key) do
+  [first | rest] = key |> Atom.to_string() |> String.split("_")
+  Enum.join([first | Enum.map(rest, &String.capitalize/1)])
+end
+```
+
+`String.split`, `String.capitalize` per word, `Enum.join` — per set option, per
+request. There are exactly five option keys and they are literals in that same
+file, twenty lines above.
+
+**Measured**, `query_payload/2` with one option set, median of 15 rounds of
+300,000 calls:
+
+| | per call |
+| --- | ---: |
+| rebuilding the name | 1.83 µs |
+| reading a table built at compile time | **0.147 µs** |
+
+12.4×, on work whose entire input is a compile-time constant. Against an 8 ms
+p50 round trip it is 0.02% and it would not be worth a finding on its own; it
+is worth one because the fix *removes* code — `camelize/1` is deleted — rather
+than adding any.
+
+#### VII-3 — `to_struct/3` rebuilds its field mapping once per row (minor)
+
+`typedb/lib/typedb/concept_row.ex:211`, `struct_fields/1`
+
+```elixir
+module.__struct__() |> Map.from_struct() |> Map.keys() |> Map.new(&{Atom.to_string(&1), &1})
+```
+
+The mapping from a row's string variable names to a struct's atom fields is
+worked out from the module, on every call — and the moduledoc's own example is
+`Enum.map(rows, &to_struct(&1, Person))`. On a 10,000-row answer it is built
+10,000 times.
+
+**Measured**, interleaved A/B against the previous implementation, 21 rounds,
+10,000 rows onto a three-field struct:
+
+| | median |
+| --- | ---: |
+| rebuilt per row | 11.69 ms |
+| cached per process, validated | **10.29 ms** |
+
+**11.9%, and the first number written down for it was 32%** — from a stand-in
+that also skipped `CallOptions.validate!/3`. The correction is the finding as
+much as the number is: a prototype measures the prototype.
+
+The cache is in the **process dictionary**, not `:persistent_term`, and the
+reason is a difference in kind rather than in taste. The driver's two other
+caches — `TypeDB.JSON`'s codec and `TypeDB.Concept`'s "is `Decimal` loaded?" —
+hold facts that are settled before the first query and cannot change. A
+struct's fields change every time its module is recompiled, which in a
+development environment is constantly, and `:persistent_term.put/2` scans every
+process's heap to do it: **3.7 µs against 0.295 µs** for `Process.put/2`. Per
+process also means the cache lives exactly as long as the work it speeds up.
+
+It is keyed on the module and validated against the module's md5, because a
+cache keyed on a module alone answers a recompiled module with its predecessor's
+fields. That is not theoretical: the naive version was written first, and
+`TypeDB.StructFieldsCacheTest` fails against it with *"query variable
+\"nickname\" does not name a field"* for a field the struct now has.
+
+#### VII-4 — response headers are lowercased twice and read once (minor)
+
+`typedb/lib/typedb/http/finch.ex:202`, and the same in the other two adapters
+
+All three adapters normalise every response header name to lowercase. The
+driver then reads exactly one header, `retry-after`, only on a retryable status
+— and `Transport.header/2` lowercases again on the way in, because the contract
+does not promise the adapters did.
+
+**Measured**: 1.06 µs per response for six headers.
+
+Kept as it is, deliberately. The only way to remove the duplication is to make
+lowercase part of the `TypeDB.HTTP` contract, which is a public extension point
+anyone may implement, and that is a change to a published behaviour for one
+microsecond in eight thousand.
+
+#### VII-5 — a token renewal is paid on a caller's critical path (minor)
+
+`typedb/lib/typedb/connection.ex:170`, `token/1`
+
+Renewal is entirely caller-driven: there is no timer anywhere in the connection.
+The first request to arrive after the refresh deadline calls into the connection
+process and blocks for a whole sign-in. "Proactive" in the earlier audits means
+*before the 401*, not *off the critical path*.
+
+This was written down expecting a thundering herd — every concurrent caller
+stalling on one sign-in — and **the measurement says no**. 64 concurrent
+callers, a 4-second window, against the test stub:
+
+| | p50 | p99 | max |
+| --- | ---: | ---: | ---: |
+| long-lived token, no refresh | 4.32 ms | 7.84 ms | 13.55 ms |
+| 1 s token lifetime | 4.35 ms | 8.66 ms | 17.86 ms |
+| 2 s token lifetime | 4.26 ms | 8.11 ms | 16.50 ms |
+
+p50 does not move and p99 moves by under a millisecond: the renewal-collapsing
+`Connection.handle_call/3` does works as documented. What is left is the tail —
+roughly one sign-in, once per token lifetime, and against a remote server that
+is a connect plus a round trip rather than the stub's 4 ms.
+
+Not fixed. A timer would move it off the path and would introduce a renewal
+nobody is waiting for, with its own failure question.
+
+### 2. Withdrawn
+
+#### VII-6 — WITHDRAWN: a decoded answer does not retain the response body
+
+`typedb/lib/typedb/transport.ex:524`
+
+**The finding as written was wrong, and it is the one this audit most expected
+to be right.** The reasoning: `JSON.decode/1` is handed a 4.5 MiB binary, and a
+decoder that produces sub-binaries would leave every string in every row
+pointing into it — so holding one row of one answer would hold the whole body,
+the classic refc-binary retention bug, invisible to any test.
+
+Refuted in one command:
+
+```
+byte_size(name)                  = 13
+:binary.referenced_byte_size(name) = 13
+:binary.referenced_byte_size(iid)  = 22
+:binary.referenced_byte_size(label)= 6
+```
+
+Every string is its own binary. Elixir's built-in `JSON` copies rather than
+slices. There is nothing to fix, and the two hours that went into designing a
+copy-on-decode pass went nowhere, which is exactly the outcome the rule exists
+to produce *before* the pass is written rather than after.
+
+#### VII-7 — WITHDRAWN: interning repeated small binaries costs more than it saves
+
+`typedb/lib/typedb/concept.ex:121`
+
+A 10,000-row answer holds 10,000 separate copies of `"person"`, of `"string"`,
+of `"integer"` — one per row, none shared. `:erts_debug.same/2` on two labels
+from two rows answers `false`. The saving looked large and it *is* large:
+
+| | `size_shared` | |
+| --- | ---: | --- |
+| as decoded | 8.16 MiB | |
+| interned through a per-answer cache | 5.87 MiB | **−28.1%** |
+
+And it is not worth having:
+
+| | median of 7 |
+| --- | ---: |
+| decoding 10,000 rows as now | 12.24 ms |
+| decoding them with the cache | **61.08 ms** |
+
+**Five times slower.** Hashing a binary to look it up costs more than allocating
+it. A second attempt avoided the hash entirely — literal clauses for the closed
+nine-value `valueType` vocabulary, so equal values come from the module's
+constant pool for free — and that one is merely not worth it rather than bad:
+**−11.2% memory for +18% on row decode**, which against the 88% the JSON parse
+takes is +2% overall for a ninth of the memory. Marked and left alone.
+
+#### VII-8 — WITHDRAWN: `Config.url/2` costs nothing measurable
+
+`typedb/lib/typedb/config.ex:324`
+
+```elixir
+def url(%__MODULE__{base_url: base}, "/" <> _ = path), do: base <> "/" <> @api_version <> path
+```
+
+Three binary concatenations per request, of which two have constant operands
+that could be folded into the config at build time. Measured over 200,000 calls:
+**2.02 ms as written, 2.00 ms with the prefix precomputed.** No difference. The
+same applies to `Transport.route/1`, whose `String.split` plus `URI.decode` per
+request — built unconditionally, for telemetry metadata nobody may be listening
+to — costs **0.038 µs**. Neither is a finding.
+
+### Checked and clean
+
+* **`Answer.decode/1` already prepends nothing it has to reverse** and maps once
+  over the answers; `ConceptRow.decode/1` builds its map in one pass.
+* **`Enumerable` on both answer structs implements `slice/1` properly**, which
+  Audit I's note explains is not the obvious thing to do.
+* **`Concept.decimal_loaded?/0` is asked once per VM**, with the measurement
+  that justifies it in the comment — 1 ms against 1096 ms over 50,000 casts.
+  This audit re-read it and it is right.
+* **`CallOptions.query/0` and its siblings rebuild their accepted-key lists with
+  `++` on every call.** Measured at 0.036 µs. Below the threshold of anything.
+* **Requests really do run in the caller's process.** 64 concurrent callers
+  sustained ~14,000 requests/second through one connection against the stub with
+  a p50 of 4.3 ms, and the connection process is not in the path.
 
 ---
 

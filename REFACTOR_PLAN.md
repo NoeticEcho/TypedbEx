@@ -1,3 +1,129 @@
+# Refactor plan V — Audit VII, `typedb` efficiency (executed at `94bb372`)
+
+Executed. Eight findings: one major, four minor, three withdrawn *before* any
+code was written, by the measurement the rule now demands. Two produced code,
+one produced documentation, two are recorded and deliberately not fixed.
+
+Ordered by what the measurement said was worth doing, which is not the order
+they were found in: the largest saving this audit found needs no code at all.
+
+## The gate, after every step
+
+From `typedb/`:
+
+```sh
+mix format --check-formatted
+mix credo --strict
+mix dialyzer
+for a in finch req httpc; do TYPEDB_TEST_ADAPTER=$a mix test || break; done
+```
+
+Run on Erlang/OTP 29.0.5 and Elixir 1.20.4 — one release ahead of the pinned
+toolchain — as well as the pinned one. Every step below is green on both.
+
+## Step 0 — measure first, and be willing to lose the finding (VII-6, VII-7, VII-8)
+
+**Not a change.** Three findings were written down, measured, and withdrawn
+before a line of production code was touched:
+
+* **VII-6**, that a decoded answer retains the whole 4.5 MB response body
+  through sub-binaries. `:binary.referenced_byte_size/1` says every string is
+  its own binary. One command, and a copy-on-decode pass never got written.
+* **VII-7**, that repeated small binaries should be interned. −28% memory,
+  **5× slower** to decode. A second, hash-free attempt using literal clauses:
+  −11% memory, +18% row decode. Neither is worth it.
+* **VII-8**, that `Config.url/2`'s three concatenations should be folded. 2.02 ms
+  against 2.00 ms over 200,000 calls. No difference.
+
+Recorded here because the work these did *not* cause is the return on the rule.
+
+## Step 1 — the wire names of options are settled at compile time (VII-2) — minor
+
+**Changes.** `TypeDB.Options` gains a `@wire_names` table built, at compile
+time, from `@transaction_keys ++ @query_keys`. `encode/2` reads it;
+`camelize/1` is deleted.
+
+**Why a table built from the lists rather than written out.** A hand-written
+table can drift from the lists it serves, and the failure is silent in the
+direction that matters: an option the caller set never reaches the server.
+Building it from the same attributes makes drift impossible.
+
+**Tests.** Two, in `options_test.exs`: every declared key has a wire name, and
+every wire name is lowerCamelCase rather than the snake_case key. Verified to
+fail — a table with one key filtered out fails 9 of 20 tests with `KeyError`.
+
+**Measured.** `query_payload/2` with one option set, median of 15 rounds of
+300,000 calls: 1.83 µs → 0.147 µs, 12.4×.
+
+## Step 2 — the variable-to-field mapping is worked out once per process (VII-3) — minor
+
+**Changes.** `TypeDB.ConceptRow.struct_fields/1` caches its result in the
+process dictionary, keyed on the module and validated against the module's md5.
+`build_struct_fields/1` is the old body, unchanged, including its
+`UndefinedFunctionError` rescue.
+
+**Why the process dictionary and not `:persistent_term`.** The driver's two
+existing caches hold facts settled before the first query — the JSON codec, and
+whether `Decimal` is loaded. A struct's fields are not such a fact: they change
+on every recompile of the module, which in development is constant, and
+`:persistent_term.put/2` scans every process's heap to write one (3.7 µs against
+0.295 µs). Per process also scopes the cache to the work that benefits from it.
+
+**Why the md5.** Without it, a module recompiled between two calls is answered
+with its previous version's fields. The naive implementation was written first
+and watched to fail exactly that way.
+
+**Tests.** `test/typedb/struct_fields_cache_test.exs`, `async: false` because it
+redefines modules: a redefined struct is not served a stale mapping; two modules
+in one process do not share one; the "variable names no field" error still
+fires after the mapping is cached; a non-struct and a non-existent module still
+say "is not a struct" and are not cached as anything.
+
+**Measured.** Interleaved A/B against the previous implementation, 21 rounds,
+10,000 rows onto a three-field struct: 11.69 ms → 10.29 ms, 11.9%.
+
+**A correction that belongs in the plan.** This was first written down as 32%,
+from a prototype that also skipped `CallOptions.validate!/3`. Re-measured
+against the shipped code it is 11.9%. Prototype numbers are not findings.
+
+## Step 3 — the documentation carries the numbers (VII-1, and the codec) — major
+
+**Changes.** `TypeDB.Options`'s `:include_instance_types` entry gains the
+measurements: 40% of the bytes, 2.2× on decode, 30% of the memory.
+`TypeDB.JSON` gains the one thing its moduledoc never said — that the default
+codec is also the faster one, by 40% on a large answer.
+
+**Why this is the major finding.** It is worth more than both code steps put
+together and it costs no code at all. It is a per-query decision only the
+caller can make, and a clause without a number does not get acted on.
+
+## Not doing, and why
+
+* **VII-4, response headers lowercased twice.** 1.06 µs per response, against an
+  8 ms p50. Removing it means making lowercase part of the `TypeDB.HTTP`
+  contract — a change to a public extension point anyone may implement — for
+  0.013% of a request.
+* **VII-5, the renewal on the caller's critical path.** Measured, and smaller
+  than expected: p50 unmoved, p99 up 0.8 ms with a 1-second token. A timer in
+  the connection process would move it off the path and introduce a renewal
+  nobody is waiting for, with its own failure question, for one sign-in per
+  token lifetime.
+* **`Answer.to_structs/3`.** The right fix for VII-3 is an API that sees the
+  whole answer, so the mapping is built once with no cache and no staleness to
+  reason about. It is a public API addition and belongs to the
+  `Freeze the public API` epic, not to an efficiency pass.
+* **Anything inside `Answer.decode/1`.** About 88% of what a large answer costs
+  is the JSON parse. Optimising the remaining 12% is why VII-7 was withdrawn and
+  why this plan has no step in the decode path.
+
+## Order and dependencies
+
+None. The three steps touch different files and can land in any order; they were
+committed in the order above because the two code steps are the ones whose gate
+can fail.
+
+---
+
 # Refactor plan IV — Audit VI, both packages (executed at `fc5c3a6`)
 
 Executed. Step 3 was withdrawn — the finding behind it was wrong — and step 7

@@ -20,6 +20,21 @@ defmodule TypeDB.JSON do
   them would turn a future change of floor into a silent change of behaviour.
 
   A codec is any module implementing this behaviour.
+
+  ## The default is also the faster one
+
+  Configuring `Jason` is a choice about dependencies, not about speed. Decoding
+  the same 4.5 MB `conceptRows` answer, median of seven runs on Elixir 1.20.4
+  and OTP 29:
+
+  | codec | |
+  | --- | ---: |
+  | built-in `JSON` | 129 ms |
+  | `Jason` | 180 ms |
+
+  Reach for `Jason` if something else in your application already needs it and
+  you would rather have one codec than two; know that it costs 40% on a large
+  answer.
   """
 
   @doc "Encodes a term to JSON iodata. Raises on unencodable input."
