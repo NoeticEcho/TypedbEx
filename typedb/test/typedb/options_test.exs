@@ -102,4 +102,33 @@ defmodule TypeDB.OptionsTest do
   test "the two option sets do not overlap" do
     assert Options.query_keys() -- Options.transaction_keys() == Options.query_keys()
   end
+
+  # The wire names are worked out once, when this module is compiled, rather
+  # than on every request. That is only safe while every declared key has one:
+  # a key added to either list without a wire name would reach the server
+  # unnamed, or not at all. This is the check that a table cannot drift from
+  # the lists it is built from.
+  test "every declared option key has a wire name" do
+    for key <- Options.query_keys() do
+      assert Options.query_payload([{key, 1}]) |> Map.keys() |> length() == 1
+    end
+
+    for key <- Options.transaction_keys() do
+      assert Options.transaction_payload([{key, 1}]) |> Map.keys() |> length() == 1
+    end
+  end
+
+  test "a wire name is lowerCamelCase, never the snake_case key" do
+    for key <- Options.query_keys() ++ Options.transaction_keys() do
+      [wire] =
+        (Options.query_payload([{key, 1}]) || Options.transaction_payload([{key, 1}])) |> Map.keys()
+
+      refute wire =~ "_"
+      assert String.first(wire) == String.downcase(String.first(wire))
+
+      assert wire ==
+               Macro.camelize(Atom.to_string(key))
+               |> then(&(String.downcase(String.first(&1)) <> String.slice(&1, 1..-1//1)))
+    end
+  end
 end
