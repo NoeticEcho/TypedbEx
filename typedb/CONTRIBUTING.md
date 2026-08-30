@@ -260,12 +260,15 @@ renamed telemetry event is breaking and the snapshot cannot see either.
 2. Bump `@version` in `mix.exs`.
 3. Add the `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` **and its link at
    the bottom of the file**. The workflow greps for the heading and refuses a
-   tag without one; nothing checks the link, so it is the line that gets
-   forgotten.
+   tag without one — but only after the tag is pushed, which is the point of no
+   return. `test/typedb/release_test.exs` asks the same question of the working
+   tree, the link included, so bumping `@version` and running `mix test` is what
+   tells you what is left to do.
 4. Update the version in the README's installation snippet, and in
    `notebooks/getting_started.livemd`'s `Mix.install/2` if the new version no
-   longer satisfies what it pins. The notebook test asserts that it does, so a
-   requirement the release outgrew fails the suite rather than shipping.
+   longer satisfies what it pins. Both are asserted — by
+   `test/typedb/release_test.exs` and `test/typedb/notebook_test.exs` — so a
+   pin the release outgrew fails the suite rather than shipping.
 5. Write the release's own paragraph. A CHANGELOG entry that is a list of commit
    subjects is a list of commit subjects; say what changed for someone who
    already uses the driver, and if anything can be noticed by working code, say

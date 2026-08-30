@@ -1,7 +1,7 @@
 defmodule TypeDB.MixProject do
   use Mix.Project
 
-  @version "0.9.0"
+  @version "0.10.0"
   @source_url "https://github.com/NoeticEcho/TypedbEx"
 
   def project do
@@ -125,7 +125,7 @@ defmodule TypeDB.MixProject do
       files: ~w(lib guides notebooks .formatter.exs mix.exs README.md LICENSE CHANGELOG.md CONTRIBUTING.md),
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md",
+        "Changelog" => "#{@source_url}/blob/main/typedb/CHANGELOG.md",
         "TypeDB" => "https://typedb.com",
         "TypeDB HTTP API" => "https://typedb.com/docs/reference/typedb-http-api/"
       }
@@ -137,6 +137,11 @@ defmodule TypeDB.MixProject do
       main: "readme",
       source_ref: "v#{@version}",
       source_url: @source_url,
+      # Two packages share this repository, so a Mix project root is one level
+      # below the repository root and ex_doc's default pattern — which is
+      # relative to the project — points at a path GitHub does not have. Every
+      # "source" link up to and including 0.9.0 was a 404 for that reason.
+      source_url_pattern: "#{@source_url}/blob/v#{@version}/typedb/%{path}#L%{line}",
       extras: [
         "README.md",
         "guides/transactions.md",

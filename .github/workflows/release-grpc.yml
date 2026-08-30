@@ -11,6 +11,11 @@ name: Release typedb_grpc
 # Requires the same `HEX_API_KEY` secret as the sibling. See CONTRIBUTING.md
 # for how the package was first created on hex.pm — the first publish is a
 # manual step, deliberately, because it claims a global name.
+#
+# The sibling has to be published first. `@typedb_requirement` names an exact
+# minor of `typedb`, so `mix deps.get` below cannot resolve until that version
+# is live on hex.pm — a tag pushed before it fails on the first step and has to
+# be re-cut.
 on:
   push:
     tags: ["typedb_grpc-v*"]

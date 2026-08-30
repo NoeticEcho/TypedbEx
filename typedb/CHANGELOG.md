@@ -6,6 +6,112 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-30
+
+A read larger than the server's cap can finally be read. `TypeDB.stream/4` is
+the one thing the Rust driver could do here that this one could not, and closing
+that gap turned up two things about the driver's own documentation that were
+wrong — both are corrected below, and one of them was wrong in every release
+since 0.6.0.
+
+A minor under the 0.x rule: the public surface gains a function.
+`test/api_snapshot.txt` grows by two lines and nothing in it moves.
+
+### Added
+
+- **`TypeDB.stream/4`** — walks a read query one page at a time as a lazy
+  `Stream` of `TypeDB.ConceptRow`, and is the only way to read an answer larger
+  than TypeDB's 10,000-answer cap over this transport. Measured against 3.12.1
+  over 25,000 rows: `query/4` returns 10,000 with `truncated? = true`, and
+  `stream/4` returns **25,000 in 998 ms**.
+
+  The whole walk runs in one `:read` transaction, so the pages add up to one
+  answer rather than to several — measured twice: a walk that collected 25,000
+  rows saw none of the 5,000 another transaction inserted while it ran, and the
+  database held 30,000 at the end.
+
+  `offset` and `limit` are appended as the query's last stages, so **the caller
+  must `sort`**: paging without a total order can hand you a row twice. The
+  driver does not go looking for the word `sort` in your query, because that
+  check would be wrong the first time somebody sorted in a sub-pipeline.
+
+  `fetch` pipelines cannot be paged — `offset` after a `fetch` stage is a syntax
+  error, measured, `400 TQL0` — so this streams `conceptRows` and says so.
+
+  It raises rather than returning `{:error, _}`: a lazy stream has nowhere to put
+  an error tuple, since the failure happens inside `Enum.to_list/1` long after
+  the call returned. There is no `stream!/4` for the same reason.
+
+- **`:page_size`** for `stream/4` — rows per request, 1,000 by default. It is
+  also used as each page's `:answer_count_limit` unless you set that yourself, so
+  a page can never be silently truncated.
+
+### Changed
+
+- **`transaction_timeout_millis` is documented correctly at last.** It was
+  described as *"how long the server keeps an idle transaction alive"*. It is
+  not an idle timer: it is a **lifetime counted from the moment the transaction
+  opens**, and requests do not reset it. Measured against 3.12.1 — a transaction
+  opened with `transaction_timeout_millis: 5_000` and queried every two seconds
+  answered at 2 s and 4 s and was gone at 6 s; left unset, one polled every ten
+  seconds died at **300 096 ms**, so the server's default is 300,000 ms.
+
+  This matters to `stream/4` more than to anything else, because a walk holds one
+  transaction for its whole length. Over 3,000 rows at `page_size: 200`: a
+  consumer taking 2 ms a row raises `TSV12` at 4,282 ms under a 4,000 ms budget,
+  finishes all 3,000 in 9,198 ms under a 30,000 ms one, and a consumer going flat
+  out finishes in 279 ms and never meets the budget at all. Pinned by
+  `test/integration/transaction_lifetime_integration_test.exs`, and written down
+  wherever the option is documented.
+
+- **The 2 MiB request-body limit is version-dependent**, and the documentation
+  now carries both numbers rather than one. Measured: 3.12.1 accepts 2,047 KiB
+  and refuses 2,048 KiB with `400 HSR2`; 3.13.0-rc0 accepted 512 MiB and refused
+  nothing. Batching a large write is therefore about portability across server
+  versions, not about a limit that is always there.
+
+- **Wire names for options are computed at compile time** rather than by
+  camelising each key on every request. Measured: 1.83 µs to 0.147 µs per
+  encode, 12.4×. No behaviour changes; the set of accepted keys is the same set.
+
+- **`TypeDB.ConceptRow.to_struct/2` caches a module's field map** for the
+  process that asked, keyed on the module and validated against its md5 so a
+  recompile cannot serve a stale map. Measured over 10,000 rows: 11.69 ms to
+  10.29 ms, **11.9%**. The cache is in the process dictionary rather than
+  `:persistent_term` deliberately — `:persistent_term.put/2` scans every process
+  heap, which costs 3.7 µs against 0.295 µs, and struct fields change on every
+  recompile.
+
+### Fixed
+
+- **Every "source" link in the published documentation was a 404.** Two packages
+  share this repository, so the Mix project root is one level below the
+  repository root, and ex_doc's default pattern pointed at `blob/v0.9.0/lib/…`
+  where GitHub has `blob/v0.9.0/typedb/lib/…`. 228 links across 32 files in the
+  0.9.0 docset, none of them reachable. `:source_url_pattern` now carries the
+  subdirectory, and `test/typedb/release_test.exs` fails if it stops doing so.
+
+- **The "Changelog" link on hex.pm was a 404** for the same reason: it pointed
+  at `blob/main/CHANGELOG.md`, and this package's changelog is at
+  `blob/main/typedb/CHANGELOG.md`.
+
+### Documentation
+
+- **The README no longer claims paging is impossible.** Its "Limitations"
+  section said *"There is no cursor to page through and none can be built on this
+  API"*, which `stream/4` disproves. What is still true — that the HTTP API does
+  not stream, and that an answer is materialised whole per request — is said
+  without the part that stopped being true.
+
+- **[Recipes](recipes.html) leads with `stream/4`**, and the hand-rolled paging
+  recipe is kept below it under "Paging by hand", because it is still what you
+  want for a cursor of your own, for pages handed out to a client, and for
+  `fetch`.
+
+- **The built-in `JSON` codec is also the faster one**, in `TypeDB.JSON`:
+  decoding the same 4.5 MB answer takes 129 ms against `Jason`'s 180 ms, median
+  of seven. Choosing `Jason` is a decision about dependencies, not about speed.
+
 ## [0.9.0] - 2026-08-13
 
 Parity work, measured against TypeDB's Rust driver — the reference for what a
@@ -904,7 +1010,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.6.0...v0.7.0

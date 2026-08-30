@@ -40,6 +40,13 @@ cap to raise. A read of 20 000 answers takes 248 ms here against 1004 ms over
 HTTP — and over HTTP only after raising the limit, since the default truncates
 at 10 000 and sets a warning.
 
+The sibling is no longer stuck at that cap: `TypeDB.stream/4`, new in `typedb`
+0.10.0, pages a read inside one transaction and walked 25 000 rows in 998 ms.
+What it cannot do is what a real stream does — it costs a round trip per page,
+it needs a `sort` from the caller so the pages line up, it cannot page a `fetch`
+pipeline, and the whole walk lives under one `transaction_timeout_millis`. This
+transport has none of those constraints.
+
 `TypeDB.GRPC.stream/4` gives that stream to the caller rather than collecting
 it:
 
@@ -80,7 +87,7 @@ to speak it.
 ```elixir
 def deps do
   [
-    {:typedb_grpc, "~> 0.1.0"}
+    {:typedb_grpc, "~> 0.2.0"}
   ]
 end
 ```
