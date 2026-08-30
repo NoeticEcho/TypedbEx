@@ -35,6 +35,24 @@ defmodule TypeDB.GRPC.Error do
   divergence is exactly what sharing the struct is meant to prevent.
 
   The gRPC status is not lost: it is in `:reason`, as `{:grpc_status, integer}`.
+
+  ## The one status whose kind depends on more than the status
+
+  `INTERNAL` (13) is `:server` when it carries details and `:transport` when it
+  carries none. TypeDB attaches `ErrorInfo` and `DebugInfo` to every error it
+  generates, so an `INTERNAL` with neither did not come from TypeDB — it is the
+  gRPC stack reporting a failure of its own, and the one this rule was written
+  for is a connection that never came up. A plaintext client against a TLS port
+  is the reproducible case: it arrives as `INTERNAL` with
+  `:connection_error: {:protocol_error, :"Invalid connection preface received"}`
+  and no details, and calling that `:server` says the server answered when
+  nothing answered at all.
+
+  It also made one misconfiguration report two different kinds depending on
+  which side of a race won — `:timeout` when the TLS handshake simply hung,
+  `:server` when the client's HTTP/2 layer got far enough to reject the bytes.
+  Both are now `:transport`, which is what `from_reason/2` has always called an
+  unestablished connection.
   """
 
   alias TypeDB.Error
@@ -89,7 +107,7 @@ defmodule TypeDB.GRPC.Error do
     code = error_code(error)
     status = http_status(error.status)
 
-    Error.new(kind(error.status), message(error, context),
+    Error.new(kind(error), message(error, context),
       code: code,
       status: status,
       reason: {:grpc_status, error.status},
@@ -112,12 +130,36 @@ defmodule TypeDB.GRPC.Error do
 
   # UNAUTHENTICATED and PERMISSION_DENIED are about credentials; DEADLINE_EXCEEDED
   # is a timeout by any name; UNAVAILABLE is the server not being there. Everything
-  # else reached TypeDB and came back with TypeDB's opinion of it.
-  defp kind(16), do: :unauthenticated
-  defp kind(7), do: :unauthenticated
-  defp kind(4), do: :timeout
-  defp kind(14), do: :transport
-  defp kind(_), do: :server
+  # else reached TypeDB and came back with TypeDB's opinion of it — except an
+  # INTERNAL carrying nothing, which is the clause below.
+  defp kind(%GRPC.RPCError{status: 16}), do: :unauthenticated
+  defp kind(%GRPC.RPCError{status: 7}), do: :unauthenticated
+  defp kind(%GRPC.RPCError{status: 4}), do: :timeout
+  defp kind(%GRPC.RPCError{status: 14}), do: :transport
+
+  # An INTERNAL with no details at all did not come from TypeDB. TypeDB attaches
+  # `ErrorInfo` and `DebugInfo` to every error it generates — measured against
+  # 3.12.1, deleting an absent database arrives as status 3 carrying both, and
+  # `error_code/1` and `stack_entries/1` exist precisely because it does. What
+  # arrives bare is the gRPC stack reporting its own failure, and the one this
+  # clause was written for is a connection that never came up: a plaintext client
+  # against a TLS port gets INTERNAL with
+  # `:connection_error: {:protocol_error, :"Invalid connection preface received"}`
+  # and nothing else.
+  #
+  # Calling that `:server` says the server answered, when nothing answered at
+  # all — and it made the same misconfiguration report two different kinds
+  # depending on which side of a race won: `:timeout` when the handshake simply
+  # hung, `:server` when the client's HTTP/2 layer got far enough to reject the
+  # bytes. `from_reason/2` has always called an unestablished connection
+  # `:transport`; this is the same failure arriving by the other road.
+  #
+  # Deliberately narrow. It is INTERNAL alone, and only with *no* details: a
+  # detail this build cannot decode is still the server having attached
+  # something, and stays `:server`.
+  defp kind(%GRPC.RPCError{status: 13, details: details}) when details in [nil, []], do: :transport
+
+  defp kind(%GRPC.RPCError{}), do: :server
 
   # The code is in ErrorInfo.reason. Everything else in the envelope is either a
   # category or a rendering of the same thing.
