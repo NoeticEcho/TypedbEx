@@ -204,11 +204,62 @@ defmodule TypeDB.ConceptRow do
     |> then(&struct(module, &1))
   end
 
+  # Worked out once per process per struct, not once per row. The documented way
+  # to use this function is `Enum.map(rows, &to_struct(&1, Person))`, so on a
+  # ten-thousand-row answer the mapping was rebuilt ten thousand times. Ten
+  # thousand rows onto a three-field struct, an interleaved A/B of twenty-one
+  # rounds against the previous implementation: 10.29ms against 11.69ms, or
+  # 11.9%. Modest, and it is the honest figure — a first draft measured 32% by
+  # benchmarking a stand-in that also skipped `CallOptions.validate!/3`, which
+  # every real call pays.
+  #
+  # The process dictionary rather than `:persistent_term`, which is what the two
+  # other caches in this driver use, because what is cached here is different in
+  # kind. `TypeDB.JSON`'s codec and `TypeDB.Concept`'s `Decimal?` are settled
+  # before any query runs and never change; a struct's fields change every time
+  # its module is recompiled, which in development is constantly. A
+  # `:persistent_term.put/2` scans every process's heap — measured at 3.7us
+  # against 0.295us for `Process.put/2` — so the store that is right for a fact
+  # fixed at boot is the wrong one for a fact that moves. Per process also means
+  # the cache lives exactly as long as the work that benefits from it.
+  #
+  # Keyed on the module and *validated* against its md5, so a module recompiled
+  # between two calls is rebuilt rather than answered from the mapping its
+  # previous version had. `TypeDB.StructFieldsCacheTest` fails without that
+  # check.
+  defp struct_fields(module) do
+    case module_md5(module) do
+      nil ->
+        build_struct_fields(module)
+
+      md5 ->
+        case Process.get({__MODULE__, module}) do
+          {^md5, fields} ->
+            fields
+
+          _stale_or_absent ->
+            fields = build_struct_fields(module)
+            Process.put({__MODULE__, module}, {md5, fields})
+            fields
+        end
+    end
+  end
+
+  # `:erlang.get_module_info/2` does not load a module, so it raises for one
+  # that is merely loadable as well as for one that does not exist. Both answer
+  # "do not cache": the call below still loads it and either succeeds or
+  # produces the `is not a struct` message, and the next call finds it loaded.
+  defp module_md5(module) do
+    :erlang.get_module_info(module, :md5)
+  rescue
+    _ -> nil
+  end
+
   # Keyed by string so that a variable name never has to become an atom: even
   # `String.to_existing_atom/1` would raise for a variable that happens to name
   # an atom somewhere else in the system, which is a confusing way to be told
   # that a struct has no such field.
-  defp struct_fields(module) do
+  defp build_struct_fields(module) do
     module.__struct__()
     |> Map.from_struct()
     |> Map.keys()
