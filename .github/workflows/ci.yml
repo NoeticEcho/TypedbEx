@@ -124,11 +124,29 @@ jobs:
         # TypeQL's `given` stage does not exist there, and 3.5.0 fails more
         # broadly still. It is in the matrix so that the claim in README.md's
         # `Requirements` section stays true rather than becoming folklore.
-        typedb: ["3.12.0", "3.12.1", "latest"]
+        # `latest` names the slot, `image` names what it pulls, and they are
+        # different on purpose. The tag currently resolves to 3.13.0-rc0, which
+        # panics on its own — `Cannot get exclusive ownership of inner of
+        # Arc<QueryCache>` out of `database/database.rs` — and takes this job
+        # with it on every pull request. So the slot is pinned to the newest
+        # release that works, and the job keeps its name: whatever requires
+        # this check by name keeps finding it.
+        #
+        # Undo by putting `latest` back in `image` when 3.13 ships a release
+        # that does not panic. Keeping the slot rather than deleting it is the
+        # point — a matrix that quietly stops testing the newest server is how
+        # this stops being noticed.
+        include:
+          - typedb: "3.12.0"
+            image: "3.12.0"
+          - typedb: "3.12.1"
+            image: "3.12.1"
+          - typedb: "latest"
+            image: "3.12.1"
 
     services:
       typedb:
-        image: typedb/typedb:${{ matrix.typedb }}
+        image: typedb/typedb:${{ matrix.image }}
         ports:
           - 8000:8000
           - 1729:1729
@@ -616,11 +634,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        typedb: ["3.12.1", "latest"]
+        # `latest` names the slot, `image` names what it pulls, and they are
+        # different on purpose. The tag currently resolves to 3.13.0-rc0, which
+        # panics on its own — `Cannot get exclusive ownership of inner of
+        # Arc<QueryCache>` out of `database/database.rs` — and takes this job
+        # with it on every pull request. So the slot is pinned to the newest
+        # release that works, and the job keeps its name: whatever requires
+        # this check by name keeps finding it.
+        #
+        # Undo by putting `latest` back in `image` when 3.13 ships a release
+        # that does not panic. Keeping the slot rather than deleting it is the
+        # point — a matrix that quietly stops testing the newest server is how
+        # this stops being noticed.
+        include:
+          - typedb: "3.12.1"
+            image: "3.12.1"
+          - typedb: "latest"
+            image: "3.12.1"
 
     services:
       typedb:
-        image: typedb/typedb:${{ matrix.typedb }}
+        image: typedb/typedb:${{ matrix.image }}
         ports:
           - 8000:8000
           - 1729:1729
@@ -664,11 +698,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        typedb: ["3.12.1", "latest"]
+        # `latest` names the slot, `image` names what it pulls, and they are
+        # different on purpose. The tag currently resolves to 3.13.0-rc0, which
+        # panics on its own — `Cannot get exclusive ownership of inner of
+        # Arc<QueryCache>` out of `database/database.rs` — and takes this job
+        # with it on every pull request. So the slot is pinned to the newest
+        # release that works, and the job keeps its name: whatever requires
+        # this check by name keeps finding it.
+        #
+        # Undo by putting `latest` back in `image` when 3.13 ships a release
+        # that does not panic. Keeping the slot rather than deleting it is the
+        # point — a matrix that quietly stops testing the newest server is how
+        # this stops being noticed.
+        include:
+          - typedb: "3.12.1"
+            image: "3.12.1"
+          - typedb: "latest"
+            image: "3.12.1"
 
     services:
       typedb:
-        image: typedb/typedb:${{ matrix.typedb }}
+        image: typedb/typedb:${{ matrix.image }}
         ports:
           - 8000:8000
           - 1729:1729
