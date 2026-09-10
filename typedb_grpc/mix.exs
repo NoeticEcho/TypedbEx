@@ -15,7 +15,26 @@ defmodule TypeDB.GRPC.MixProject do
       # build hostage to whichever protoc-gen-elixir generated them, so they are
       # excluded from the strict pass rather than edited by hand — editing them
       # is what `mix typedb.grpc.gen` exists to make unnecessary.
-      elixirc_options: [debug_info: Mix.env() != :prod],
+      #
+      # `elixirc_options: [debug_info: Mix.env() != :prod]` used to sit here, and it made
+      # this package UNDIALYZABLE for everyone who depends on it. Mix compiles a dependency
+      # with `env: :prod` unless the consumer says otherwise, so `Mix.env()` inside this
+      # file is `:prod` in every consumer's build — and the beams shipped as
+      # `{debug_info, {debug_info_v1, elixir_erl, none}}`. Dialyzer then answers
+      # `Could not get Core Erlang code for .../Elixir.TypeDB.GRPC.beam` and reports every
+      # call into this driver as `unknown_function`: "Function TypeDB.GRPC.query/4 does not
+      # exist", on code that is correct and on a module whose `__info__(:functions)` lists
+      # it.
+      #
+      # Measured 10.09.2026 in a consumer's gate, where it cost four red runs and was
+      # blamed on a stale PLT first — the app WAS in dialyzer's application list and the
+      # PLT reported itself up to date, because neither of those has anything to do with
+      # whether a beam can be decompiled. The sibling `typedb` never carried the line,
+      # which is why the same code dialyzes fine against the HTTP driver.
+      #
+      # The line is what a Phoenix application generator writes, and there it is right:
+      # an application strips debug info from its release to make the image smaller.
+      # A library is not a release, and its consumers are the ones who pay.
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
