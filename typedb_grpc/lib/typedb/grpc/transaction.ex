@@ -1197,6 +1197,30 @@ defmodule TypeDB.GRPC.Transaction do
     }
   end
 
+  # `NaiveDateTime` is TypeDB's `datetime`, and it is here because the sibling both writes
+  # AND READS it: `TypeDB.Given` maps `NaiveDateTime.t()` to `datetime`, and
+  # `TypeDB.Concept` decodes a `datetime` back into one. Without this clause a value read
+  # from the graph could not be written back to it through this transport — the round trip
+  # was broken in one direction only, which is the shape that survives a test suite.
+  #
+  # Measured 10.09.2026 in a consumer's migrator, which passes the moment a migration was
+  # applied as a `given` row: `no TypeDB value for ~N[2026-09-10 18:01:03.282]`, and with
+  # it every test that stands a graph up in `setup_all` — fourteen modules invalidated at
+  # once, none of them about datetimes.
+  #
+  # Read as UTC deliberately. TypeDB's `datetime` carries no zone, so there is nothing to
+  # convert *to* and nothing to guess: this encodes the wall clock it was given, which is
+  # what the sibling's ISO-8601 string does as well.
+  defp encode_value(%NaiveDateTime{} = naive) do
+    nanos = naive |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:nanosecond)
+
+    %Proto.Value{
+      value:
+        {:datetime,
+         %Proto.Value.Datetime{seconds: div(nanos, 1_000_000_000), nanos: rem(nanos, 1_000_000_000)}}
+    }
+  end
+
   defp encode_value(%TypeDB.Duration{months: months, days: days, nanos: nanos}) do
     %Proto.Value{value: {:duration, %Proto.Value.Duration{months: months, days: days, nanos: nanos}}}
   end
@@ -1205,7 +1229,7 @@ defmodule TypeDB.GRPC.Transaction do
     raise Error.new(
             :encode,
             "no TypeDB value for #{inspect(other)} — supported: boolean, integer, float, string, " <>
-              "Date, DateTime and TypeDB.Duration"
+              "Date, DateTime, NaiveDateTime and TypeDB.Duration"
           )
   end
 
