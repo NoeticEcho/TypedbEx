@@ -26,7 +26,9 @@ defmodule TypeDB.GRPC.Config do
           timeout: timeout(),
           call_timeout: timeout(),
           connect_timeout: timeout(),
-          connect_retries: non_neg_integer()
+          connect_retries: non_neg_integer(),
+          keepalive: timeout(),
+          keepalive_tolerance: non_neg_integer()
         }
 
   @enforce_keys [:name, :address]
@@ -42,10 +44,12 @@ defmodule TypeDB.GRPC.Config do
     timeout: 60_000,
     call_timeout: 30_000,
     connect_timeout: 10_000,
-    connect_retries: 0
+    connect_retries: 0,
+    keepalive: 20_000,
+    keepalive_tolerance: 3
   ]
 
-  @keys ~w(name address url username password token tls tls_root_ca tls_opts timeout call_timeout connect_timeout connect_retries)a
+  @keys ~w(name address url username password token tls tls_root_ca tls_opts timeout call_timeout connect_timeout connect_retries keepalive keepalive_tolerance)a
 
   @doc """
   Builds a config from `start_link/1` options.
@@ -91,6 +95,41 @@ defmodule TypeDB.GRPC.Config do
       `:timeout` — a failure that reads as "the server is slow" when it is
       really "this will never work". Raise it for a server that is expected to
       come up after the application does
+    * `:keepalive` — how often, in ms, to send an HTTP/2 PING on an idle
+      connection, default 20 s. `:infinity` turns it off, which is the
+      transport's own default and the reason this option exists — see below
+    * `:keepalive_tolerance` — how many unacknowledged pings the connection
+      survives before it is closed, default `3`. It is **not** optional
+      whenever `:keepalive` is set: gun reads it with `map_get/2`, which
+      raises on a missing key, so a keepalive without a tolerance kills the
+      connection process on its first tick
+
+  ## Why keepalive is on by default here, unlike in the transport
+
+  gun's own `default_keepalive()` is `infinity`, which is the right default for
+  a generic HTTP client and the wrong one for this driver: what it means is that
+  a connection sends nothing at all while the server works, and an intermediary
+  that counts idle time cannot tell that from a connection nobody wants.
+
+  Measured 10.09.2026 against a TypeDB Cloud cluster, from a client on another
+  host. A connection that says nothing is closed by the far end at **59.4 s on
+  port 80, 59.9 s on 443 and 60.0 s on 1729** — the gRPC port included, so this
+  is the cluster's edge and not the HTTP API. The same connection to 1729, sent
+  a PING every 20 s, was still open at **119 s**. So the limit is on idleness,
+  any traffic resets it, and a PING is the cheapest traffic there is.
+
+  What that costs when it is off is not a slow query, it is a query that
+  disappears: the request is sent, the server works for longer than the
+  intermediary's patience, and the socket closes with no HTTP status and no
+  gRPC status — a `:transport` failure that names nothing and looks like the
+  database being unreachable, on a database that is answering health checks in
+  four milliseconds.
+
+  Twenty seconds is chosen against that sixty rather than against a
+  specification: three pings inside the shortest window we have measured. A
+  server or proxy with a shorter one wants a smaller number, and a local TypeDB
+  with no intermediary at all loses nothing by leaving this on — one 17-byte
+  frame every twenty seconds on a connection that is otherwise silent.
   """
   @spec new(keyword()) :: {:ok, t()} | {:error, Error.t()}
   def new(opts) when is_list(opts) do
@@ -102,6 +141,8 @@ defmodule TypeDB.GRPC.Config do
          {:ok, call_timeout} <- fetch_timeout(opts, :call_timeout, 30_000),
          {:ok, connect_timeout} <- fetch_timeout(opts, :connect_timeout, 10_000),
          {:ok, connect_retries} <- fetch_retries(opts),
+         {:ok, keepalive} <- fetch_timeout(opts, :keepalive, 20_000),
+         {:ok, tolerance} <- fetch_tolerance(opts),
          {:ok, tls_root_ca} <- fetch_tls_root_ca(opts) do
       {username, password, token} = credentials
 
@@ -118,7 +159,9 @@ defmodule TypeDB.GRPC.Config do
          timeout: timeout,
          call_timeout: call_timeout,
          connect_timeout: connect_timeout,
-         connect_retries: connect_retries
+         connect_retries: connect_retries,
+         keepalive: keepalive,
+         keepalive_tolerance: tolerance
        }}
     end
   end
@@ -356,16 +399,34 @@ defmodule TypeDB.GRPC.Config do
 
   defp fetch_timeout(opts, key, default) do
     case Keyword.get(opts, key, default) do
-      :infinity -> {:ok, :infinity}
-      n when is_integer(n) and n > 0 -> {:ok, n}
-      other -> error("invalid #{inspect(key)} #{inspect(other)}, expected a positive integer or :infinity")
+      :infinity ->
+        {:ok, :infinity}
+
+      n when is_integer(n) and n > 0 ->
+        {:ok, n}
+
+      other ->
+        error("invalid #{inspect(key)} #{inspect(other)}, expected a positive integer or :infinity")
+    end
+  end
+
+  defp fetch_tolerance(opts) do
+    case Keyword.get(opts, :keepalive_tolerance, 3) do
+      n when is_integer(n) and n >= 0 ->
+        {:ok, n}
+
+      other ->
+        error("invalid :keepalive_tolerance #{inspect(other)}, expected a non-negative integer")
     end
   end
 
   defp fetch_retries(opts) do
     case Keyword.get(opts, :connect_retries, 0) do
-      n when is_integer(n) and n >= 0 -> {:ok, n}
-      other -> error("invalid :connect_retries #{inspect(other)}, expected a non-negative integer")
+      n when is_integer(n) and n >= 0 ->
+        {:ok, n}
+
+      other ->
+        error("invalid :connect_retries #{inspect(other)}, expected a non-negative integer")
     end
   end
 

@@ -92,7 +92,8 @@ defmodule TypeDB.GRPC.Connection do
 
   @doc "Stops a connection."
   @spec stop(t() | pid(), term(), timeout()) :: :ok
-  def stop(conn, reason \\ :normal, timeout \\ :infinity), do: GenServer.stop(conn, reason, timeout)
+  def stop(conn, reason \\ :normal, timeout \\ :infinity),
+    do: GenServer.stop(conn, reason, timeout)
 
   @doc """
   Whether `conn` can serve a call.
@@ -174,7 +175,10 @@ defmodule TypeDB.GRPC.Connection do
     catch
       :exit, {:timeout, {GenServer, :call, _}} ->
         {:error,
-         Error.new(:timeout, "renewing the access token on #{inspect(conn)} took longer than #{timeout}ms")}
+         Error.new(
+           :timeout,
+           "renewing the access token on #{inspect(conn)} took longer than #{timeout}ms"
+         )}
 
       :exit, {_reason, {GenServer, :call, _}} ->
         reraise not_running(conn), __STACKTRACE__
@@ -204,8 +208,11 @@ defmodule TypeDB.GRPC.Connection do
   def authenticated(conn, fun) when is_function(fun, 1) do
     with {:ok, md, minted_at} <- metadata(conn) do
       case fun.(md) do
-        {:error, %Error{kind: :unauthenticated}} = rejected -> retry_once(conn, fun, minted_at, rejected)
-        result -> result
+        {:error, %Error{kind: :unauthenticated}} = rejected ->
+          retry_once(conn, fun, minted_at, rejected)
+
+        result ->
+          result
       end
     end
   end
@@ -263,7 +270,9 @@ defmodule TypeDB.GRPC.Connection do
   catch
     :exit, reason ->
       {:error,
-       Error.new(:transport, "#{context}: the gRPC channel is gone (#{inspect(reason, limit: 3)})",
+       Error.new(
+         :transport,
+         "#{context}: the gRPC channel is gone (#{inspect(reason, limit: 3)})",
          reason: reason
        )}
   end
@@ -341,7 +350,11 @@ defmodule TypeDB.GRPC.Connection do
   end
 
   defp connect(%Config{} = config) do
-    adapter_opts = [retry: config.connect_retries, connect_timeout: config.connect_timeout]
+    adapter_opts = [
+      retry: config.connect_retries,
+      connect_timeout: config.connect_timeout,
+      http2_opts: http2_opts(config)
+    ]
 
     with {:ok, credential} <- credential(config) do
       case GRPC.Stub.connect(config.address, [adapter_opts: adapter_opts] ++ credential) do
@@ -357,6 +370,21 @@ defmodule TypeDB.GRPC.Connection do
            )}
       end
     end
+  end
+
+  # Both keys, always, and the second one is not decoration: gun reads it with
+  # `map_get(keepalive_tolerance, Opts)`, which raises on a missing key, and it
+  # sets no default for it — `gun_http2:init/4` defaults the two window sizes and
+  # nothing else. Since `default_keepalive()` is `infinity`, that line is never
+  # reached today, so setting a keepalive alone would take a connection process
+  # down with `{badkey, keepalive_tolerance}` on its first tick — a sixty-second
+  # problem traded for an immediate one.
+  #
+  # `TypeDB.GRPC.Config` says why this is on at all and carries the measurement.
+  defp http2_opts(%Config{keepalive: :infinity}), do: %{}
+
+  defp http2_opts(%Config{keepalive: ms, keepalive_tolerance: tolerance}) do
+    %{keepalive: ms, keepalive_tolerance: tolerance}
   end
 
   # `GRPC.Credential.new(ssl: opts)` hands `opts` straight to `:ssl`, whose
@@ -439,7 +467,11 @@ defmodule TypeDB.GRPC.Connection do
         {:ok, token, deadline_for(token), %{state | connection_id: id}}
 
       {:ok, other} ->
-        {:error, Error.new(:decode, "opening the connection returned no token: #{inspect(other, limit: 5)}")}
+        {:error,
+         Error.new(
+           :decode,
+           "opening the connection returned no token: #{inspect(other, limit: 5)}"
+         )}
 
       {:error, error} ->
         {:error, open_error(error, config)}
@@ -506,7 +538,8 @@ defmodule TypeDB.GRPC.Connection do
 
   defp connection_id_of(_), do: nil
 
-  defp cache_static_token(%{config: %Config{static_token: token}} = state) when is_binary(token) do
+  defp cache_static_token(%{config: %Config{static_token: token}} = state)
+       when is_binary(token) do
     :ets.insert(state.table, {@token_key, token, deadline_for(token)})
     state
   end
