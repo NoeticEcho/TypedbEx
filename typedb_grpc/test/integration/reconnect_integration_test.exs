@@ -56,6 +56,16 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
     ref
   end
 
+  # gun's state is a record whose shape this test does not depend on beyond one
+  # fact: the socket is in it, and a plaintext socket is a port. Closing the port
+  # from outside is a TCP close as far as gun can tell.
+  defp hang_up(gun) do
+    {_state_name, data} = :sys.get_state(gun)
+    port = data |> Tuple.to_list() |> Enum.find(&is_port/1)
+    assert port, "no plaintext socket in gun's state — is TYPEDB_GRPC_ADDRESS a TLS server?"
+    true = :erlang.port_close(port)
+  end
+
   defp kill_transport(conn) do
     # The gun pid is reached through the adapter's private state. That reach is
     # deliberate and pinned by the assertion: the day the adapter renames the
@@ -154,11 +164,16 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
       # kill: gun reports `gun_down`, the adapter forwards `{:connection_error,
       # reason}` down every live stream, and until 0.2.2 that arrived as a
       # `:decode` error, which a caller reads as terminal.
+      # Not `:gun.shutdown/1`: that is *our* side being polite, and gun lets every
+      # open stream finish first — the query below simply succeeds. The far side
+      # hanging up is the socket going away under gun, which is what closing it
+      # from outside produces: `tcp_closed`, then `gun_down` with every stream
+      # listed as killed.
       result =
         Transaction.transaction(conn, database, :read, fn tx ->
           {:ok, _} = Transaction.query(tx, "match $t isa thing; select $t;")
           {:ok, gun} = Connection.gun_pid(conn)
-          :ok = :gun.shutdown(gun)
+          hang_up(gun)
           Transaction.query(tx, "match $t isa thing; select $t;", timeout: 10_000)
         end)
 
