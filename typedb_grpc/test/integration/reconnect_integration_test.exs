@@ -136,8 +136,33 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
           Transaction.query(tx, "match $t isa thing; select $t;", timeout: 10_000)
         end)
 
-      assert {:error, %TypeDB.Error{kind: kind}} = result
-      assert kind in [:transport, :timeout], "got #{inspect(kind)}"
+      assert {:error, %TypeDB.Error{kind: :transport}} = result
+    end
+  end
+
+  test "a transaction in flight when the far side hangs up fails as :transport, not :decode",
+       context do
+    if context[:skip] do
+      :ok
+    else
+      conn = context.conn
+      database = start_database(conn)
+      {:ok, _} = TypeDB.GRPC.query(conn, database, "define entity thing;")
+
+      # The graceful close is the one production actually meets — the edge
+      # hanging up every few minutes — and it travels a different road from a
+      # kill: gun reports `gun_down`, the adapter forwards `{:connection_error,
+      # reason}` down every live stream, and until 0.2.2 that arrived as a
+      # `:decode` error, which a caller reads as terminal.
+      result =
+        Transaction.transaction(conn, database, :read, fn tx ->
+          {:ok, _} = Transaction.query(tx, "match $t isa thing; select $t;")
+          {:ok, gun} = Connection.gun_pid(conn)
+          :ok = :gun.shutdown(gun)
+          Transaction.query(tx, "match $t isa thing; select $t;", timeout: 10_000)
+        end)
+
+      assert {:error, %TypeDB.Error{kind: :transport}} = result
     end
   end
 end

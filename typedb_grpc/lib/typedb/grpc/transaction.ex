@@ -558,7 +558,12 @@ defmodule TypeDB.GRPC.Transaction do
       calls: %{},
       # req_id -> the reference of the call that owns it.
       owner: %{},
-      reader: nil
+      reader: nil,
+      # The gun process under this stream, watched so that a transport that dies
+      # takes the transaction down at once with `:transport`, rather than leaving
+      # its callers to wait out their timeout. See `handle_info/2` for the two
+      # ways a dead transport reaches a stream, and why this one is needed.
+      gun: monitor_gun(conn)
     }
 
     case start_reader(stream) do
@@ -756,6 +761,29 @@ defmodule TypeDB.GRPC.Transaction do
   @impl GenServer
   def handle_info({:stream_reply, reply}, state), do: {:noreply, handle_reply(reply, state)}
 
+  # The transport died under this stream. Two roads bring that news, and both
+  # have to end in `:transport` at once:
+  #
+  # 1. gun closed gracefully — the far side hung up (measured on TypeDB Cloud's
+  #    edge every ~3 minutes, 11.09.2026) — and the adapter forwards
+  #    `{:connection_error, reason}` down the stream. That arrives as an error
+  #    tuple that is *not* a `GRPC.RPCError`, and until 0.2.2 it fell through to
+  #    the `:decode` clause below: "unexpected reply", no code, no status, which a
+  #    caller reads as a malformed answer and treats as terminal. A hang-up is the
+  #    opposite of terminal.
+  # 2. gun was killed outright, and nothing forwards anything: the stream's
+  #    response process is simply never written to again, and the reader blocks.
+  #    The monitor set in `init/1` is what notices that case.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{gun: {_gun, ref}} = state) do
+    GenServer.cast(state.conn, :verify)
+
+    {:stop, :normal,
+     fail_awaiting(
+       state,
+       Error.new(:transport, "the transport under the transaction died: #{inspect(reason, limit: 3)}")
+     )}
+  end
+
   def handle_info({:stream_done, _reason}, state) do
     # A stream that closed under us may mean the whole transport did. The
     # connection checks; almost always it is fine and this costs nothing.
@@ -793,6 +821,13 @@ defmodule TypeDB.GRPC.Transaction do
 
   defp handle_reply({:error, %GRPC.RPCError{} = error}, state) do
     fail_awaiting(state, GRPCError.from_rpc_error(error, "a transaction request"))
+  end
+
+  # The adapter's own failures — `{:connection_error, reason}` when the
+  # connection went away under the stream — are transport, not a malformed
+  # reply. `from_reason/2` says so; see the `:DOWN` clause for what this cost.
+  defp handle_reply({:error, reason}, state) do
+    fail_awaiting(state, GRPCError.from_reason(reason, "a transaction request"))
   end
 
   defp handle_reply(other, state) do
@@ -1112,6 +1147,16 @@ defmodule TypeDB.GRPC.Transaction do
 
   # The stream is gone, so every outstanding call is gone with it — not just
   # whichever one happened to be in a slot.
+  # `:error` when the connection is mid-rebuild or the adapter's state has no gun
+  # pid: the transaction still works, it just cannot be told about a dead
+  # transport ahead of its own timeout.
+  defp monitor_gun(conn) do
+    case Connection.gun_pid(conn) do
+      {:ok, pid} -> {pid, Process.monitor(pid)}
+      :error -> nil
+    end
+  end
+
   defp fail_awaiting(state, error) do
     Enum.each(state.calls, fn {_ref, call} -> GenServer.reply(call.from, {:error, error}) end)
     %{state | calls: %{}, owner: %{}}

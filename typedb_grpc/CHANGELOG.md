@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-11
+
+A patch, found within hours of 0.2.1 reaching production, where the edge of
+TypeDB Cloud hangs up every few minutes and the driver now reconnects each time.
+
+### Fixed
+
+- **A transport that dies under an open transaction is `:transport`, at once.**
+  Two roads bring that news and neither ended well. When the far side hangs up
+  gracefully, gun reports `gun_down` and the adapter forwards
+  `{:connection_error, reason}` down every live stream; that is not a
+  `GRPC.RPCError`, so it fell through to the "unexpected reply" clause and came
+  out as `:decode` — no code, no status — which a caller reads as a malformed
+  answer, and a malformed answer is terminal. A hang-up is the opposite of
+  terminal. When gun is killed outright, nothing forwards anything and the
+  transaction's callers waited out their own timeout. The transaction now
+  classifies the adapter's own errors through `from_reason/2`, and monitors the
+  gun process so that a kill ends it immediately, with the connection told to
+  verify its channel.
+
 ## [0.2.1] - 2026-09-11
 
 A patch: no signature changes, one new public function, and the behaviour that
@@ -178,7 +198,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.2...HEAD
+[0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.1...typedb_grpc-v0.2.2
 [0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/typedb_grpc-v0.1.0
