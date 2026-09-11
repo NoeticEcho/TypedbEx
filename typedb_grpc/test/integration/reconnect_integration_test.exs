@@ -199,6 +199,10 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
       {:ok, first} = Connection.token(conn)
       # The moment a caller read the token it is about to be refused with.
       read_at = System.monotonic_time(:millisecond)
+      # A JWT minted within the same second as `first` is byte-identical to it
+      # (`iat` has second resolution), which would make a real sign-in look like
+      # the refused token coming back. One second apart, the tokens differ.
+      Process.sleep(1_100)
 
       # What `authenticated/2` does on an `:unauthenticated` answer. Until 0.2.3
       # this handed back `first` — locally still good for an hour — and the
