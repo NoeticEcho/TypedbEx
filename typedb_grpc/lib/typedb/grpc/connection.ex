@@ -217,7 +217,7 @@ defmodule TypeDB.GRPC.Connection do
   @spec token(t()) :: {:ok, String.t()} | {:error, Error.t()}
   def token(conn) do
     case :ets.lookup(conn, @token_key) do
-      [{@token_key, token, deadline}] ->
+      [{@token_key, token, deadline, _minted_at}] ->
         if usable?(deadline), do: {:ok, token}, else: renew_token(conn, :any)
 
       [] ->
@@ -395,15 +395,24 @@ defmodule TypeDB.GRPC.Connection do
     {:reply, {:error, reconnecting(state.config.name)}, state}
   end
 
+  # `minted_before` is when the caller read the token the server has just refused.
+  # If the table already holds a token minted after that moment, somebody queued
+  # ahead of this caller has done the work, and the newer token is the answer.
+  # Otherwise the refused token is the one in the table, and it is replaced —
+  # whatever its local deadline says. This clause used to hand a caller back the
+  # very token it was refused with, on the strength of `usable?/1`: the server's
+  # verdict lost to our clock. Measured on production 11.09.2026: a token with
+  # 4 721 s of local life left, refused with `AUT3` by a server that had dropped
+  # the connection it was minted on, and every call on that node — health,
+  # queries, transaction opens — failing as `:unauthenticated` until a forced
+  # sign-in replaced it. A caller's translation of that is terminal, so this is
+  # a job-killer rather than a slow path. The server is the authority on whether
+  # a token is good; the deadline only says when to renew ahead of time.
   def handle_call({:renew_token, minted_before}, _from, state) do
     case :ets.lookup(state.table, @token_key) do
-      # Somebody else already replaced the token this caller was holding.
-      [{@token_key, token, deadline}] when minted_before != :any ->
-        if minted_before < deadline - @renewal_margin_ms or usable?(deadline) do
-          {:reply, {:ok, token}, state}
-        else
-          sign_in_and_reply(state)
-        end
+      [{@token_key, token, _deadline, minted_at}]
+      when minted_before != :any and minted_before < minted_at ->
+        {:reply, {:ok, token}, state}
 
       _ ->
         sign_in_and_reply(state)
@@ -543,7 +552,7 @@ defmodule TypeDB.GRPC.Connection do
   defp sign_in_and_reply(state) do
     case sign_in(state) do
       {:ok, token, deadline, state} ->
-        :ets.insert(state.table, {@token_key, token, deadline})
+        :ets.insert(state.table, {@token_key, token, deadline, System.monotonic_time(:millisecond)})
         {:reply, {:ok, token}, schedule_refresh(state, deadline)}
 
       {:error, error} ->
@@ -680,7 +689,11 @@ defmodule TypeDB.GRPC.Connection do
 
   defp cache_static_token(%{config: %Config{static_token: token}} = state)
        when is_binary(token) do
-    :ets.insert(state.table, {@token_key, token, deadline_for(token)})
+    :ets.insert(
+      state.table,
+      {@token_key, token, deadline_for(token), System.monotonic_time(:millisecond)}
+    )
+
     state
   end
 
@@ -893,7 +906,7 @@ defmodule TypeDB.GRPC.Connection do
 
     case sign_in(state) do
       {:ok, token, deadline, state} ->
-        :ets.insert(state.table, {@token_key, token, deadline})
+        :ets.insert(state.table, {@token_key, token, deadline, System.monotonic_time(:millisecond)})
         schedule_refresh(state, deadline)
 
       {:error, %Error{} = error} ->

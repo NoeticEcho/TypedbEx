@@ -190,4 +190,26 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
       assert_receive {^ref, :up, _}, 5_000
     end
   end
+
+  test "a token the server refused is replaced even while its local deadline holds", context do
+    if context[:skip] do
+      :ok
+    else
+      conn = context.conn
+      {:ok, first} = Connection.token(conn)
+      # The moment a caller read the token it is about to be refused with.
+      read_at = System.monotonic_time(:millisecond)
+
+      # What `authenticated/2` does on an `:unauthenticated` answer. Until 0.2.3
+      # this handed back `first` — locally still good for an hour — and the
+      # caller failed again with the same token; measured on production as a
+      # node whose every call was refused for the rest of the token's life.
+      assert {:ok, second} = Connection.renew_token(conn, read_at)
+      assert second != first, "the refused token came back unchanged"
+
+      # A caller queued behind that renewal, holding the old token, gets the
+      # new one without a third sign-in.
+      assert {:ok, ^second} = Connection.renew_token(conn, read_at)
+    end
+  end
 end

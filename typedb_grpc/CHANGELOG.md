@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-11
+
+A patch, and the third of the day: found by a probe on production hours after
+0.2.2, on a node whose every call had been refused for the last twenty minutes.
+
+### Fixed
+
+- **A token the server refuses is replaced, whatever its local deadline says.**
+  `renew_token/2` answered a caller that had just been refused with the very
+  token it was refused with, because that token's deadline was still in the
+  future by the connection's own clock — the server's verdict lost to ours.
+  Measured on production 11.09.2026: a token with 4 721 s of local life left,
+  refused with `AUT3` by a server that had dropped the connection it was minted
+  on, and health, queries and transaction opens all failing as
+  `:unauthenticated` on that node until a forced sign-in replaced it. The cached
+  token now carries when it was minted; a refused caller gets a newer token if
+  one was minted after it read the old one, and a fresh sign-in otherwise.
+
 ## [0.2.2] - 2026-09-11
 
 A patch, found within hours of 0.2.1 reaching production, where the edge of
@@ -198,7 +216,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.2...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.3...HEAD
+[0.2.3]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.2...typedb_grpc-v0.2.3
 [0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.1...typedb_grpc-v0.2.2
 [0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
