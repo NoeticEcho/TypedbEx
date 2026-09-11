@@ -135,6 +135,7 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
       conn = context.conn
       database = start_database(conn)
       {:ok, _} = TypeDB.GRPC.query(conn, database, "define entity thing;")
+      ref = watch_connection_events()
 
       result =
         Transaction.transaction(conn, database, :read, fn tx ->
@@ -147,6 +148,13 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
         end)
 
       assert {:error, %TypeDB.Error{kind: :transport}} = result
+
+      # Teardown deletes the database over this connection. Let the channel come
+      # back first: a caller that reads the old channel in the moments between
+      # gun's death and the connection noticing it casts into a dead process and
+      # waits its full timeout — the residual window the "Reconnecting" section
+      # of `Connection` describes, and not what this test is about.
+      assert_receive {^ref, :up, _}, 5_000
     end
   end
 
@@ -158,6 +166,7 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
       conn = context.conn
       database = start_database(conn)
       {:ok, _} = TypeDB.GRPC.query(conn, database, "define entity thing;")
+      ref = watch_connection_events()
 
       # The graceful close is the one production actually meets — the edge
       # hanging up every few minutes — and it travels a different road from a
@@ -178,6 +187,7 @@ defmodule TypeDB.GRPC.ReconnectIntegrationTest do
         end)
 
       assert {:error, %TypeDB.Error{kind: :transport}} = result
+      assert_receive {^ref, :up, _}, 5_000
     end
   end
 end
