@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-11
+
+A patch: no signature changes, one new public function, and the behaviour that
+was missing.
+
+### Fixed
+
+- **A dropped connection is re-established.** The transport is opened with
+  `retry: 0`, so that a connection which can never come up fails in
+  milliseconds; the same setting meant gun never came back after a *drop*
+  either, and the adapter kept the dead pid and kept casting requests into it —
+  a cast to a dead process is dropped silently, so every caller waited its
+  full timeout for an answer nobody would send. Measured on production
+  11.09.2026: six hours of renewals timing out at 30 s and transaction opens at
+  240 s, while a fresh connection on the same node worked in 92 ms.
+  `TypeDB.GRPC.Connection` now monitors the gun process and rebuilds the
+  channel when it dies, with a short backoff; the token and the connection id
+  are minted afresh on the new transport. While it is being rebuilt,
+  `fetch_channel/1` (new) and every call answer `kind: :transport` at once
+  rather than handing out the dead channel. Two telemetry events,
+  `[:typedb, :connection, :down]` and `[:typedb, :connection, :up]`, say when.
+- **The sign-in RPC is bounded by the caller's wait.** It ran with `:timeout`
+  (the per-request budget, 240 s in the deployment that found it) while the
+  caller waited `:call_timeout` (30 s), so one slow sign-in took every caller
+  down with it and the process stayed busy on a token nobody would receive. It
+  now runs with the smaller of the two, less a second.
+- **The token is renewed ahead of time**, from a timer at half its remaining
+  life, so the ordinary renewal costs no caller anything; the on-demand
+  renewal remains as the fallback for a timer that failed.
+
 ## [0.2.0] - 2026-08-30
 
 A minor under the 0.x rule, and for one reason: an error that used to arrive as
@@ -148,6 +178,7 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.1...HEAD
+[0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.2.1
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/typedb_grpc-v0.1.0

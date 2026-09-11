@@ -340,8 +340,12 @@ defmodule TypeDB.GRPC.ConnectionIntegrationTest do
 
       _ = GRPC.Stub.disconnect(Connection.channel(conn))
 
+      # Two honest answers, decided by whether the connection process has seen
+      # the transport go before this caller read the channel: the exit from the
+      # adapter, translated, or the connection saying it is rebuilding. Both
+      # are `:transport` and retryable, which is what the caller needs to know.
       assert {:error, %TypeDB.Error{kind: :transport} = error} = Database.list(conn)
-      assert error.message =~ "channel is gone"
+      assert error.message =~ ~r/channel is gone|re-establishing/
       assert TypeDB.Error.retryable?(error), "the connection can come back; this is not permanent"
     end
   end

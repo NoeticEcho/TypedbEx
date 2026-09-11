@@ -90,6 +90,7 @@ defmodule TypeDB.GRPC.Telemetry do
   @transaction [:typedb, :transaction]
   @sign_in [:typedb, :sign_in]
   @stream_batch [:typedb, :grpc, :stream, :batch]
+  @connection [:typedb, :connection]
 
   @transport :grpc
 
@@ -108,6 +109,17 @@ defmodule TypeDB.GRPC.Telemetry do
   @doc "The event emitted for each batch of a streamed read."
   @spec stream_batch_event() :: [atom()]
   def stream_batch_event, do: @stream_batch
+
+  @doc """
+  The event prefix for the connection's transport: `[:typedb, :connection, :down]`
+  when the gun process carrying it dies, `[:typedb, :connection, :up]` when the
+  channel has been rebuilt. Metadata carries `:connection`; `:down` adds the
+  `:reason`, `:up` adds `:reconnects` (lifetime count) and `:attempts` (this
+  time). These are the two lines that were missing from six hours of production
+  log on 11.09.2026.
+  """
+  @spec connection_event() :: [atom()]
+  def connection_event, do: @connection
 
   @doc "The value this driver puts in `:transport`."
   @spec transport() :: atom()
@@ -141,6 +153,12 @@ defmodule TypeDB.GRPC.Telemetry do
       {result, tagged(stop_metadata)}
     end)
   end
+
+  @doc false
+  def connection_down(metadata), do: :telemetry.execute(@connection ++ [:down], %{}, tagged(metadata))
+
+  @doc false
+  def connection_up(metadata), do: :telemetry.execute(@connection ++ [:up], %{}, tagged(metadata))
 
   defp tagged(metadata), do: Map.put(metadata, :transport, @transport)
 

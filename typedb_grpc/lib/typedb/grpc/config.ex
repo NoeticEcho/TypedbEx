@@ -90,11 +90,17 @@ defmodule TypeDB.GRPC.Config do
       then waits, because the server is waiting for a handshake that will never
       arrive. Without this the wait is minutes
     * `:connect_retries` — how many times the transport retries establishing the
-      channel, default `0`. The adapter's own default is 100, which turns a
-      wrong CA or a wrong port into a wait of tens of seconds ending in
-      `:timeout` — a failure that reads as "the server is slow" when it is
-      really "this will never work". Raise it for a server that is expected to
-      come up after the application does
+      channel **the first time**, default `0`. The adapter's own default is 100,
+      which turns a wrong CA or a wrong port into a wait of tens of seconds
+      ending in `:timeout` — a failure that reads as "the server is slow" when
+      it is really "this will never work". Raise it for a server that is
+      expected to come up after the application does. A connection that drops
+      *later* is re-established by the connection process itself, always, and
+      this option has no part in that: gun's `retry` governs both the first
+      connection and every reconnect with one number, and a driver that wants
+      the first to fail fast cannot let it be the mechanism for the second.
+      Measured 11.09.2026, where `retry: 0` alone left a dropped production
+      connection dead for six hours — see `TypeDB.GRPC.Connection`
     * `:keepalive` — how often, in ms, to send an HTTP/2 PING on an idle
       connection, default 20 s. `:infinity` turns it off, which is the
       transport's own default and the reason this option exists — see below
@@ -102,7 +108,8 @@ defmodule TypeDB.GRPC.Config do
       survives before it is closed, default `3`. It is **not** optional
       whenever `:keepalive` is set: gun reads it with `map_get/2`, which
       raises on a missing key, so a keepalive without a tolerance kills the
-      connection process on its first tick
+      connection process on its first tick. Exceeding it closes the connection,
+      which is then re-established like any other drop
 
   ## Why keepalive is on by default here, unlike in the transport
 

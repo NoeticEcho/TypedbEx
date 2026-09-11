@@ -533,16 +533,19 @@ defmodule TypeDB.GRPC.Transaction do
 
   @impl GenServer
   def init({conn, database, type, opts}) do
-    case Connection.metadata(conn) do
+    with {:ok, md, _minted_at} <- Connection.metadata(conn),
+         {:ok, channel} <- Connection.fetch_channel(conn) do
+      start_stream(conn, channel, database, type, opts, md)
+    else
       {:error, error} -> {:stop, error}
-      {:ok, md, _minted_at} -> start_stream(conn, database, type, opts, md)
     end
   end
 
-  defp start_stream(conn, database, type, opts, md) do
-    stream = Proto.TypeDB.Stub.transaction(Connection.channel(conn), metadata: md)
+  defp start_stream(conn, channel, database, type, opts, md) do
+    stream = Proto.TypeDB.Stub.transaction(channel, metadata: md)
 
     state = %{
+      conn: conn,
       stream: stream,
       database: database,
       type: type,
@@ -754,6 +757,9 @@ defmodule TypeDB.GRPC.Transaction do
   def handle_info({:stream_reply, reply}, state), do: {:noreply, handle_reply(reply, state)}
 
   def handle_info({:stream_done, _reason}, state) do
+    # A stream that closed under us may mean the whole transport did. The
+    # connection checks; almost always it is fine and this costs nothing.
+    GenServer.cast(state.conn, :verify)
     {:stop, :normal, fail_awaiting(state, Error.new(:transport, "the transaction stream closed"))}
   end
 
