@@ -24,6 +24,12 @@ typedb_grpc-*.tar
 # ExUnit's :tmp_dir tag writes here.
 tmp/
 
+# Test certificates and their private keys. The TLS job mints a throwaway CA and
+# a localhost certificate in three openssl commands, and anyone reproducing that
+# job locally does the same. Minted per run, valid for a day, never shared — and
+# a private key in a repository is wrong whatever it protects.
+tls/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

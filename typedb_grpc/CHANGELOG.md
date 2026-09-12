@@ -44,8 +44,18 @@ that were never created.
   reconnect, because a caller has no use for the difference between "not yet"
   and "not any more".
 
-  **What it costs**, said plainly: a wrong port or an untrusted CA no longer
-  announces itself by refusing to boot. It announces itself by a `Logger.error`
+  **What it costs is bounded on purpose.** A server that *refuses the handshake*
+  still refuses to start: a TLS alert — an untrusted CA, an expired certificate
+  — is the peer answering no, and retrying it gets the same certificate. VI-8 of
+  Audit VI is the standing decision that such a server is refused rather than
+  quietly accepted, and this release does not move it. The TLS suite is what
+  holds that line, and it caught this very change trying to cross it — the first
+  version of this work started happily against an untrusted server and was sent
+  back by two tests that have guarded that posture since 0.1.0.
+
+  What is tolerated is the other kind: a refused connection, a name that does not
+  resolve yet, a port nothing is listening on. So a wrong port no longer
+  announces itself by refusing to boot; it announces itself by a `Logger.error`
   at start-up naming the address and the reason, by the same line at every
   backoff, and by every call failing as `:transport`. That is a deliberate trade
   of a loud immediate failure for an application that survives its database
