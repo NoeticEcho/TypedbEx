@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **An impossible port in `:url` is reported as an impossible port again.**
+  Which layer notices it is `URI.new/1`'s business, and that changed underneath
+  the driver: Elixir used to parse `http://host:99999999` and leave the range to
+  this driver, and now refuses the URL outright — at which point the only thing
+  the driver could say was *"unexpected \":\""*, about a URL whose colon is
+  perfectly fine. The port is read here now, so the answer is the same sentence
+  on every Elixir and it names the part that is wrong.
+
+  This is what had CI red on `main` since 2026-09-11: seven jobs across three
+  Elixir versions, Windows and all three integration matrices, every one of them
+  the same assertion in `TypeDB.ConfigTest`.
+
+  The suite caught the first attempt at the fix too — it reported
+  `http://ho st:8000` as a port problem, sending the reader to correct the one
+  part of that URL that was right. A port is only named when it is genuinely
+  outside 1..65535.
+
 ## [0.10.0] - 2026-08-30
 
 A read larger than the server's cap can finally be read. `TypeDB.stream/4` is

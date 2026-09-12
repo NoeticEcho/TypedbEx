@@ -79,6 +79,10 @@ defmodule TypeDB.ConfigTest do
           {"http://host:abc", "A port must be numeric"},
           {"http://host:99999999", "outside 1..65535"},
           {"http://host:0", "outside 1..65535"},
+          # `URI.new/1` parses this one on some Elixir versions and refuses it on
+          # others — a numeric port it will not take at all. Either way the
+          # driver's answer should be about the port, not about a colon.
+          {"http://host:-1", "outside 1..65535"},
           {"http://user:pw@host:8000", "Pass :username and :password instead"},
           {"http://[bad", "unbalanced brackets"},
           {"http://ho st:8000", "no spaces"},
