@@ -87,13 +87,20 @@ defmodule TypeDB.GRPC.Connection do
   deliberately so: a caller has no use for the distinction between "not yet" and
   "not any more", and both are worth retrying.
 
-  What this costs is the one thing `retry: 0` used to buy for free. A wrong port
-  or an untrusted CA no longer announces itself by refusing to boot; it
-  announces itself by a `Logger.error` at start-up naming the address and the
-  reason, by the same line at every backoff, and by every call failing. That is
-  a deliberate trade of a loud immediate failure for an application that
-  survives its database restarting, and it is the trade every official TypeDB
-  driver makes.
+  What this costs is bounded on purpose. **A server that refuses the handshake
+  still refuses to start.** A TLS alert — an untrusted CA, an expired
+  certificate — is the peer answering *no*, and retrying it gets the same
+  certificate; VI-8 of Audit VI is the standing decision that such a server is
+  refused rather than quietly accepted, and this change does not move it. The
+  TLS suite is what holds that line, and it caught this very change trying to
+  cross it.
+
+  What is tolerated is the other kind: a refused connection, a name that does
+  not resolve yet, a port nothing is listening on. Those are conditions that
+  pass. A wrong port therefore no longer announces itself by refusing to boot —
+  it announces itself by a `Logger.error` at start-up naming the address and the
+  reason, by the same line at every backoff, and by every call answering
+  `kind: :transport`.
   """
 
   use GenServer
@@ -420,35 +427,61 @@ defmodule TypeDB.GRPC.Connection do
 
         {:ok, cache_static_token(state)}
 
-      # A server that is not up *yet* is the same situation as one that went
-      # away, and this process has handled the second since 0.2.1 — so it starts
-      # and keeps trying, rather than taking the supervision tree down with it.
-      # Returning `{:stop, error}` here is what made
-      # `Supervisor.start_link/2` answer `{:error, {:shutdown, …}}` while TypeDB
-      # was restarting, against a README that promises in bold that it will not.
-      #
-      # The cost is that a misconfiguration — wrong port, untrusted CA — no
-      # longer announces itself by refusing to boot. It announces itself instead
-      # by this line, repeated at every backoff, and by every call answering
-      # `kind: :transport`; which is why this one is `error` and names both the
-      # address and the reason.
+      # A server that refused the handshake is not a server that is not up: the
+      # peer answered, and answered no. Retrying an untrusted certificate gets
+      # the same certificate, so this stays what it has always been — a refusal
+      # to start. VI-8 of Audit VI is the standing decision that a server this
+      # machine does not trust must be refused rather than quietly accepted, and
+      # a driver that started anyway would have moved that decision without
+      # saying so.
       {:error, %Error{} = error} ->
-        :ets.insert(table, {@channel_key, :reconnecting})
-
-        Logger.error(
-          "TypeDB.GRPC connection #{inspect(config.name)} could not open its transport at " <>
-            "start-up (#{error.message}); it will keep trying, and every call until then " <>
-            "answers with kind: :transport",
-          typedb_connection: config.name
-        )
-
-        # `1` rather than `0`: the attempt `init` just made was the zeroth, so
-        # the backoff continues from where that left off instead of repeating it.
-        Process.send_after(self(), {:reconnect, 1}, hd(@reconnect_backoff_ms))
-
-        {:ok, state}
+        if handshake_rejected?(error) do
+          {:stop, error}
+        else
+          start_without_transport(state, error)
+        end
     end
   end
+
+  # A server that is not up *yet* is the same situation as one that went away,
+  # and this process has handled the second since 0.2.1 — so it starts and keeps
+  # trying, rather than taking the supervision tree down with it. Returning
+  # `{:stop, error}` for this case is what made `Supervisor.start_link/2` answer
+  # `{:error, {:shutdown, …}}` while TypeDB was restarting, against a README
+  # that promises in bold that it will not.
+  #
+  # The cost is that a wrong port no longer announces itself by refusing to
+  # boot. It announces itself instead by this line, repeated at every backoff,
+  # and by every call answering `kind: :transport`; which is why this one is
+  # `error` and names both the address and the reason.
+  defp start_without_transport(%{config: config, table: table} = state, %Error{} = error) do
+    :ets.insert(table, {@channel_key, :reconnecting})
+
+    Logger.error(
+      "TypeDB.GRPC connection #{inspect(config.name)} could not open its transport at " <>
+        "start-up (#{error.message}); it will keep trying, and every call until then " <>
+        "answers with kind: :transport",
+      typedb_connection: config.name
+    )
+
+    # `1` rather than `0`: the attempt `init` just made was the zeroth, so the
+    # backoff continues from where that left off instead of repeating it.
+    Process.send_after(self(), {:reconnect, 1}, hd(@reconnect_backoff_ms))
+
+    {:ok, state}
+  end
+
+  # `:ssl` reports a rejected handshake as a `:tls_alert` somewhere inside the
+  # reason gun hands up — `{:down, {:shutdown, {:tls_alert, {:unknown_ca, …}}}}`
+  # at the depth it happens to be today. This looks for the tag rather than
+  # matching that shape, because the shape is three libraries' business and the
+  # tag is the fact.
+  defp handshake_rejected?(%Error{reason: reason}), do: tls_alert?(reason)
+
+  defp tls_alert?({:tls_alert, _}), do: true
+  defp tls_alert?(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> tls_alert?()
+  defp tls_alert?(list) when is_list(list), do: Enum.any?(list, &tls_alert?/1)
+  defp tls_alert?(_other), do: false
 
   @impl GenServer
   def handle_call({:renew_token, _minted_before}, _from, %{channel: nil} = state) do

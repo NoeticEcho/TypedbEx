@@ -153,7 +153,9 @@ The driver treats them as ordinary:
   pipeline that stalls. Two telemetry events say when:
   `[:typedb, :connection, :down]` and `[:typedb, :connection, :up]`.
 - **A connection that was never up is the same case.** Starting before TypeDB is
-  reachable is not an error; the process starts and connects when it can.
+  reachable is not an error; the process starts and connects when it can. The
+  exception is a server that *refuses the handshake* — an untrusted certificate
+  is a verdict rather than a hiccup, and `start_link/1` still fails on it.
 - **Idle connections are kept alive.** An HTTP/2 PING every 20 s, and the
   connection is closed after 3 unacknowledged ones. gun's own default is no
   keepalive at all, which is how a connection dies silently behind something
