@@ -425,11 +425,42 @@ defmodule TypeDB.Config do
         {:ok, uri}
 
       {:error, part} ->
-        {:error,
-         config_error(
-           "invalid :url #{inspect(original)}: unexpected #{inspect(part)}. A port must be numeric, " <>
-             "and a host must contain no spaces and no unbalanced brackets."
-         )}
+        {:error, refused_url_error(candidate, original, part)}
+    end
+  end
+
+  # Which layer notices an impossible port is `URI.new/1`'s business and it has
+  # changed: Elixir used to parse `http://host:99999999` and leave the range to
+  # `check_port/2`, and now refuses it outright — at which point the only thing
+  # this driver could say was "unexpected \":\"", about a URL whose colon is
+  # perfectly fine. The port is read here so the answer is the same sentence on
+  # every Elixir, and it is the sentence that names what to change.
+  @port_in_authority ~r{^[a-zA-Z][a-zA-Z0-9+.\-]*://[^/?\#]*?:(-?\d+)(?:[/?\#]|$)}
+
+  defp refused_url_error(candidate, original, part) do
+    case refused_port(candidate) do
+      {:ok, port} ->
+        config_error("invalid :url #{inspect(original)}: port #{port} is outside 1..65535")
+
+      :error ->
+        config_error(
+          "invalid :url #{inspect(original)}: unexpected #{inspect(part)}. A port must be numeric, " <>
+            "and a host must contain no spaces and no unbalanced brackets."
+        )
+    end
+  end
+
+  # Only a port that is genuinely out of range: `"http://ho st:8000"` carries a
+  # perfectly good 8000 and is refused for the space in its host, and saying
+  # "port 8000 is outside 1..65535" about it would send the reader to fix the
+  # one part of that URL that is right. The existing suite caught exactly that.
+  defp refused_port(candidate) do
+    with [digits] <- Regex.run(@port_in_authority, candidate, capture: :all_but_first),
+         {port, ""} <- Integer.parse(digits),
+         false <- port in 1..65_535 do
+      {:ok, port}
+    else
+      _ -> :error
     end
   end
 
