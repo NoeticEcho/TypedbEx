@@ -30,7 +30,8 @@ defmodule TypeDB.GRPC.Connection do
   to decode, and the id in this driver's telemetry is the id in the server's log.
 
   It happens on the first call rather than in `start_link/1`, which is what keeps
-  a supervision tree from failing to boot because TypeDB is not up yet.
+  a supervision tree from failing to boot because TypeDB is not up yet. So does
+  the transport, since 0.3.0 — see "Starting before the server" below.
 
   ## Tokens
 
@@ -69,6 +70,30 @@ defmodule TypeDB.GRPC.Connection do
   hours of a pipeline reporting nothing but timeouts — renewals at 30 s,
   transaction opens at 240 s, and a fresh connection on the same node working
   in 92 ms.
+
+  ## Starting before the server
+
+  A server that is not up *yet* is the same situation as one that went away, and
+  since 0.3.0 it is treated as one: `init/1` opens the transport if it can and,
+  if it cannot, starts anyway with the same reconnect loop running. So a
+  supervision tree containing a connection boots while TypeDB is restarting,
+  which is what this module and the README have both promised since 0.1.0 and
+  what neither delivered — measured against a closed port,
+  `Supervisor.start_link/2` answered `{:error, {:shutdown, …}}` where the HTTP
+  sibling answered `{:ok, pid}`.
+
+  Until the transport comes up, every call answers `%TypeDB.Error{kind:
+  :transport}` at once. That is the same answer as during a reconnect, and
+  deliberately so: a caller has no use for the distinction between "not yet" and
+  "not any more", and both are worth retrying.
+
+  What this costs is the one thing `retry: 0` used to buy for free. A wrong port
+  or an untrusted CA no longer announces itself by refusing to boot; it
+  announces itself by a `Logger.error` at start-up naming the address and the
+  reason, by the same line at every backoff, and by every call failing. That is
+  a deliberate trade of a loud immediate failure for an application that
+  survives its database restarting, and it is the trade every official TypeDB
+  driver makes.
   """
 
   use GenServer
@@ -363,30 +388,65 @@ defmodule TypeDB.GRPC.Connection do
 
     warn_if_plaintext(config)
 
+    table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
+
+    # The published copy carries no credentials: every process in the VM can
+    # read this table, which is the point, and a password should not be one
+    # `:ets.lookup/2` away.
+    :ets.insert(table, {@config_key, redact(config)})
+
+    state = %{
+      config: config,
+      table: table,
+      channel: nil,
+      connection_id: nil,
+      gun: nil,
+      # Whether this process has ever had a transport, which is not the same
+      # question as whether it has one now. It is what tells a first opening
+      # apart from a re-opening in the log and in telemetry — an operator
+      # reading "re-established" concludes something dropped, and goes looking
+      # for a fault that did not happen.
+      opened?: false,
+      reconnects: 0,
+      last_up: System.monotonic_time(:millisecond),
+      refresh_timer: nil
+    }
+
     case connect(config) do
       {:ok, channel} ->
-        table = :ets.new(config.name, [:named_table, :protected, :set, read_concurrency: true])
+        :ets.insert(table, {@channel_key, channel})
 
-        # The published copy carries no credentials: every process in the VM can
-        # read this table, which is the point, and a password should not be one
-        # `:ets.lookup/2` away.
-        :ets.insert(table, [{@config_key, redact(config)}, {@channel_key, channel}])
-
-        state = %{
-          config: config,
-          table: table,
-          channel: channel,
-          connection_id: nil,
-          gun: monitor_transport(channel, config),
-          reconnects: 0,
-          last_up: System.monotonic_time(:millisecond),
-          refresh_timer: nil
-        }
+        state = %{state | channel: channel, gun: monitor_transport(channel, config), opened?: true}
 
         {:ok, cache_static_token(state)}
 
-      {:error, error} ->
-        {:stop, error}
+      # A server that is not up *yet* is the same situation as one that went
+      # away, and this process has handled the second since 0.2.1 — so it starts
+      # and keeps trying, rather than taking the supervision tree down with it.
+      # Returning `{:stop, error}` here is what made
+      # `Supervisor.start_link/2` answer `{:error, {:shutdown, …}}` while TypeDB
+      # was restarting, against a README that promises in bold that it will not.
+      #
+      # The cost is that a misconfiguration — wrong port, untrusted CA — no
+      # longer announces itself by refusing to boot. It announces itself instead
+      # by this line, repeated at every backoff, and by every call answering
+      # `kind: :transport`; which is why this one is `error` and names both the
+      # address and the reason.
+      {:error, %Error{} = error} ->
+        :ets.insert(table, {@channel_key, :reconnecting})
+
+        Logger.error(
+          "TypeDB.GRPC connection #{inspect(config.name)} could not open its transport at " <>
+            "start-up (#{error.message}); it will keep trying, and every call until then " <>
+            "answers with kind: :transport",
+          typedb_connection: config.name
+        )
+
+        # `1` rather than `0`: the attempt `init` just made was the zeroth, so
+        # the backoff continues from where that left off instead of repeating it.
+        Process.send_after(self(), {:reconnect, 1}, hd(@reconnect_backoff_ms))
+
+        {:ok, state}
     end
   end
 
@@ -809,17 +869,25 @@ defmodule TypeDB.GRPC.Connection do
       {:ok, channel} ->
         :ets.insert(state.table, {@channel_key, channel})
 
+        first? = not state.opened?
+
         state = %{
           state
           | channel: channel,
             gun: monitor_transport(channel, state.config),
-            reconnects: state.reconnects + 1,
+            opened?: true,
+            reconnects: if(first?, do: state.reconnects, else: state.reconnects + 1),
             last_up: System.monotonic_time(:millisecond)
         }
 
         Logger.info(
-          "TypeDB.GRPC connection #{inspect(name)} re-established its transport " <>
-            "(attempt #{attempt + 1}, reconnect #{state.reconnects} of this process's life)",
+          if first? do
+            "TypeDB.GRPC connection #{inspect(name)} opened its transport " <>
+              "(attempt #{attempt + 1}); it was not reachable when this process started"
+          else
+            "TypeDB.GRPC connection #{inspect(name)} re-established its transport " <>
+              "(attempt #{attempt + 1}, reconnect #{state.reconnects} of this process's life)"
+          end,
           typedb_connection: name
         )
 

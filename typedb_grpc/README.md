@@ -87,7 +87,7 @@ to speak it.
 ```elixir
 def deps do
   [
-    {:typedb_grpc, "~> 0.2.0"}
+    {:typedb_grpc, "~> 0.3.0"}
   ]
 end
 ```
@@ -96,9 +96,10 @@ end
 
 ## Quick start
 
-Add a connection to your supervision tree — it validates the options and starts
-the process, and does **not** contact the server, so your application boots
-whether or not TypeDB is up yet:
+Add a connection to your supervision tree. It starts whether or not TypeDB is
+up: if the server is not reachable it says so loudly, starts anyway, and keeps
+trying in the background, so your application boots while its database is
+restarting rather than after.
 
 ```elixir
 children = [
@@ -136,6 +137,32 @@ TypeDB.GRPC.stream(:graph, "social", "match $p isa person, has name $n; select $
 
 `given_rows` is how a value reaches a query without being spliced into its text,
 and it is the only way this driver offers — a value can never be read as syntax.
+
+## When the connection drops
+
+TypeDB behind a load balancer, a proxy cycling connections, a rolling restart —
+this transport is one long-lived HTTP/2 connection, so all of those are things
+that happen *to* it, unlike the sibling where every request stands alone.
+
+The driver treats them as ordinary:
+
+- **A dropped transport is rebuilt**, with a backoff from 100 ms to 5 s, and the
+  token and connection id are minted afresh on the new one. While it is down,
+  every call answers `%TypeDB.Error{kind: :transport}` **at once** rather than
+  waiting out its timeout — the difference between a request that fails and a
+  pipeline that stalls. Two telemetry events say when:
+  `[:typedb, :connection, :down]` and `[:typedb, :connection, :up]`.
+- **A connection that was never up is the same case.** Starting before TypeDB is
+  reachable is not an error; the process starts and connects when it can.
+- **Idle connections are kept alive.** An HTTP/2 PING every 20 s, and the
+  connection is closed after 3 unacknowledged ones. gun's own default is no
+  keepalive at all, which is how a connection dies silently behind something
+  that reaps idle ones and is only discovered by the next query. `keepalive:
+  :infinity` turns it off.
+
+None of this is configuration you have to write; the defaults are the shape
+above. `TypeDB.GRPC.Config` documents each knob, and `TypeDB.GRPC.Connection`
+explains what each one cost to learn.
 
 ## The generated protocol modules
 

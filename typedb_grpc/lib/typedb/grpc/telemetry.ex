@@ -5,7 +5,7 @@ defmodule TypeDB.GRPC.Telemetry do
   ## The event names are the sibling's, on purpose
 
   `[:typedb, :operation, …]`, `[:typedb, :transaction, …]` and
-  `[:typedb, :sign_in, …]` are exactly the events `TypeDB.Telemetry` emits, and
+  `[:typedb, :sign_in, …]` are the events `TypeDB.Telemetry` emits too, and
   they mean the same things. That is the same argument as the shared
   `%TypeDB.Error{}`: an application that switches transports should keep its
   dashboards, and telemetry is precisely the sort of thing that breaks quietly
@@ -21,6 +21,13 @@ defmodule TypeDB.GRPC.Telemetry do
   | `[:typedb, :transaction, …]` | one bracketed transaction | how long work holds a transaction |
   | `[:typedb, :sign_in, …]` | one sign-in | token churn |
   | `[:typedb, :grpc, :stream, :batch]` | one batch of a streamed read | back pressure, and whether it is working |
+  | `[:typedb, :connection, :down \| :up]` | the transport dying and coming back | whether the link to TypeDB is steady |
+
+  The last two have no counterpart on the other transport, and cannot: over
+  HTTP every request stands alone, so there is no transport to lose and no
+  batching to watch. An application that switches transports keeps every
+  dashboard built on the first three and loses these — which is the honest
+  version of "the names are the sibling's".
 
   ## What is missing, and why
 
@@ -78,6 +85,32 @@ defmodule TypeDB.GRPC.Telemetry do
   every time means the server is ahead of the consumer and the batch size could
   be larger; a `:wait` that dominates means the consumer is waiting on TypeDB,
   which is the shape a healthy streamed read has.
+
+  ## `[:typedb, :connection, :down | :up]`
+
+  Not a span, and the pair an operator wants first when something is wrong with
+  the link rather than with a query. `:down` is emitted when the gun process
+  carrying the transport dies — a proxy cycling connections, a keepalive
+  tolerance exceeded, TypeDB restarting — and `:up` when a new transport is in
+  place and calls go through again.
+
+  Metadata on `:down`: `:transport`, `:connection`, and `:reason` — gun's own
+  word for why it went.
+
+  Metadata on `:up`: `:transport`, `:connection`, `:attempts` (how many tries
+  this recovery took) and `:reconnects` (how many times this process has
+  recovered in its life). A `:reconnects` that climbs steadily is a link that is
+  not steady, and it is the metric to alert on; `:attempts` says how hard each
+  recovery was.
+
+  A connection that starts before TypeDB is reachable emits `:up` with
+  `reconnects: 0` when it finally opens — it recovered from nothing, it simply
+  arrived late. See "Starting before the server" in `TypeDB.GRPC.Connection`.
+
+  These two are **not** logged by `attach_default_logger/1`, deliberately:
+  `TypeDB.GRPC.Connection` already writes both, at `:warning` and `:info`, with
+  the address and the reason. Attaching them here would give every operator two
+  lines for one event.
 
   ## Just show me what it is doing
 
