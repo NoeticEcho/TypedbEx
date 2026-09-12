@@ -6,6 +6,83 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-12
+
+A minor under the 0.x rule: a connection that used to refuse to start now
+starts. No signature changes.
+
+**This release carries 0.2.1, 0.2.2 and 0.2.3 with it.** All three were prepared
+and merged on 11.09.2026 and none was ever tagged or published — hex.pm went
+straight from 0.2.0 to here. Their entries below stand; anyone upgrading from
+0.2.0 is getting four releases' worth of work, all of it about what happens when
+the link to TypeDB is not perfect. Their headings carry no link, because there
+is no tag to link to — the comparison links they used to have pointed at refs
+that were never created.
+
+### Fixed
+
+- **A supervision tree containing a connection boots whether or not TypeDB is
+  up.** `init/1` opened the transport and answered `{:stop, error}` when it
+  could not, so an application whose database was restarting did not start at
+  all. Measured against a closed port:
+
+  | | `Supervisor.start_link/2` |
+  | --- | --- |
+  | `TypeDB.GRPC` before | `{:error, {:shutdown, …}}` |
+  | `TypeDB.GRPC` now | `{:ok, pid}` |
+  | `TypeDB` (HTTP sibling) | `{:ok, pid}` — always did |
+
+  This module's own docs and the README have promised the new behaviour since
+  0.1.0; the README promised it in bold. What makes it a defect rather than a
+  design is that the machinery had already landed: 0.2.1 gave this process a
+  reconnect loop with backoff and a channel that reads `:reconnecting` until it
+  is back. A server that is not up *yet* is the same situation as one that went
+  away, and the process simply never lived long enough to treat it that way.
+
+  Until the transport comes up, every call answers
+  `%TypeDB.Error{kind: :transport}` at once — the same answer as during a
+  reconnect, because a caller has no use for the difference between "not yet"
+  and "not any more".
+
+  **What it costs**, said plainly: a wrong port or an untrusted CA no longer
+  announces itself by refusing to boot. It announces itself by a `Logger.error`
+  at start-up naming the address and the reason, by the same line at every
+  backoff, and by every call failing as `:transport`. That is a deliberate trade
+  of a loud immediate failure for an application that survives its database
+  restarting, and it is the trade every official TypeDB driver makes.
+
+  `test/typedb/grpc/connection_start_test.exs` holds the first half — it needs no
+  server, because a closed port is the situation under test — and
+  `test/integration/late_server_integration_test.exs` holds the second: a
+  connection started against nothing, a TCP relay opened to the real server
+  afterwards, and the connection working through it. Bytes are bytes, so what
+  travels over that relay is TypeDB's own protocol rather than a mock's idea
+  of it.
+
+### Changed
+
+- **A connection opening for the first time no longer reports that it
+  *re-established* its transport.** It says it opened one, and that TypeDB was
+  not reachable when the process started; `[:typedb, :connection, :up]` carries
+  `reconnects: 0` rather than `1`. The old wording sent an operator looking for
+  a drop that never happened, and would have made `:reconnects` — the metric
+  worth alerting on — count arrivals as losses.
+
+### Documentation
+
+- **The telemetry catalogue lists `[:typedb, :connection, :down | :up]`**, which
+  0.2.1 added and `TypeDB.GRPC.Telemetry` never mentioned — the module whose
+  whole job is to be that catalogue. With them, the header's claim that the
+  event names are the sibling's is qualified rather than simply repeated: these
+  two have no HTTP counterpart and cannot, because over HTTP there is no
+  transport to lose.
+
+- **The README has a section on what happens when the connection drops** —
+  rebuild with backoff, calls failing at once rather than hanging, keepalive on
+  by default at 20 s with a tolerance of 3. Three releases of production-driven
+  work on exactly that, and the package's front page did not contain the word
+  "reconnect".
+
 ## [0.2.3] - 2026-09-11
 
 A patch, and the third of the day: found by a probe on production hours after
@@ -216,9 +293,7 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.3...HEAD
-[0.2.3]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.2...typedb_grpc-v0.2.3
-[0.2.2]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.1...typedb_grpc-v0.2.2
-[0.2.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.2.1
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...HEAD
+[0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.3.0
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/typedb_grpc-v0.1.0
