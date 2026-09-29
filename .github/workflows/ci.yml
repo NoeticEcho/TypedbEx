@@ -81,7 +81,27 @@ jobs:
       # its `test_coverage` for what is excluded and why.
       - name: Coverage floor
         if: matrix.lint
-        run: mix test --cover
+        # `mix test --cover` already fails below the floor (it exits 3), but it
+        # prints the two numbers and leaves the subtraction to the reader. The
+        # delta is the useful part: it says how much room there is to raise the
+        # floor, which is the only direction it moves.
+        run: |
+          set -o pipefail
+          status=0
+          mix test --cover 2>&1 | tee /tmp/cover.log || status=$?
+
+          total=$(awk -F'|' '$3 ~ /Total/ { gsub(/[ %]/, "", $2); print $2 }' /tmp/cover.log | tail -1)
+          floor=$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:test_coverage][:summary][:threshold])' 2>/dev/null | tail -1)
+
+          if [ -n "$total" ] && [ -n "$floor" ]; then
+            awk -v t="$total" -v f="$floor" 'BEGIN {
+              printf "coverage %.2f%% against a floor of %s%% (%+.2f points)\n", t, f, t - f
+            }'
+          else
+            echo "could not read the coverage total or the floor; see the table above" >&2
+          fi
+
+          exit $status
 
       - name: Lint
         if: matrix.lint
@@ -120,10 +140,14 @@ jobs:
         # than noise.
         #
         # 3.12.0 is the floor, established by running this suite down the
-        # published releases: 3.11.5 fails fourteen integration tests because
-        # TypeQL's `given` stage does not exist there, and 3.5.0 fails more
-        # broadly still. It is in the matrix so that the claim in README.md's
-        # `Requirements` section stays true rather than becoming folklore.
+        # published releases. On 3.11.5 the suite fails 32 tests and invalidates
+        # ten more, in four groups — `given` is a syntax error, attributes
+        # arrive with no `iid`, and two user calls answer differently; README.md
+        # has the breakdown. 3.5.0 fails more broadly still. 3.12.0 is in the
+        # matrix so that the claim in README.md's `Requirements` section stays
+        # true rather than becoming folklore — as its predecessor did: it said
+        # "fourteen", which was right when it was written and drifted as the
+        # suite grew, which is what a number nobody re-runs does.
         # `latest` names the slot, `image` names what it pulls, and they are
         # different on purpose. The tag currently resolves to 3.13.0-rc0, which
         # panics on its own — `Cannot get exclusive ownership of inner of
@@ -618,6 +642,32 @@ jobs:
       # error mapping and the protocol assertions, which need none.
       - name: Run unit tests
         run: mix test
+
+      # The same arrangement as the sibling `typedb` job, and the same reason:
+      # coverage was measured here and never enforced, so it could only drift.
+      # One version, because the floor is a property of the tests rather than of
+      # the Elixir running them, and two readings of it would just be two ways
+      # to go red. See this package's mix.exs for what the number excludes and
+      # why it is as low as it is.
+      - name: Coverage floor
+        if: matrix.elixir == '1.20'
+        run: |
+          set -o pipefail
+          status=0
+          mix test --cover 2>&1 | tee /tmp/cover.log || status=$?
+
+          total=$(awk -F'|' '$3 ~ /Total/ { gsub(/[ %]/, "", $2); print $2 }' /tmp/cover.log | tail -1)
+          floor=$(mix run --no-start -e 'IO.puts(Mix.Project.config()[:test_coverage][:summary][:threshold])' 2>/dev/null | tail -1)
+
+          if [ -n "$total" ] && [ -n "$floor" ]; then
+            awk -v t="$total" -v f="$floor" 'BEGIN {
+              printf "coverage %.2f%% against a floor of %s%% (%+.2f points)\n", t, f, t - f
+            }'
+          else
+            echo "could not read the coverage total or the floor; see the table above" >&2
+          fi
+
+          exit $status
 
       # MIX_ENV: dev, overriding the workflow-level `test`, for the same reason
       # the Dialyzer step below and the sibling `typedb` job both do it: credo

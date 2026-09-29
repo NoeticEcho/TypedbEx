@@ -10,6 +10,33 @@ defmodule TypeDB.GRPC.MixProject do
       version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
+      test_coverage: [
+        # The floor is what the unit suite covers today — 20.22% — rounded down
+        # to the whole number below it, so it can only go up.
+        #
+        # It is a low number and it is honest about what it measures: this
+        # package's tests are mostly integration tests, and they skip without a
+        # server, so a `mix test --cover` run exercises the error mapping, the
+        # config and the protocol assertions and little else. The real exercise
+        # of `TypeDB.GRPC.Connection` and friends happens in the
+        # `gRPC integration` jobs, which measure nothing. So this floor catches
+        # a unit test being deleted; it does not claim the driver is 20% tested.
+        summary: [threshold: 20],
+        ignore_modules: [
+          # Test support: measuring the coverage of the thing doing the
+          # measuring says nothing about the library.
+          TypeDB.GRPC.Case,
+          ~r/^TypeDB\.Behaviour\.Adapter/,
+          # `lib/protocol/` is protoc-gen-elixir's output — three thousand lines
+          # nobody here wrote and nobody here can fix. Counting it measures how
+          # much of TypeDB's wire protocol this driver happens to touch, which
+          # moves when TypeDB adds a message, and buries the code that is
+          # actually ours: with it counted the total is 17%, and the number
+          # says nothing about any change anyone could make.
+          ~r/^Typedb\.Protocol/,
+          ~r/^Google\.Protobuf/
+        ]
+      ],
       # The generated protobuf modules are machine-written and 3,000 lines wide.
       # Compiling them under --warnings-as-errors would make this package's
       # build hostage to whichever protoc-gen-elixir generated them, so they are

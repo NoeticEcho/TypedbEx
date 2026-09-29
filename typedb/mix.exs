@@ -24,18 +24,25 @@ defmodule TypeDB.MixProject do
         flags: [:error_handling, :extra_return, :missing_return, :unmatched_returns]
       ],
       test_coverage: [
-        # The floor is the number CI reaches, with a couple of points of
-        # headroom, so that it catches a regression rather than the weather.
+        # The floor is a number both CI and a development container clear, so
+        # that it catches a regression rather than the weather, and it only ever
+        # moves up. 83 → 87 once the coverage step began printing the delta.
         #
-        # CI is the authority: it measures about two points lower than a
-        # development container does, with identical per-module figures, and the
-        # cause of that gap has not been chased down. A floor set from a local
-        # reading would be red on every push.
+        # The gap that was never chased down turns out not to exist, and to have
+        # had the wrong sign. This comment used to say CI "measures about two
+        # points lower than a development container", so the floor was set well
+        # under the local reading to compensate. Measured on 42f7fee: **CI reads
+        # 88.16% and this container reads 87.93%** — CI is 0.23 points *higher*.
+        #
+        # 87 rather than 88 for a reason worth stating: a floor above the local
+        # reading would be green in CI and red for every contributor running
+        # `mix test --cover` before pushing, which is the opposite of a useful
+        # gate. It sits below both readings and above everything before them.
         #
         # Modules that run only under another adapter or another JSON codec drag
         # any single run down. CI covers those by running the matrix, not by
         # pretending one run covers everything.
-        summary: [threshold: 83],
+        summary: [threshold: 87],
         ignore_modules: [
           # Test support: measuring the coverage of the thing doing the
           # measuring says nothing about the library.

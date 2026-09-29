@@ -10,6 +10,33 @@ defmodule TypeDB.SoakIntegrationTest do
   in `TypeDB.TokenRenewalIntegrationTest`, which needs a second server whose
   tokens expire in seconds. This one needs nothing that an ordinary integration
   run does not already have, so it runs on every push.
+
+  ## Why this does not flake
+
+  A concurrency test in CI is a flake generator unless it is built not to be,
+  so: **nothing here asserts a duration, and nothing here sleeps.** Every
+  assertion is about an outcome — did all 200 reads succeed, did exactly the
+  100 writes land, did exactly the committed transactions appear. A slow runner
+  makes this test slower and does not make it fail.
+
+  The `Task.async_stream` timeouts are 120 s against a whole file that measures
+  **0.3 s through Finch, 0.3 s through Req and 1.3 s through `:httpc`** on an
+  ordinary container against TypeDB 3.12.1 — `:httpc` being slowest under
+  concurrency is the point of the table in `TypeDB.HTTP`, not a surprise. So
+  the margin is two orders of magnitude on the slowest of the three; the
+  timeouts exist to turn a hang into a failed test rather than a job that runs
+  for six hours.
+
+  Contention is expected rather than excluded. The explicit-transaction test
+  accepts a clean `TypeDB.Error` as an outcome — an isolation conflict under 25
+  concurrent writers is TypeDB working correctly — and then asserts that
+  exactly the transactions which reported a commit are the ones in the
+  database. That is the property worth checking, and it holds however the
+  conflicts fall.
+
+  Each test filters what it counts by its own prefix (`soak-`, `tx-`) because
+  the file shares one database and ExUnit orders by seed, so no test depends on
+  another having run, or not having run, first.
   """
 
   use ExUnit.Case, async: false

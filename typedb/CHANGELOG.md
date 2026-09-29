@@ -32,6 +32,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   server has been seen. The line now shows what the driver actually prints for a
   retried 503, and says why such a status usually carries no TypeDB code at all.
 
+- **The supported TypeDB range is re-measured, and the old number was stale.**
+  *Requirements* said fourteen integration tests fail on 3.11.5. That was true
+  when it was written; the suite has grown since, and the real figure is **32
+  failures and ten more tests invalidated**. Re-running it also turned up a
+  cause the old sentence did not have: TypeQL's missing `given` stage accounts
+  for about nineteen of them, but eleven are something else entirely —
+  3.11.5 sends attributes with **no `iid` field**, so the driver cannot decode
+  one at all and every read of an attribute fails with
+  `%TypeDB.Error{kind: :decode}`. Two more are user calls answering differently
+  (`User.delete/2` gives `400 USD3` where 3.12 gives `404`; `User.set_password/3`
+  on a user that does not exist returns `:ok` where 3.12 gives `404 USU4`).
+
+  The floor is unchanged — **TypeDB 3.12.0 or newer** — and is now stated with
+  the measurement behind it rather than a number nobody re-ran. README's
+  *Requirements* section has the table.
+
 ## [0.10.2] - 2026-09-29
 
 ### Added

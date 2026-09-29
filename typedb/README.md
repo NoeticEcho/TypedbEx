@@ -21,17 +21,32 @@ as well as Linux. The one exception is the `mix typedb.check` task, which
 shells out and therefore wants Git Bash, WSL or MSYS2 there.
 
 Every release runs the full suite against TypeDB 3.12.0, 3.12.1 and `latest`,
-through all three HTTP adapters. 3.12.0 is the floor because it is the oldest
-release the suite passes on, bisected rather than guessed: on 3.11.5, fourteen
-integration tests fail. TypeQL's `given` stage — which is how this driver makes
-a parameterised query safe — is a syntax error there, so every parameterised
-query, and everything that reads a typed value back, fails. `User.delete/2` on
-an unknown user also answers 400 where 3.12 answers 404.
+through all three HTTP adapters. **3.12.0 is the floor** because it is the
+oldest release the suite passes on — measured by running the suite against the
+older releases rather than reasoned about.
 
-Older still is worse, not better: on 3.5.0 `/v1/servers` does not exist and
-inserting then matching fails outright. If you need a release older than
-3.12.0, open an issue — it would mean giving up `given`, so it is a decision
-rather than a patch.
+On **3.11.5** the suite fails 32 tests and invalidates ten more, in four
+groups:
+
+| what fails | tests | why |
+| --- | ---: | --- |
+| every parameterised query | ~19 | TypeQL's `given` stage does not exist: `given $n: string; …` is `[TQL0] [TQL03] … expected query_structure`, wrapped as `[TSV7] Query parsing failed` |
+| every read of an attribute | 11 | attributes arrive with no `iid` field, so the driver cannot decode one and answers `%TypeDB.Error{kind: :decode}` |
+| `User.delete/2` on an unknown user | 1 | `400 USD3` where 3.12 answers `404` |
+| `User.set_password/3` on an unknown user | 1 | `:ok` — 3.11.5 accepts setting a password for a user that does not exist, where 3.12 answers `404 USU4` |
+
+The ten invalidated tests are two modules whose `setup_all` bulk-loads through
+`given`, so they never reach a test body. One more failure comes and goes
+between runs — a transaction that times out opening under the soak's
+concurrency — and it is load rather than a version difference, so the stable
+count is 32.
+
+The first two groups are the decisive ones, and neither is a patch: `given` is
+how this driver makes a parameterised query safe, and an attribute with no
+`iid` cannot be turned into a `TypeDB.Concept` at all. Older still is worse,
+not better: on 3.5.0 `/v1/servers` does not exist and inserting then matching
+fails outright. If you need a release older than 3.12.0, open an issue — it
+would mean giving up `given`, so it is a decision rather than a patch.
 
 ## Installation
 
