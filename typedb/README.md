@@ -583,7 +583,7 @@ guide pairs `typeql-check` with the
 
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2FNoeticEcho%2FTypedbEx%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
 
-The notebook is the fastest way to find out whether this driver fits: a
+[The notebook](notebooks/getting_started.livemd) is the fastest way to find out whether this driver fits: a
 database, a schema, reads and writes, a parameterised query that survives a
 hostile value, and a transaction — against a TypeDB you start with one `docker
 run`.

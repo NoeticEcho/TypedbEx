@@ -1,8 +1,13 @@
-# TypeDB for Elixir
+# TypeDB for Elixir — a Livebook tour
 
 ```elixir
 Mix.install([
-  {:typedb, "~> 0.5"},
+  {:typedb, "~> 0.10.0"},
+  # The default transport. Without it `TypeDB.start_link/1` returns
+  # `{:error, %TypeDB.Error{kind: :config}}` and the next cell has nothing to
+  # match on — every HTTP adapter's dependency is optional, so the one you use
+  # is the one you ask for.
+  {:finch, "~> 0.23"},
   {:kino, "~> 0.14"}
 ])
 ```
@@ -18,6 +23,11 @@ docker run --rm -p 8000:8000 -p 1729:1729 typedb/typedb:3.12.1
 
 Everything below creates its own database and drops it at the end, so it is safe
 against a scratch server — and only a scratch server.
+
+Every cell on this page was run, in order, against **TypeDB CE 3.12.1** — the
+version the driver is developed against and one of the three in CI. The outputs
+quoted in the prose are from that run. `test/typedb/notebook_test.exs` keeps the
+code here parsing and the version requirement above honest between runs.
 
 ## Connecting
 
@@ -109,15 +119,28 @@ defmodule Person do
 end
 
 conn
-|> TypeDB.query!(database, "match $p isa person, has name $name, has age $age;",
+|> TypeDB.query!(
+  database,
+  """
+  match $p isa person, has name $name, has age $age;
+  select $name, $age;
+  """,
   transaction_type: :read
 )
 |> Enum.map(&TypeDB.ConceptRow.to_struct(&1, Person))
 ```
 
-`to_struct/2` raises for a variable that names no field, which is the failure you
-want — `Kernel.struct/2` on a string-keyed map silently hands back a struct full
-of `nil`s.
+The `select` is load-bearing. Without it the row also carries `$p`, the person
+entity itself, and `to_struct/2` raises:
+
+```
+query variable "p" does not name a field of Person.
+Its fields are: :age, :name. Narrow the row with TypeQL's select stage,
+or add the field.
+```
+
+Which is the failure you want, and why this example narrows: `Kernel.struct/2`
+on a string-keyed map silently hands back a struct full of `nil`s instead.
 
 ## Parameterised queries
 
@@ -219,7 +242,11 @@ TypeDB.stop(:notebook)
 
 ## Where next
 
+* [Getting started](https://hexdocs.pm/typedb/getting-started.html) — the same
+  ground as this notebook, in prose, with what surprises people at each step
 * [Transactions](https://hexdocs.pm/typedb/transactions.html)
+* [Recipes](https://hexdocs.pm/typedb/recipes.html) — paging past the
+  10,000-answer cap, bulk loading, upsert, schema at boot
 * [Errors and retries](https://hexdocs.pm/typedb/errors-and-retries.html)
 * [Telemetry and logging](https://hexdocs.pm/typedb/observability.html)
 * [Testing an application](https://hexdocs.pm/typedb/testing.html)

@@ -175,7 +175,11 @@ defmodule TypeDB.MixProject do
       # test/typedb/api_snapshot_test.exs asserts — a new module that nobody
       # filed would otherwise land in an unnamed heap at the bottom.
       groups_for_modules: [
-        Connection: [TypeDB, TypeDB.Connection, TypeDB.Config],
+        # `TypeDB` on its own and first. It is the facade — nearly everything a
+        # caller does goes through it — and it used to sit third inside a group
+        # named for something else, which is a poor first thing to find.
+        "Start here": [TypeDB],
+        Connection: [TypeDB.Connection, TypeDB.Config],
         Querying: [
           TypeDB.Transaction,
           TypeDB.Given,
@@ -206,15 +210,17 @@ defmodule TypeDB.MixProject do
         Errors: [TypeDB.Error],
         Observability: [TypeDB.Telemetry],
         Administration: [TypeDB.Database, TypeDB.User, TypeDB.Server],
-        Extending: [
+        # Split out of one "Extending" group. Choosing a transport is an
+        # ordinary thing a user does — `TypeDB.HTTP` carries the table of which
+        # adapter to pick and why — and it was filed under a heading that reads
+        # as "for people writing plug-ins". The JSON codecs really are that.
+        "HTTP adapters": [
           TypeDB.HTTP,
           TypeDB.HTTP.Finch,
           TypeDB.HTTP.Req,
-          TypeDB.HTTP.Httpc,
-          TypeDB.JSON,
-          TypeDB.JSON.Native,
-          TypeDB.JSON.Jason
+          TypeDB.HTTP.Httpc
         ],
+        "JSON codecs": [TypeDB.JSON, TypeDB.JSON.Native, TypeDB.JSON.Jason],
         "Mix tasks": [Mix.Tasks.Typedb.Check]
       ]
     ]
