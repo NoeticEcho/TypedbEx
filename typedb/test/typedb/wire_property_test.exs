@@ -91,15 +91,39 @@ defmodule TypeDB.WirePropertyTest do
 
   # At least one component negative, which TypeDB has no way to store: TypeQL
   # rejects `P-1Y`, `-P1Y` and every other form.
+  #
+  # Which components are negative is *chosen*, not filtered for. Drawing three
+  # signed integers and keeping the draws with a negative among them looks like
+  # the same generator and is not: `StreamData` starts at generation size 1,
+  # where every integer it draws is 0, so the filter rejects every value and the
+  # property dies with `FilterTooNarrowError` rather than running. That is a
+  # seed lottery — four local seeds passed and CI's 799734 did not — and it is
+  # the failure mode the error message itself names: turn the values into
+  # suitable ones instead of taking the unsuitable ones out.
+  @negated_components [
+    [:months],
+    [:days],
+    [:nanos],
+    [:months, :days],
+    [:months, :nanos],
+    [:days, :nanos],
+    [:months, :days, :nanos]
+  ]
+
   defp negative_duration do
     gen all(
-          months <- integer(-1000..1000),
-          days <- integer(-1000..1000),
-          nanos <- integer(-1_000_000_000..1_000_000_000),
-          any_negative? = months < 0 or days < 0 or nanos < 0,
-          any_negative?
+          months <- integer(0..1000),
+          days <- integer(0..1000),
+          nanos <- integer(0..1_000_000_000),
+          negated <- member_of(@negated_components)
         ) do
-      %Duration{months: months, days: days, nanos: nanos}
+      components = %{months: months, days: days, nanos: nanos}
+
+      # `max(1, …)` because a component chosen to be negative has to be one:
+      # negating a drawn 0 gives 0 back.
+      negated
+      |> Enum.reduce(components, &Map.update!(&2, &1, fn value -> -max(1, value) end))
+      |> then(&struct!(Duration, &1))
     end
   end
 
