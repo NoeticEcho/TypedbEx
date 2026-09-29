@@ -47,4 +47,32 @@ defmodule TypeDB.NotebookTest do
     assert Version.match?(version, requirement),
            "the notebook installs typedb #{requirement}, which #{version} does not satisfy"
   end
+
+  test "the notebook installs the adapter its own code then uses" do
+    # Every HTTP adapter's dependency is optional, so `Mix.install/2` has to ask
+    # for the one the notebook goes on to use. It did not, for three releases:
+    # the list held `:typedb` and `:kino`, the code called `TypeDB.start_link/1`
+    # without `:http`, and the default adapter answers
+    # `{:error, %TypeDB.Error{kind: :config}}` when `:finch` is absent — so the
+    # next cell's `{:ok, _pid} = …` raised `MatchError` for every reader.
+    #
+    # Nothing caught it because every way of testing the notebook from inside
+    # this project has `:finch` already. This asks the only question that
+    # survives that: does the declaration name what the code needs?
+    source = File.read!(@notebook)
+
+    install =
+      ~r/Mix\.install\(\[(.*?)\]/s
+      |> Regex.run(source, capture: :all_but_first)
+      |> hd()
+
+    explicit_adapter? = source =~ ~r/http:\s*\{TypeDB\.HTTP\./
+
+    unless explicit_adapter? do
+      assert install =~ ":finch",
+             "the notebook starts a connection on the default adapter but does not " <>
+               "Mix.install {:finch, …}, so TypeDB.start_link/1 returns a :config error " <>
+               "and the cell after it raises MatchError"
+    end
+  end
 end
