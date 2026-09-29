@@ -1,7 +1,7 @@
 defmodule TypeDB.GRPC.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.4.0"
   @source_url "https://github.com/NoeticEcho/TypedbEx"
 
   def project do
@@ -160,7 +160,7 @@ defmodule TypeDB.GRPC.MixProject do
   # 0.11, and this repository's own rule is that while `typedb` is in 0.x a minor
   # carries anything a 1.x would call breaking. This package pattern-matches the
   # sibling's structs, so that is exactly the kind of change it would meet.
-  @typedb_requirement "~> 0.10.0"
+  @typedb_requirement "~> 0.11.0"
 
   defp typedb_dependency do
     if System.get_env("TYPEDB_GRPC_PUBLISH") in [nil, "", "0"] and File.exists?("../typedb/mix.exs") do

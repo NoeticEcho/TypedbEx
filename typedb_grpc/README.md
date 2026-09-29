@@ -87,7 +87,7 @@ to speak it.
 ```elixir
 def deps do
   [
-    {:typedb_grpc, "~> 0.3.0"}
+    {:typedb_grpc, "~> 0.4.0"}
   ]
 end
 ```

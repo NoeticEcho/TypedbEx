@@ -53,7 +53,7 @@ would mean giving up `given`, so it is a decision rather than a patch.
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.10.0"},
+    {:typedb, "~> 0.11.0"},
     # The default transport. Leave it out only if you select TypeDB.HTTP.Httpc.
     {:finch, "~> 0.23"}
   ]

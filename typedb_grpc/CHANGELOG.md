@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
+### Changed
+
+- **Requires `typedb ~> 0.11.0`.** `typedb` 0.11.0 narrowed its documented surface (ten functions are `@doc false` now; none removed); their behaviour is unchanged, and this package follows the sibling's minor as its pin says.
+
 ## [0.3.1] - 2026-09-29
 
 ### Fixed
@@ -338,7 +344,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.4.0...HEAD
+[0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...typedb_grpc-v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...typedb_grpc-v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.3.0
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
