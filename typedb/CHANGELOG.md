@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Five links in the README were 404s**, all the same monorepo mistake the
+  documentation's `source` links had in 0.10.0: a path built from the repository
+  root when the package lives one level down. The "Run in Livebook" badge — the
+  fastest path into the driver for a new reader — opened nothing, and so did the
+  four links to the opt-in integration suites. Each corrected URL was requested
+  and answers 200.
+
+### Added
+
+- **A "Support" section in the README**: where to report a bug, where to ask a
+  question, what a useful report contains, and what is and is not promised.
+
+### Changed
+
+- **`test/api_snapshot.txt` marks internal entries.** A `@doc false` function is
+  compiled into its module, so the snapshot listed it exactly like a public one
+  and a reviewer could not tell the frozen promise from the plumbing. Those
+  entries now carry a trailing `# @doc false`; the file still fails when any
+  function appears or disappears, public or not. The regenerated snapshot differs
+  from 0.10.4's only by those 43 annotations — no function was added or removed.
+
+  Functions defined with default arguments are handled by their `:defaults`
+  count, so `query/3` and `query/4` are never marked differently from each other.
+
 ## [0.10.4] - 2026-09-29
 
 ### Changed

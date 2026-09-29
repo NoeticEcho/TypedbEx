@@ -195,6 +195,24 @@ mix typedb.grpc.gen 3.12.0
 and the integration suite compares it against the server it is pointed at — so
 falling behind is a failing test rather than a decoding bug in an application.
 
+## Support
+
+Report a bug or a missing capability as a
+[GitHub issue](https://github.com/NoeticEcho/TypedbEx/issues); ask a question in
+[Discussions](https://github.com/NoeticEcho/TypedbEx/discussions). A good report
+names the `typedb_grpc` version, the `typedb` version it resolved, the TypeDB
+version, and what the server answered — failures arrive as `%TypeDB.Error{}`,
+which carries the `:kind` and TypeDB's own `:code`.
+
+This package and its sibling live in one repository and release separately:
+`typedb_grpc` pins `typedb` to an exact minor, so the two move together. It is
+maintained by one person, in the open, under Apache-2.0, with no service-level
+promise.
+
+Security issues: please report them privately through the repository's
+[Security tab](https://github.com/NoeticEcho/TypedbEx/security) rather than as a
+public issue.
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
