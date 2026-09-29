@@ -1,6 +1,6 @@
 ---
 name: typeql-3
-description: Write or fix TypeQL for TypeDB 3.x — schemas (entity, relation, attribute, owns, plays, relates, annotations), data queries (match, insert, put, update, delete, select, fetch, reduce, sort), and functions. Use when a query is being written for TypeDB, when a TypeDB schema is being designed, when TypeQL returns a syntax or type error, or when code carries TypeDB 2.x habits that 3.x rejects.
+description: Write or fix TypeQL for TypeDB 3.x — schemas (entity, relation, attribute, owns, plays, relates, annotations), data queries (match, insert, put, update, delete, select, fetch, reduce, sort), and functions. Use when a query is being written for TypeDB, when a TypeDB schema is being designed, when a TypeQL query or define is rejected, when a TypeDB error code such as TQL0, SYR1, SYR9, INF2, DEX31, REX3, SVL50, SVL51 or CNT9 needs explaining, or when code carries TypeDB 2.x habits — sub entity, get, rule, trailing count — that 3.x rejects.
 ---
 
 # TypeQL 3
