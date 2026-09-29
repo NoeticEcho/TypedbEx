@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-29
+
 ### Fixed
 
 - **One refused connection no longer gets reported two different ways.** gun
@@ -336,7 +338,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...HEAD
+[0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...typedb_grpc-v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.3.0
 [0.2.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.1.0...typedb_grpc-v0.2.0
 [0.1.0]: https://github.com/NoeticEcho/TypedbEx/releases/tag/typedb_grpc-v0.1.0
