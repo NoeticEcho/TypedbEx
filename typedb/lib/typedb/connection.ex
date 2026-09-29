@@ -179,14 +179,18 @@ defmodule TypeDB.Connection do
     ArgumentError -> reraise not_running(conn), __STACKTRACE__
   end
 
-  @doc """
-  Renews the access token.
-
-  `failed_at` is the monotonic millisecond at which the caller's request was
-  sent, or `:any` when the caller simply has no usable token. Passing the send
-  time is what lets the connection tell "my token really is stale" from "another
-  process already replaced it while I was queued".
-  """
+  # Renews the access token.
+  #
+  # `failed_at` is the monotonic millisecond at which the caller's request was
+  # sent, or `:any` when the caller simply has no usable token. Passing the send
+  # time is what lets the connection tell "my token really is stale" from
+  # "another process already replaced it while I was queued".
+  #
+  # Internal since 0.11.0: that argument is a protocol between `Transport` and
+  # this module, not something a caller can hold. `token/1` is what a caller
+  # wants — it returns a token that is not about to expire, minting one if
+  # needed — and it is still documented.
+  @doc false
   @spec renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, Error.t()}
   def renew_token(conn, failed_at) do
     timeout = call_timeout(config(conn))

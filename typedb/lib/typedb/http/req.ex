@@ -90,13 +90,16 @@ defmodule TypeDB.HTTP.Req do
     end
   end
 
-  @doc """
-  The options this adapter hands to `Req.request/2`.
-
-  Public so that the merge below can be asserted on directly: whether a
-  per-request option quietly replaced a configured one is not observable from
-  the outside of a successful request.
-  """
+  # The options this adapter hands to `Req.request/2`.
+  #
+  # Exposed so that the merge below can be asserted on directly: whether a
+  # per-request option quietly replaced a configured one is not observable from
+  # the outside of a successful request. That is a reason to keep the function
+  # callable, not a reason to promise it — a `@doc false` function is just as
+  # testable — and neither the Finch nor the httpc adapter publishes an
+  # equivalent, so publishing this one was an accident of which adapter got the
+  # test. Internal since 0.11.0.
+  @doc false
   @spec request_options(
           t(),
           TypeDB.HTTP.method(),

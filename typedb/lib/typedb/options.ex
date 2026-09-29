@@ -104,23 +104,26 @@ defmodule TypeDB.Options do
                  {key, Enum.join([first | Enum.map(rest, &String.capitalize/1)])}
                end)
 
-  @doc """
-  Extracts transaction options, returning the wire payload or `nil` when none
-  were given.
-
-  `defaults` fills in options the caller did not set.
-  """
+  # Extracts transaction options, returning the wire payload or `nil` when none
+  # were given; `defaults` fills in options the caller did not set.
+  #
+  # Internal since 0.11.0. What this returns is TypeDB's request body, whose
+  # shape is the server's to change — CONTRIBUTING puts the wire format outside
+  # what the version number covers. A caller passes the options themselves to
+  # `TypeDB.Transaction.open/4`; the structs above stay documented, because they
+  # are what names the option set.
+  @doc false
   @spec transaction_payload(keyword() | Transaction.t() | nil, keyword()) :: map() | nil
   def transaction_payload(options, defaults \\ [])
   def transaction_payload(options, defaults), do: payload(options, defaults, @transaction_keys)
 
-  @doc """
-  Extracts query options, returning the wire payload or `nil` when none were
-  given.
-
-  `defaults` fills in options the caller did not set — used for the
-  connection-level `:answer_count_limit`.
-  """
+  # Extracts query options, returning the wire payload or `nil` when none were
+  # given; `defaults` fills in options the caller did not set — used for the
+  # connection-level `:answer_count_limit`.
+  #
+  # Internal since 0.11.0, for the reason given on `transaction_payload/2`.
+  # A caller passes the options to `TypeDB.query/4`.
+  @doc false
   @spec query_payload(keyword() | Query.t() | nil, keyword()) :: map() | nil
   def query_payload(options, defaults \\ [])
   def query_payload(options, defaults), do: payload(options, defaults, @query_keys)

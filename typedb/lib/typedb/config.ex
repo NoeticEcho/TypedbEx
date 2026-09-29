@@ -313,29 +313,37 @@ defmodule TypeDB.Config do
     end
   end
 
-  @doc """
-  Builds the absolute URL for a versioned API path.
-
-      iex> config = TypeDB.Config.new!(url: "http://localhost:8000", token: "t")
-      iex> TypeDB.Config.url(config, "/databases/social")
-      "http://localhost:8000/v1/databases/social"
-  """
+  # Builds the absolute URL for a versioned API path:
+  #
+  #     url(config, "/databases/social")
+  #     #=> "http://localhost:8000/v1/databases/social"
+  #
+  # Internal since 0.11.0. Which URL a call ends up requesting is named in
+  # CONTRIBUTING's "What it does not cover" as free to change, and this is that
+  # mechanism. A caller reaching an endpoint the driver does not wrap passes the
+  # path to `TypeDB.Connection.request/4`, which builds the URL itself.
+  # The example above was a doctest; `test/typedb/config_test.exs` asserts the
+  # same construction, so nothing is now unverified.
+  @doc false
   @spec url(t(), String.t()) :: String.t()
   def url(%__MODULE__{base_url: base}, "/" <> _ = path), do: base <> "/" <> @api_version <> path
 
-  @doc """
-  Builds the absolute URL for an unversioned API path, such as `/health`.
-  """
+  # Builds the absolute URL for an unversioned API path, such as `/health`.
+  # Internal since 0.11.0, for the reason given on `url/2`.
+  @doc false
   @spec raw_url(t(), String.t()) :: String.t()
   def raw_url(%__MODULE__{base_url: base}, "/" <> _ = path), do: base <> path
 
-  @doc """
-  Computes the backoff delay, in milliseconds, before retry `attempt` (1-based).
-
-  `{:exponential, base}` is jittered: the delay is drawn uniformly from
-  `0..base * 2 ** (attempt - 1)`. A function is used as it returns. Either way
-  the result is capped by `:retry_max_delay`.
-  """
+  # Computes the backoff delay, in milliseconds, before retry `attempt`
+  # (1-based). `{:exponential, base}` is jittered: the delay is drawn uniformly
+  # from `0..base * 2 ** (attempt - 1)`. A function is used as it returns.
+  # Either way the result is capped by `:retry_max_delay`.
+  #
+  # Internal since 0.11.0. CONTRIBUTING names retry policy as free to change in
+  # a patch release, and a published function that computes it contradicts that.
+  # What a caller configures — `:retry_backoff` and `:retry_max_delay` — is
+  # unchanged and still covered by the version number.
+  @doc false
   @spec backoff(t(), pos_integer()) :: non_neg_integer()
   def backoff(%__MODULE__{retry_backoff: {:exponential, base}} = config, attempt) do
     base |> exponential(attempt) |> cap(config.retry_max_delay) |> jitter()
