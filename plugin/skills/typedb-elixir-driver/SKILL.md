@@ -116,10 +116,43 @@ rules are TypeQL's, not Elixir's.
 It is the fast path too — one request and one query compilation covers every
 row, which is why `given_rows` is also how you bulk load.
 
+**Write `== $n`, not `$n`** — in an `insert` as much as in a `match`. A bare
+`has name $n` against a `given` column declares the same variable as both an
+attribute and a value, and TypeDB answers `400 REP1 The variable 'n' cannot be
+declared as both a 'Attribute' and as a 'Value'`:
+
+```elixir
+# 400 REP1
+"given $n: string; insert $p isa person, has name $n;"
+# correct
+"given $n: string; insert $p isa person, has name == $n;"
+```
+
 A `given` stage with no rows supplied is `400 QEX21`. And one caveat, documented
 on `TypeDB.Given`: a column declared as a *concept* (`given $p: person;`) accepts
 any iid, so whoever chose the iid chose which entity the query reads. Bind those
 from concepts your own code fetched.
+
+Bulk loading is the same shape, in batches — one request per batch, never one per
+row:
+
+```elixir
+people
+|> Stream.map(&%{"n" => &1.name, "a" => &1.age})
+|> Stream.chunk_every(2_000)
+|> Enum.each(fn batch ->
+  {:ok, _} =
+    TypeDB.query(conn, "social", """
+      given $n: string, $a: integer;
+      insert $p isa person, has name == $n, has age == $a;
+    """, transaction_type: :write, given_rows: batch)
+end)
+```
+
+Batch on the **bytes** you are sending, not the row count: TypeDB 3.12 refuses a
+request body of 2048 KiB and accepts 2047 KiB, and there is no server flag for
+it. 2,000 rows of two short attributes is comfortable; 2,000 rows each carrying a
+kilobyte of text is not.
 
 Interpolating a number **you** computed — a page offset — is fine. Interpolating
 anything that came from a user is not.
@@ -305,8 +338,9 @@ conn
 ```
 
 **`sort` is not optional.** Paging an unsorted query can repeat or skip rows,
-because nothing fixes the order between pages. `stream/4` is read-only —
-`:transaction_type` is not one of its options.
+because nothing fixes the order between pages. `stream/4` is read-only, and says
+so rather than ignoring you: passing `:transaction_type` raises `unknown option
+:transaction_type passed to TypeDB.stream/4`.
 
 A `fetch` pipeline cannot be paged at all (`offset` after `fetch` is `400
 TQL0`), so page the `match` and `fetch` inside it. `TypeDB.Answer.truncated?/1`

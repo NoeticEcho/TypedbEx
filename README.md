@@ -71,6 +71,23 @@ for what is different about the second package — including how it was first
 published to hex.pm — and [`AUDIT.md`](AUDIT.md) for the state of the code and
 why several things are the way they are.
 
+## The Claude plugin
+
+`plugin/` is a [Claude plugin](https://claude.com/docs/plugins/build) — three
+skills that teach Claude to write TypeQL 3, to use these packages through their
+documented public API, and to test an application that talks to TypeDB. It is
+documentation only: no MCP server, no hooks, no scripts, nothing that runs.
+
+```shell
+claude plugin validate ./plugin   # CI runs this on every push
+cd plugin && claude plugin eval . # with-plugin against without-plugin
+```
+
+Its `version` tracks the `typedb` package's, so a release raises both. See
+[docs/claude-plugin.md](docs/claude-plugin.md) for what is in it, the two rules
+its content follows, and what to enter in the developer portal when submitting
+it.
+
 ## Releasing
 
 Two packages in one repository cannot both answer to `v*`, so the tags are

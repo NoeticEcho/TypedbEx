@@ -38,7 +38,8 @@ define
 ```
 
 `plays` names a role as `relation_type:role`. A relation must `relates` each of
-its roles; a role that nothing `relates` does not exist.
+its roles: `plays employment:employee` with no `relation employment, relates
+employee` is `400 SYR9 The role type 'employment:employee' was not found`.
 
 ### Value types
 
@@ -289,6 +290,7 @@ bad syntax. If a `define` says a type you are defining was not found, you wrote
 | code | what happened |
 | --- | --- |
 | `SYR1` | a type in the query does not exist (see the trap above) |
+| `SYR9` | a role type does not exist — `plays employment:employee` with no `relation employment, relates employee` |
 | `INF2` | `Type label 'x' not found` while compiling — the schema lacks it |
 | `TQL0` | TypeQL syntax error; the message points at the token |
 | `DEX31` | a reserved keyword used as an identifier |

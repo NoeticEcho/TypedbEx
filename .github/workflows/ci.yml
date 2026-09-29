@@ -1002,3 +1002,52 @@ jobs:
           TYPEDB_GRPC_USERNAME: admin
           TYPEDB_GRPC_PASSWORD: password
         run: mix test --include integration test/integration/migration_integration_test.exs
+
+  plugin:
+    name: Claude plugin validates
+    runs-on: ubuntu-latest
+
+    # `plugin/` is documentation — three Markdown skills, a manifest, a licence
+    # and a README — so it needs no Elixir and none of the matrix above. What it
+    # does need is the check the plugin directory runs first: `claude plugin
+    # validate` reads the manifest and every skill's front matter and fails on a
+    # syntax or schema error. Measured: the CLI installs from npm and validates
+    # with no credentials and an empty HOME, so this job needs no secret and
+    # makes no model call.
+    #
+    # It is deliberately not the whole story. The developer portal's own
+    # Validate button checks what this command does not — a README of at least
+    # 40 words, a licence, and whether the name is already taken — and
+    # `claude plugin eval` measures whether the skills help, which costs model
+    # calls and belongs in a human's hands rather than on every push. See
+    # docs/claude-plugin.md.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pinned rather than @latest: a CLI release that changes what validation
+      # accepts should turn this job red in a commit that says so, not silently
+      # on an unrelated push.
+      - name: Install the Claude Code CLI
+        run: npm install --no-fund --no-audit @anthropic-ai/claude-code@2.1.285
+
+      - name: Validate the plugin
+        run: ./node_modules/.bin/claude plugin validate ./plugin
+
+      # The directory blocks a plugin whose README is under 40 words, counting
+      # only words outside code blocks, and that is the one portal check cheap
+      # enough to run here too.
+      - name: The plugin README is long enough for the directory
+        run: |
+          words=$(python3 - <<'PY'
+          import re
+          t = open("plugin/README.md").read()
+          t = re.sub(r"```.*?```", "", t, flags=re.S)
+          print(len(t.split()))
+          PY
+          )
+          echo "plugin/README.md has $words words outside code blocks"
+          test "$words" -ge 40
