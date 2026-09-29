@@ -32,10 +32,14 @@ Each package fails its build below a floor set at what it measures today, and
 the step prints the delta so the headroom is visible:
 
 ```
-coverage 87.86% against a floor of 85% (+2.86 points)
+coverage 88.16% against a floor of 87% (+1.16 points)
 ```
 
-A floor only moves up. The numbers live in each package's `mix.exs` under
+A floor only moves up. Those are the real numbers from CI on `42f7fee`, and
+printing them settled something that had been guessed at: `typedb/mix.exs` used
+to say CI measures about two points *lower* than a development container, with
+the cause never chased down. It measures 0.23 points **higher** — 88.16% against
+87.93% locally — so the floor sits below both rather than well under one. The numbers live in each package's `mix.exs` under
 `test_coverage`, along with what is excluded and why — test support and macros
 for `typedb`, and protoc-gen-elixir's three thousand generated lines for
 `typedb_grpc`.
