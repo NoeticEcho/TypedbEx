@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# Starts, waits for, and stops the TypeDB the integration suite needs.
+#
+#   scripts/typedb-server start    start it and wait until /health answers
+#   scripts/typedb-server wait     wait for an already-starting one
+#   scripts/typedb-server stop     stop it
+#   scripts/typedb-server status   say whether it is serving
+#
+# Two ways to run TypeDB and one command for both: the container from
+# docker-compose.yml when there is a docker daemon, and the release
+# `scripts/cloud-setup.sh` unpacks when there is not. A worker should not have
+# to know which of the two its box got.
+
+set -euo pipefail
+
+readonly TYPEDB_VERSION="${TYPEDB_VERSION:-3.12.1}"
+readonly TYPEDB_PREFIX="${TYPEDB_PREFIX:-/opt/typedb}"
+readonly TYPEDB_HOME="${TYPEDB_PREFIX}/typedb-all-linux-x86_64-${TYPEDB_VERSION}"
+
+readonly HEALTH_URL="${TYPEDB_HEALTH_URL:-http://127.0.0.1:8000/health}"
+readonly WAIT_SECONDS="${TYPEDB_WAIT_SECONDS:-120}"
+
+readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Outside the working tree on purpose: a pid file and a log are runtime state,
+# and putting them in the repository would mean a .gitignore entry and a worker
+# one `git add -A` away from committing them.
+readonly STATE_DIR="${TYPEDB_STATE_DIR:-${TMPDIR:-/tmp}/typedb-run}"
+readonly PID_FILE="${STATE_DIR}/typedb.pid"
+readonly LOG_FILE="${STATE_DIR}/typedb.log"
+
+say() { printf '%s\n' "$*" >&2; }
+
+die() {
+  printf 'typedb-server: %s\n' "$*" >&2
+  exit 1
+}
+
+# Docker is only usable when its daemon answers; installed-but-not-running is
+# the normal state of a container that has Docker on PATH and nothing behind it.
+have_docker() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+have_release() { [ -x "${TYPEDB_HOME}/typedb" ]; }
+
+serving() { curl --fail --silent --show-error --max-time 5 "$HEALTH_URL" >/dev/null 2>&1; }
+
+wait_for_health() {
+  local waited=0
+
+  # /health is unauthenticated and answers 204 once the server is serving, so
+  # this needs no credentials and says nothing about them.
+  while [ "$waited" -lt "$WAIT_SECONDS" ]; do
+    if serving; then
+      say "typedb: serving at ${HEALTH_URL} (after ${waited}s)"
+      return 0
+    fi
+
+    sleep 2
+    waited=$((waited + 2))
+  done
+
+  say "typedb: ${HEALTH_URL} did not answer within ${WAIT_SECONDS}s"
+  [ -f "$LOG_FILE" ] && say "typedb: last lines of ${LOG_FILE}:" && tail -n 20 "$LOG_FILE" >&2
+  have_docker && docker compose -f "${REPO_ROOT}/docker-compose.yml" logs --tail 20 typedb >&2 2>/dev/null
+
+  return 1
+}
+
+start() {
+  if serving; then
+    say "typedb: already serving at ${HEALTH_URL}"
+    return 0
+  fi
+
+  if have_docker; then
+    say "typedb: starting the container from docker-compose.yml"
+    (cd "$REPO_ROOT" && docker compose up -d)
+  elif have_release; then
+    say "typedb: starting ${TYPEDB_HOME}/typedb server"
+    mkdir -p "$STATE_DIR"
+
+    # Detached with its output kept: when the server refuses to start, the
+    # reason is in that file and nowhere else.
+    ("${TYPEDB_HOME}/typedb" server >"$LOG_FILE" 2>&1 &
+      printf '%s\n' "$!" >"$PID_FILE")
+  else
+    die "no docker daemon and no release at ${TYPEDB_HOME}. Run scripts/cloud-setup.sh, or start Docker."
+  fi
+
+  wait_for_health
+}
+
+stop() {
+  if have_docker && [ -n "$(cd "$REPO_ROOT" && docker compose ps -q typedb 2>/dev/null)" ]; then
+    say "typedb: stopping the container"
+    (cd "$REPO_ROOT" && docker compose down)
+    return 0
+  fi
+
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+
+    if kill -0 "$pid" 2>/dev/null; then
+      say "typedb: stopping pid ${pid}"
+      kill "$pid"
+
+      local waited=0
+      while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+      done
+
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+    fi
+
+    rm -f "$PID_FILE"
+    return 0
+  fi
+
+  say "typedb: nothing of ours is running"
+}
+
+status() {
+  if serving; then
+    say "typedb: serving at ${HEALTH_URL}"
+  else
+    say "typedb: not serving at ${HEALTH_URL}"
+    exit 1
+  fi
+}
+
+case "${1:-start}" in
+  start) start ;;
+  wait) wait_for_health ;;
+  stop) stop ;;
+  status) status ;;
+  *)
+    printf 'usage: scripts/typedb-server [start|wait|stop|status]\n' >&2
+    exit 2
+    ;;
+esac

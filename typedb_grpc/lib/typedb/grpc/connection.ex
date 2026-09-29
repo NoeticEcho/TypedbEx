@@ -599,13 +599,11 @@ defmodule TypeDB.GRPC.Connection do
         {:ok, channel} ->
           {:ok, channel}
 
+        # Through `from_reason/2` rather than a second copy of it here: that
+        # function is where a transport reason becomes a `%TypeDB.Error{}`, and
+        # hand-rolling it here is how `{:down, :noproc}` reached the log raw.
         {:error, reason} ->
-          {:error,
-           Error.new(
-             :transport,
-             "could not open a gRPC channel to #{config.address}: #{inspect(reason)}",
-             reason: reason
-           )}
+          {:error, GRPCError.from_reason(reason, "could not open a gRPC channel to #{config.address}")}
       end
     end
   end
