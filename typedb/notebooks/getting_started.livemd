@@ -2,7 +2,7 @@
 
 ```elixir
 Mix.install([
-  {:typedb, "~> 0.10.0"},
+  {:typedb, "~> 0.11.0"},
   # The default transport. Without it `TypeDB.start_link/1` returns
   # `{:error, %TypeDB.Error{kind: :config}}` and the next cell has nothing to
   # match on — every HTTP adapter's dependency is optional, so the one you use

@@ -31,7 +31,7 @@ driver speaks the HTTP API; port 1729 is gRPC, which the sibling package
 ```elixir
 def deps do
   [
-    {:typedb, "~> 0.10.2"},
+    {:typedb, "~> 0.11.0"},
     {:finch, "~> 0.23"}
   ]
 end
