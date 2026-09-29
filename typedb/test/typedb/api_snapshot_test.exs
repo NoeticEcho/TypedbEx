@@ -180,18 +180,49 @@ defmodule TypeDB.APISnapshotTest do
     end
   end
 
+  # The frozen promise is every line that does not carry @hidden_marker. A
+  # `@doc false` function is compiled into the module and so is listed — an
+  # appearance or a disappearance still fails the test — but it is not part of
+  # the surface SemVer covers, and before 1.0 a reviewer has to be able to tell
+  # the two apart by reading the file. Twice in one week a `@doc false` helper
+  # turned the snapshot red and was restructured as if it had widened the API.
+  @hidden_marker "    # @doc false"
+
   defp render_functions(module) do
     specs = specs(module)
+    hidden = hidden_functions(module)
 
     for {name, arity} <- module.__info__(:functions),
         not String.starts_with?(Atom.to_string(name), "__"),
         into: [] do
-      case Map.fetch(specs, {name, arity}) do
-        {:ok, [rendered | _rest]} -> rendered
-        :error -> "#{name}/#{arity}"
-      end
+      rendered =
+        case Map.fetch(specs, {name, arity}) do
+          {:ok, [rendered | _rest]} -> rendered
+          :error -> "#{name}/#{arity}"
+        end
+
+      if MapSet.member?(hidden, {name, arity}), do: rendered <> @hidden_marker, else: rendered
     end
     |> Enum.sort()
+  end
+
+  # A function defined with default arguments has one doc entry, at its widest
+  # arity, and `:defaults` says how many narrower heads it generated. Asking
+  # only about the widest one would publish `TypeDB.query/2` while hiding
+  # `TypeDB.query/3` — or the reverse — for no reason a reader could see.
+  defp hidden_functions(module) do
+    case Code.fetch_docs(module) do
+      {:docs_v1, _anno, _lang, _format, _doc, _meta, docs} ->
+        for {{:function, name, arity}, _anno, _signature, :hidden, meta} <- docs,
+            defaults = Map.get(meta, :defaults, 0),
+            generated <- (arity - defaults)..arity//1,
+            into: MapSet.new() do
+          {name, generated}
+        end
+
+      _other ->
+        MapSet.new()
+    end
   end
 
   defp specs(module) do

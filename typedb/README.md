@@ -599,7 +599,7 @@ guide pairs `typeql-check` with the
 
 ## Guides
 
-[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2FNoeticEcho%2FTypedbEx%2Fmain%2Fnotebooks%2Fgetting_started.livemd)
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2FNoeticEcho%2FTypedbEx%2Fmain%2Ftypedb%2Fnotebooks%2Fgetting_started.livemd)
 
 [The notebook](notebooks/getting_started.livemd) is the fastest way to find out whether this driver fits: a
 database, a schema, reads and writes, a parameterised query that survives a
@@ -776,19 +776,19 @@ exercised without a database. The integration suite runs the same paths against 
 real TypeDB server.
 
 Three further opt-in suites cover things an ordinary run never reaches. They live
-in the [repository](https://github.com/NoeticEcho/TypedbEx/tree/main/test/integration)
+in the [repository](https://github.com/NoeticEcho/TypedbEx/tree/main/typedb/test/integration)
 rather than in the published package, and each module's doc carries the exact
 command to stand up the server it needs:
 
-- [`TypeDB.TLSIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/tls_integration_test.exs)
+- [`TypeDB.TLSIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/typedb/test/integration/tls_integration_test.exs)
   — untrusted certificate rejected, pinned CA accepted, hostname mismatch
   refused, against a server started with `--server.encryption.enabled`.
-- [`TypeDB.TokenRenewalIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/token_renewal_integration_test.exs)
+- [`TypeDB.TokenRenewalIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/typedb/test/integration/token_renewal_integration_test.exs)
   — 200-way bursts, concurrent writes and a long transaction, all straddling
   token expiry, against a server started with
   `--server.authentication.token-expiration-seconds 5`. Set
   `TYPEDB_SHORT_TOKEN_URL` to run it; without that it reports as skipped.
-- [`TypeDB.RestartIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/test/integration/restart_integration_test.exs)
+- [`TypeDB.RestartIntegrationTest`](https://github.com/NoeticEcho/TypedbEx/blob/main/typedb/test/integration/restart_integration_test.exs)
   — a server stopped mid-traffic and started again, on every adapter: what
   callers see during the outage and that the connection recovers with no help
   from them. Set `TYPEDB_RESTART_URL`, `TYPEDB_RESTART_STOP` and
@@ -799,6 +799,27 @@ command to stand up the server it needs:
 `TYPEDB_SLOW_TESTS=1` additionally runs the tests that wait out real timeouts,
 and `TYPEDB_TEST_ADAPTER=finch|req|httpc` runs the whole suite through one
 transport. CI runs all of them.
+
+## Support
+
+Report a bug or a missing capability as a
+[GitHub issue](https://github.com/NoeticEcho/TypedbEx/issues); ask a question in
+[Discussions](https://github.com/NoeticEcho/TypedbEx/discussions). A good report
+names the driver version, the TypeDB version, the HTTP adapter, and what the
+server answered — `%TypeDB.Error{}` carries the `:kind`, TypeDB's `:code` and
+the HTTP `:status`, and pasting the struct usually says more than the prose
+around it.
+
+This is maintained by one person, in the open, under Apache-2.0, with no
+service-level promise. What *is* promised is the version number: see
+[Versioning](https://hexdocs.pm/typedb/contributing.html#versioning) for what a
+release can and cannot change under it, and
+[the release runbook](https://github.com/NoeticEcho/TypedbEx/blob/main/docs/releasing.md)
+for how one is cut.
+
+Security issues: please report them privately through the repository's
+[Security tab](https://github.com/NoeticEcho/TypedbEx/security) rather than as a
+public issue.
 
 ## License
 
