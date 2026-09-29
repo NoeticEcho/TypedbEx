@@ -40,13 +40,11 @@ defmodule MyApp.DatabaseCase do
 end
 ```
 
-Creating a database is cheap. *Sharing* one between tests is the expensive
-choice, because it makes them ordered.
+Creating a database is cheap; sharing one is what makes tests ordered. The two
+facts that are specific to TypeDB, and that decide how fast the suite runs:
 
-Two things to know before pointing this at anything you care about:
-
-- A `:schema` transaction takes a **database-wide** lock, so schema-loading
-  tests serialise with each other.
+- A `:schema` transaction takes a **database-wide** lock, so schema-loading tests
+  serialise with each other however `async` is set.
 - `TypeDB.query/4` defaults to `:schema`, so tests left on the default serialise
   **even when they contain no schema at all**. Pass `transaction_type: :read` or
   `:write` in tests, for the same reason you do in production code.

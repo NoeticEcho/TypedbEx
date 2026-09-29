@@ -23,7 +23,7 @@ people looking for a missing type instead of a rewritten declaration.
 `given_rows` instead of string interpolation, reading the three answer shapes,
 branching on `%TypeDB.Error{}`, retrying the two failures the driver cannot retry
 for you, streaming past the answer cap, and when the gRPC transport earns its
-seven extra dependencies. Every function it names is in the documented public API
+seven mandatory dependencies against one. Every function it names is in the documented public API
 of `typedb` 0.11.0; that list was generated from the package itself rather than
 written by hand.
 
