@@ -111,14 +111,25 @@ defmodule TypeDB.SocketFaultTest do
         server = listener(:never_answers)
         conn = connect(server, adapter, max_retries: 0)
 
-        {elapsed, result} = :timer.tc(fn -> Database.list(conn) end, :millisecond)
+        # `:timer.tc/1` and a division, not `:timer.tc/2` with `:millisecond`:
+        # that arity only means "in this unit" from OTP 26. On OTP 25 it is
+        # `tc(Fun, Args)`, so the unit is applied to the function as its
+        # argument list and the call is an `ArgumentError` — which is what the
+        # Elixir 1.18 / OTP 25 job answered with, and nothing else in the matrix
+        # did.
+        {microseconds, result} = :timer.tc(fn -> Database.list(conn) end)
+        elapsed = div(microseconds, 1000)
 
         assert {:error, %Error{kind: :timeout}} = result
 
         assert elapsed >= @timeout,
                "#{label} gave up after #{elapsed}ms, before the #{@timeout}ms it was given"
 
-        assert elapsed < @timeout * 3,
+        # Generous on purpose: what this rules out is an adapter falling back to
+        # its own default, which is fifteen seconds for `:httpc` and a minute
+        # for Req. Four times the budget still says that decisively, and leaves
+        # room for a loaded CI runner to be slow without being wrong.
+        assert elapsed < @timeout * 4,
                "#{label} waited #{elapsed}ms for a #{@timeout}ms timeout"
       end
     end
