@@ -12,8 +12,16 @@ a library that depends on this driver does not make your logs noisier.
 ```
 [info] TypeDB GET /databases/:name 4.1ms
 [info] TypeDB transaction write on social 12.7ms outcome=commit
-[warning] TypeDB gave up on /query after 3 attempts server: [server 503] SRV9: unavailable
+[warning] TypeDB gave up on /query after 3 attempts server: [server 503] TypeDB returned HTTP 503
 ```
+
+That last line carries no TypeDB error code, and that is the usual case for a
+status the driver retries: 429, 502, 503 and 504 mostly come from something in
+front of TypeDB — a load balancer, an ingress — which has never heard of
+TypeQL. When TypeDB itself answers, the code is there and is the field to branch
+on — [Errors and retries](errors-and-retries.md) has the table, and every code in
+it is one `test/integration/error_code_integration_test.exs` has seen a live
+server send.
 
 ## Three levels, and which one answers your question
 

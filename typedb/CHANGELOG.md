@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A getting-started guide**, for the reader who cannot run the notebook:
+  `guides/getting-started.md` goes from the `mix.exs` entry to a query whose
+  answer you can read, and stops at each step where people are surprised — why
+  Finch is a separate dependency line, why `start_link/1` does not contact the
+  server, why `:transaction_type` is the option worth passing, and the
+  difference between `value/2` and `typed_value/2`. Its walkthrough is extracted
+  and **run** against the test stub by `test/typedb/guide_test.exs`, so an
+  example that stops working fails the suite rather than a reader.
+
+### Changed
+
+- **The Limitations section says more of what is true.** Five additions, each
+  something a reader would otherwise meet in production: a `TypeDB.stream/4`
+  walk is bounded by the transaction's 300,000 ms lifetime rather than by any
+  per-request timeout; `fetch` pipelines cannot be paged at all; a connection's
+  `:name` must be a plain atom, so it cannot live in a `Registry`; two optional
+  dependencies change the *type* of your data rather than only the footprint;
+  and temporal values TypeDB cannot store are refused when you encode them.
+
+- **An invented error code left the observability guide.** Its sample log line
+  showed `SRV9`, which exists in this repository's test stub and nowhere a live
+  server has been seen. The line now shows what the driver actually prints for a
+  retried 503, and says why such a status usually carries no TypeDB code at all.
+
 ## [0.10.2] - 2026-09-29
 
 ### Added
@@ -64,7 +90,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Found by the round-trip properties in `test/typedb/wire_property_test.exs`,
   which now generate offsets over the whole range the server accepts, plus the
   two kinds it does not. No public API changed: the one rule the two callers now
-  share lives in the internal `TypeDB.Wire`.
+  share lives in an internal module that is `@moduledoc false` and so has no
+  page here (lib/typedb/wire.ex).
 
 ## [0.10.1] - 2026-09-29
 

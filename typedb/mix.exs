@@ -144,6 +144,10 @@ defmodule TypeDB.MixProject do
       source_url_pattern: "#{@source_url}/blob/v#{@version}/typedb/%{path}#L%{line}",
       extras: [
         "README.md",
+        # Reading order rather than alphabetical, and the sidebar follows this
+        # list: start here, then the two things every application meets
+        # (transactions, failures), then the applied ones.
+        "guides/getting-started.md",
         "guides/transactions.md",
         "guides/recipes.md",
         "guides/errors-and-retries.md",

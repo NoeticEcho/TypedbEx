@@ -138,6 +138,20 @@ TypeDB.GRPC.stream(:graph, "social", "match $p isa person, has name $n; select $
 `given_rows` is how a value reaches a query without being spliced into its text,
 and it is the only way this driver offers — a value can never be read as syntax.
 
+**Pass `:transaction_type`.** `query/4` defaults to `:schema` here for the same
+reason the HTTP driver does — it is the only type that accepts every kind of
+query — and `:schema` takes TypeDB's exclusive, database-wide lock, so a one-shot
+read left on the default serialises against everything else. That is a fact about
+the server rather than about either transport, so the sibling package's guide
+covers it for both: **[Transactions](https://hexdocs.pm/typedb/transactions.html)**
+— the three types, one-shot versus explicit, and what a commit does and does not
+promise. (`stream/4` above defaults to `:read` instead — a stream of a `define`
+is not a thing anybody wants.)
+
+The rest of that package's guides are about the HTTP transport — its retry
+policy, its telemetry spans, its test stub — and do not carry over; this README's
+*When the connection drops* is the gRPC equivalent.
+
 ## When the connection drops
 
 TypeDB behind a load balancer, a proxy cycling connections, a rolling restart —

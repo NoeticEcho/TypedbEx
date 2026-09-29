@@ -573,8 +573,11 @@ database, a schema, reads and writes, a parameterised query that survives a
 hostile value, and a transaction — against a TypeDB you start with one `docker
 run`.
 
-Then five guides, for the things a reference page cannot teach:
+Then six guides, for the things a reference page cannot teach:
 
+- **[Getting started](guides/getting-started.md)** — from the `mix.exs` entry to
+  a query whose answer you can read, with a note at each step about the thing
+  that surprises people. Start here if the notebook is not an option.
 - **[Transactions](guides/transactions.md)** — the three types, why the default
   is the expensive one, what a commit promises and what it does not.
 - **[Recipes](guides/recipes.md)** — paging a `match` bigger than TypeDB's
@@ -659,6 +662,50 @@ do not share sockets. That is usually what you want and occasionally is not.
 **`mix typedb.check` needs a POSIX shell.** It is the only part of the project
 that shells out, and on Windows it wants Git Bash, WSL or MSYS2. The driver
 itself is pure Elixir and CI proves it on Windows.
+
+**A walk has a deadline, and it belongs to the transaction.**
+`TypeDB.stream/4` holds one transaction open for the whole walk, and TypeDB
+bounds a transaction by `transaction_timeout_millis` — **300,000 ms** by
+default, counted from the moment it opens and *not* reset by requests. It is a
+lifetime, not an idle timer. A slow consumer therefore loses the walk mid-flight
+with `TSV12`, raised from inside whatever is consuming the stream; measured at
+`test/integration/transaction_lifetime_integration_test.exs`, where 3,000 rows
+read at 2 ms per row died at 4,282 ms against a 4,000 ms budget. Pass
+`:transaction_timeout_millis`, and pass it generously — a retry does not resume,
+it restarts from the first page against a snapshot that is gone.
+
+**`fetch` pipelines cannot be paged.** `TypeDB.stream/4` appends `offset` and
+`limit`, and those after a `fetch` stage are a syntax error — measured,
+`400 TQL0`. So streaming works for `conceptRows` and nothing else. Read the same
+data with `match … select` if you need to page it.
+
+**A connection's name must be a plain atom.** `:via` and `:global` tuples are
+refused with an error saying so, because the connection publishes its config to
+a *named* ETS table — that table is what lets requests run in the caller's
+process instead of through the connection, which is the driver's central design
+decision. So a connection cannot live in a `Registry` or be distributed with
+`:global`. Name each connection and address it by that atom.
+
+**Two optional dependencies change the type of your data, not just the
+footprint.** Without `Decimal`, a TypeDB `decimal` reaches you as a string —
+`TypeDB.Concept.typed_value/1` strips TypeQL's `dec` suffix either way, so the
+content matches and the type does not. Add `{:decimal, "~> 2.4"}` if your schema
+has decimals and your code expects to do arithmetic on them. The same shape of
+surprise applies to `:finch`: leave it out and the default adapter tells you at
+start-up rather than at the first query.
+
+**Temporal values TypeDB cannot store are refused when you encode them, not when
+you send them.** A negative `TypeDB.Duration` raises `TypeDB.Error` with kind
+`:encode` — TypeQL has no negative duration in any form. So does a fixed UTC
+offset that is not a whole number of minutes, or one at or beyond a day:
+TypeDB's `datetime-tz` literal takes `-23:59` to `+23:59` and rejects
+`+00:01:15` outright, measured at
+`test/integration/datetime_tz_offset_integration_test.exs`. That last one bites
+where you would not expect it — a time zone database hands out a seconds-bearing
+offset for any pre-1900 timestamp — and the fix is to pass the IANA zone name,
+which TypeDB stores exactly. Related: a `datetime-tz` read back from TypeDB
+keeps its nanoseconds in `:raw` and only microseconds in `:naive`, because
+`NaiveDateTime` has nowhere to put the other three digits.
 
 **TypeDB 3.12.0 or newer**, and that is a measured floor rather than a cautious
 one: 3.11.5 has no `given` stage. See [Requirements](#requirements).
