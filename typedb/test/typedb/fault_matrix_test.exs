@@ -86,6 +86,10 @@ defmodule TypeDB.FaultMatrixTest do
           token: "t",
           max_retries: 0,
           retry_on_status: [],
+          # The `:stall` fault sleeps twice whatever timeout it is handed, and
+          # this file makes twenty-five calls per fault. Sixty seconds of
+          # default would be an hour of it.
+          timeout: 20,
           http: {FaultAdapter, [fault: @fault]}
         )
 

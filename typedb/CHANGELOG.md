@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The fault matrix now covers the failures that are not return values.**
+  `TypeDB.FaultAdapter` could express everything an adapter can hand back; it
+  could not express a connection dropped halfway through a body, a server that
+  accepts and then says nothing, or bytes that are not HTTP — because none of
+  those is a value. `TypeDB.SocketFault` is a real listener that does each of
+  them to a real socket, and the new `TypeDB.SocketFaultTest` drives Finch, Req
+  and `:httpc` through all six.
+
+  All three agree, which is the result worth having: every close, reset and
+  garbage response is `:transport`, a silent socket is `:timeout` and ends at
+  the timeout the caller asked for rather than at some library's own default,
+  and none of them crashes. A dropped connection is retried `:max_retries + 1`
+  times as counted by the listener, and a write is sent exactly once.
+
+- **`TypeDB.FaultRetryTest` pins the error kind and the retry decision.**
+  The existing matrix asked only whether a `%TypeDB.Error{}` came back. This
+  asks what it *says* and what the driver does about it — the same question
+  twice, because the kind is what the retry policy decides on. `:transport` and
+  `:timeout` may have lost a request that never arrived and are retried;
+  `:server` is decided by its status against `:retry_on_status`; `:decode` is
+  never retried, which is the half worth pinning — the answer arrived and could
+  not be read, and asking again buys the same bytes at three times the cost.
+
+  A new `:stall` fault covers an adapter that does not honour the timeout it was
+  handed, and shows what a `:deadline` is worth against one: nothing cancels an
+  attempt already running, but the next one is not started.
+
 ### Fixed
 
 - **A UTC offset TypeDB cannot write is refused instead of quietly changed.**
