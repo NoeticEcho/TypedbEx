@@ -128,7 +128,7 @@ struct [:query_type, :warning]
   | TypeDB.Concept.RoleType.t()
 cast(term(), String.t()) :: term()
 category(t()) :: category()
-decode(term()) :: entry()
+decode(term()) :: entry()    # @doc false
 iid(t()) :: String.t() | nil
 instance?(t()) :: boolean()
 label(t()) :: String.t() | nil
@@ -226,12 +226,12 @@ struct [:answer_count_limit, :base_url, :connect_timeout, :deadline, :http_adapt
   username: String.t() | nil
 }
 api_version() :: String.t()
-backoff(t(), pos_integer()) :: non_neg_integer()
+backoff(t(), pos_integer()) :: non_neg_integer()    # @doc false
 known_options() :: [atom()]
 new!(keyword()) :: t()
 new(keyword()) :: {:ok, t()} | {:error, TypeDB.Error.t()}
-raw_url(t(), String.t()) :: String.t()
-url(t(), String.t()) :: String.t()
+raw_url(t(), String.t()) :: String.t()    # @doc false
+url(t(), String.t()) :: String.t()    # @doc false
 
 ## TypeDB.Connection
 
@@ -245,7 +245,7 @@ handle_call/3    # @doc false
 handle_cast/2    # @doc false
 handle_info/2    # @doc false
 init/1    # @doc false
-renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}
+renew_token(t(), :any | integer()) :: {:ok, String.t()} | {:error, TypeDB.Error.t()}    # @doc false
 request(t(), TypeDB.HTTP.method(), String.t(), request_opts()) ::
   {:ok, term()} | {:error, TypeDB.Error.t()}
 request/3
@@ -424,7 +424,7 @@ request_options(
   TypeDB.HTTP.headers(),
   iodata() | nil,
   keyword()
-) :: keyword()
+) :: keyword()    # @doc false
 terminate/1    # @doc false
 
 ## TypeDB.JSON
@@ -453,14 +453,14 @@ query_keys() :: [atom()]    # @doc false
 query_payload(
   keyword() | TypeDB.Options.Query.t() | nil,
   keyword()
-) :: map() | nil
-query_payload/1
+) :: map() | nil    # @doc false
+query_payload/1    # @doc false
 transaction_keys() :: [atom()]    # @doc false
 transaction_payload(
   keyword() | TypeDB.Options.Transaction.t() | nil,
   keyword()
-) :: map() | nil
-transaction_payload/1
+) :: map() | nil    # @doc false
+transaction_payload/1    # @doc false
 
 ## TypeDB.Options.Query
 

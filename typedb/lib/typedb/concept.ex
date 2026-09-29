@@ -107,12 +107,15 @@ defmodule TypeDB.Concept do
   @typedoc "A row entry: a concept, an unbound variable, or a list of concepts."
   @type entry :: t() | nil | [t()]
 
-  @doc """
-  Decodes one wire-format row entry into concept structs.
-
-  Raises `TypeDB.Error` with `kind: :decode` when the payload does not look like
-  anything the HTTP API can produce.
-  """
+  # Decodes one wire-format row entry into concept structs, raising
+  # `TypeDB.Error` with `kind: :decode` when the payload does not look like
+  # anything the HTTP API can produce.
+  #
+  # Internal since 0.11.0. `TypeDB.Answer.decode/1` and
+  # `TypeDB.ConceptRow.decode/1` — the two steps above this one — have always
+  # been `@doc false`, and a caller reaches decoded concepts through
+  # `TypeDB.ConceptRow.get/2`, never through here.
+  @doc false
   @spec decode(term()) :: entry()
   def decode(nil), do: nil
 

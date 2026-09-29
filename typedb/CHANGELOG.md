@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — breaking
+
+**Ten function heads left the documented public API.** Nothing was removed and
+no behaviour changed: every one of them still exists, still has the same
+signature and still returns what it returned. What changed is the promise. They
+are now `@doc false`, which in this project means internal — callable, but not
+covered by the version number, and free to change in a patch release.
+
+This is the narrowing `docs/1.0-readiness.md` recommends, made now because doing
+it after 1.0 would cost a major version. Code on 0.10.x that calls one of these
+keeps compiling and keeps working; it is simply no longer relying on a promise.
+
+| no longer public | what to call instead |
+| --- | --- |
+| `TypeDB.Concept.decode/1` | nothing — `TypeDB.ConceptRow.get/2` and `TypeDB.Answer.rows/1` hand you concepts already decoded |
+| `TypeDB.Config.url/2` | `TypeDB.Connection.request/4`, which takes the path and builds the URL |
+| `TypeDB.Config.raw_url/2` | `TypeDB.Connection.request/4`, same |
+| `TypeDB.Config.backoff/2` | configure `:retry_backoff` and `:retry_max_delay`; both stay public |
+| `TypeDB.Options.query_payload/1` | pass the options to `TypeDB.query/4` or `TypeDB.Transaction.query/3` |
+| `TypeDB.Options.query_payload/2` | the same |
+| `TypeDB.Options.transaction_payload/1` | pass the options to `TypeDB.Transaction.open/4` or `TypeDB.transaction/5` |
+| `TypeDB.Options.transaction_payload/2` | the same |
+| `TypeDB.HTTP.Req.request_options/6` | nothing — it is an adapter internal; configure the adapter through `:http` |
+| `TypeDB.Connection.renew_token/2` | `TypeDB.Connection.token/1`, which returns a token that is not about to expire and mints one when needed |
+
+**Why `@doc false` and not `@deprecated`, for all ten.** Two reasons, and either
+alone would decide it:
+
+1. A deprecation says "there is a newer way to do this". For nine of the ten
+   there is no user-facing replacement at all — they are plumbing that was
+   published by accident, not an older API with a successor. Only
+   `Connection.renew_token/2` has a true replacement (`token/1`), and it is the
+   one whose second argument — a monotonic millisecond or `:any` — no caller
+   outside `TypeDB.Transport` can meaningfully supply.
+2. `@deprecated` warns at every call site, including this project's own.
+   Measured: a fully-qualified call to a `@deprecated` function from another
+   module fails `mix compile --warnings-as-errors`, which is a step in the gate
+   and in both release workflows. Nine of the ten are called from another module
+   inside the driver, so deprecating them would not compile. (A bare local call
+   does not warn; a qualified one does, even within the same module.)
+
+`TypeDB.Options.Query` and `TypeDB.Options.Transaction` stay documented — they
+are what names the option set, and that set is still covered by the version
+number.
+
+The API snapshot records the change exactly: `test/api_snapshot.txt` goes from
+208 public heads to 198, and from 43 marked `# @doc false` to 53. The diff is
+those ten lines gaining the marker and nothing else.
+
 ### Fixed
 
 - **Five links in the README were 404s**, all the same monorepo mistake the
