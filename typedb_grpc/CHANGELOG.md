@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **One refused connection no longer gets reported two different ways.** gun
+  reports the same event — its process went away before the connection came up
+  — as either `{:down, {:shutdown, :econnrefused}}` or `{:down, :noproc}`, and
+  which one you get is scheduling: `gun:await_up/2` installs its monitor
+  *after* `gun:open` returns, and a connection refused on loopback can be
+  refused and the process gone before that line runs; `monitor/2` on a process
+  that has already exited answers `:noproc`, and by then why it died is gone,
+  because nobody was watching.
+
+  Both are now one sentence — *the transport went down* — with the detail
+  appended where gun reported one, and with what the `:noproc` case actually
+  means spelled out instead of an atom nobody can act on:
+
+      could not open a gRPC channel to 127.0.0.1:1729: the transport went down (:econnrefused)
+      could not open a gRPC channel to 127.0.0.1:1729: the transport went down
+        (gun had already exited when the adapter looked, so it did not report why)
+
+  `%TypeDB.Error{}`'s `:kind` was `:transport` either way and still is, and
+  `:reason` still carries the term the adapter handed over — normalising that
+  too would hide the difference from anyone debugging the adapter.
+
+  `TypeDB.GRPC.Connection.connect/1` hand-rolled its own `Error.new/3` instead
+  of going through `TypeDB.GRPC.Error.from_reason/2`, which is how the raw
+  tuple reached the log in the first place; it now goes through it, like the
+  nine other places that convert a transport reason.
+
+  Found by CI on `main` at 99c5851, where the start-up test expected the log to
+  say `econnrefused` and it said `{:down, :noproc}` (a re-run passed — a race).
+  `test/typedb/grpc/connection_start_test.exs` now forces **both** outcomes
+  deterministically rather than hoping for one of them.
+
 ## [0.3.0] - 2026-09-12
 
 A minor under the 0.x rule: a connection that used to refuse to start now

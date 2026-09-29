@@ -27,6 +27,7 @@ defmodule TypeDB.GRPC.ConnectionStartTest do
 
   alias TypeDB.Error
   alias TypeDB.GRPC.Connection
+  alias TypeDB.GRPC.Error, as: GRPCError
 
   # A port that was bound and released. Nothing is listening on it, so the
   # connection attempt is refused rather than left hanging — which is the fast,
@@ -127,17 +128,89 @@ defmodule TypeDB.GRPC.ConnectionStartTest do
            "the call took #{div(elapsed, 1000)} ms; it should not wait on a channel that is known to be missing"
   end
 
-  test "the failure is said out loud, with the address and the reason" do
+  test "the failure is said out loud, with the address and what happened" do
     assert {:ok, _name, _pid, log} = start_against_nothing()
 
     assert log =~ "127.0.0.1:"
-    assert log =~ "econnrefused"
+
+    # Not `econnrefused`: that word is there only when gun got round to
+    # reporting it, and whether it does is a race — see the describe block
+    # below, which forces both outcomes. What the driver promises is the
+    # sentence, and the sentence is the same either way.
+    assert log =~ "the transport went down"
   end
 
   test "there is no connection id until a connection has actually been opened" do
     assert {:ok, name, _pid, _log} = start_against_nothing()
 
     assert Connection.connection_id(name) == nil
+  end
+
+  describe "one refused connection, two reasons from gun" do
+    # CI caught this once on main at 99c5851: this file's start-up test expected
+    # the log to say `econnrefused` and it said `{:down, :noproc}`. A re-run
+    # passed, which is what a race looks like.
+    #
+    # The race is in `gun:await_up/2` (gun.erl), which the gRPC adapter calls
+    # from its connection process:
+    #
+    #     await_up(ServerPid, Timeout) ->
+    #         MRef = monitor(process, ServerPid),
+    #         ...
+    #
+    # The monitor goes on *after* `gun:open` has returned. A connection refused
+    # on loopback can be refused and the gun process gone before that line runs,
+    # and `monitor/2` on a process that is already dead delivers `:noproc` — at
+    # which point why it died is gone, because nobody was watching.
+    #
+    # So one event has two reasons, decided by scheduling. Neither is the
+    # driver's to change; what is the driver's is not passing the coin-flip on
+    # to whoever reads the log.
+
+    defp refused_port do
+      {:ok, socket} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(socket)
+      :ok = :gen_tcp.close(socket)
+      port
+    end
+
+    defp await_up_after(port, delay_ms) do
+      {:ok, pid} = :gun.open(~c"127.0.0.1", port, %{retry: 0, connect_timeout: 5_000})
+      if delay_ms > 0, do: Process.sleep(delay_ms)
+      :gun.await_up(pid, 2_000)
+    end
+
+    test "gun reports the reason when its process is still alive" do
+      assert {:error, {:down, {:shutdown, :econnrefused}}} = await_up_after(refused_port(), 0)
+    end
+
+    test "gun reports :noproc when its process has already exited" do
+      assert {:error, {:down, :noproc}} = await_up_after(refused_port(), 200)
+    end
+
+    test "the driver says the same thing about both" do
+      context = "could not open a gRPC channel to 127.0.0.1:1"
+
+      told = GRPCError.from_reason({:down, {:shutdown, :econnrefused}}, context)
+      lost = GRPCError.from_reason({:down, :noproc}, context)
+
+      for error <- [told, lost] do
+        assert error.kind == :transport
+        assert error.message =~ context
+        assert error.message =~ "the transport went down"
+      end
+
+      # The detail survives where there is one, and where there is not the
+      # message says that rather than printing an atom nobody can act on.
+      assert told.message =~ "econnrefused"
+      assert lost.message =~ "did not report why"
+
+      # `:reason` stays exactly what the adapter handed over. Normalising it
+      # too would hide the difference from anyone debugging the adapter, and
+      # the message is what a human reads.
+      assert told.reason == {:down, {:shutdown, :econnrefused}}
+      assert lost.reason == {:down, :noproc}
+    end
   end
 
   test "the process keeps trying rather than sitting on the first refusal" do

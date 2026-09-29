@@ -122,11 +122,43 @@ defmodule TypeDB.GRPC.Error do
   that died, as plain terms rather than as `GRPC.RPCError`. They are transport
   failures in the sense `%TypeDB.Error{}` means: the request produced no answer,
   and trying again could produce one.
+
+  ## One event, two reasons
+
+  `{:down, _}` is gun saying its process went away before the connection came
+  up, and it arrives in two shapes for the same event:
+
+      {:down, {:shutdown, :econnrefused}}
+      {:down, :noproc}
+
+  Which one you get is scheduling. `gun:await_up/2` installs its monitor
+  *after* `gun:open` has returned, and a connection refused on loopback can be
+  refused and the process gone before that line runs; `monitor/2` on a process
+  that is already dead answers `:noproc`, and by then why it died is gone,
+  because nobody was watching. Forced both ways in
+  `test/typedb/grpc/connection_start_test.exs`.
+
+  Neither shape is this driver's to change. What is this driver's is not
+  passing the coin-flip on: both say *the transport went down*, and the detail
+  is appended where gun reported one. `:reason` keeps the term the adapter
+  handed over, because normalising that too would hide the difference from
+  anyone debugging the adapter.
   """
   @spec from_reason(term(), String.t()) :: Error.t()
+  def from_reason({:down, why} = reason, context) do
+    Error.new(:transport, "#{context}: the transport went down #{down_detail(why)}", reason: reason)
+  end
+
   def from_reason(reason, context) do
     Error.new(:transport, "#{context}: #{inspect(reason)}", reason: reason)
   end
+
+  defp down_detail(:noproc) do
+    "(gun had already exited when the adapter looked, so it did not report why)"
+  end
+
+  defp down_detail({:shutdown, why}), do: "(#{inspect(why)})"
+  defp down_detail(why), do: "(#{inspect(why)})"
 
   # UNAUTHENTICATED and PERMISSION_DENIED are about credentials; DEADLINE_EXCEEDED
   # is a timeout by any name; UNAVAILABLE is the server not being there. Everything
