@@ -72,12 +72,84 @@ defmodule TypeDB.GuideTest do
              "so its example demonstrates the give-up path it says it does not"
   end
 
+  describe "guides/getting-started.md" do
+    # The one guide a stranger reads first, so its walkthrough is run rather
+    # than parsed: create a database, define a schema, insert, read the names
+    # back. The stub answers all four, so this proves the sequence composes —
+    # the function names exist, the options are accepted, and the answer is
+    # `Enumerable` with the variable the guide says it has.
+    #
+    # It cannot prove TypeDB accepts that TypeQL; the guide says which
+    # integration test measured each claim it makes about the server.
+
+    @getting_started Path.expand("../../guides/getting-started.md", __DIR__)
+
+    defp walkthrough do
+      [block] =
+        @getting_started
+        |> elixir_blocks()
+        |> Enum.filter(&String.contains?(&1, "TypeDB.create_database!"))
+
+      block
+    end
+
+    test "the walkthrough runs and hands back the names it says it does" do
+      {:ok, stub} = TypeDB.Stub.start_link([])
+      on_exit(fn -> stop_quietly(fn -> TypeDB.Stub.stop(stub) end) end)
+
+      name = :"guide_start_#{System.unique_integer([:positive])}"
+
+      {:ok, _pid} =
+        start_supervised(
+          {TypeDB,
+           name: name, url: TypeDB.Stub.url(stub), username: "admin", password: "password", http: adapter()}
+        )
+
+      {names, _bindings} = Code.eval_string(walkthrough(), [conn: name], file: @getting_started)
+
+      assert names == ["Alice"]
+    end
+
+    test "the walkthrough asks for the transaction type it tells you to pass" do
+      # The guide's own advice, checked against the guide's own code: a reader
+      # who copies this gets a `:read` read and a `:write` write, not the
+      # `:schema` default the paragraph warns about.
+      block = walkthrough()
+
+      assert block =~ "transaction_type: :write"
+      assert block =~ "transaction_type: :read"
+    end
+
+    test "the injection-safe example binds rather than interpolates" do
+      [block] =
+        @getting_started
+        |> elixir_blocks()
+        |> Enum.filter(&String.contains?(&1, "given_rows:"))
+
+      assert block =~ "given $n: string;"
+      assert block =~ ~s(given_rows: [%{"n" => user_supplied}])
+
+      # `~S` because `"#{}"` is an interpolation producing the empty string, and
+      # every string matches that — the first version of this line passed for
+      # any guide text at all.
+      refute block =~ ~S(#{),
+             "the guide's parameterised example interpolates into the query, " <>
+               "which is the thing it exists to tell people not to do"
+    end
+  end
+
+  defp stop_quietly(fun) do
+    fun.()
+  catch
+    :exit, _ -> :ok
+  end
+
   test "every elixir block in every guide parses" do
     # The same guard the notebook has, for the same reason: nothing compiles a
     # guide, so prose edited into code is invisible until a reader hits it.
     guides = Path.wildcard(Path.expand("../../guides/*.md", __DIR__))
 
-    assert length(guides) >= 4
+    assert length(guides) >= 5
 
     for guide <- guides, {code, index} <- Enum.with_index(elixir_blocks(guide), 1) do
       assert {:ok, _quoted} = Code.string_to_quoted(code),
