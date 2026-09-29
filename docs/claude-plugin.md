@@ -20,7 +20,7 @@ and `claude` CLI 2.1.285.*
 | `plugin/skills/typeql-3/SKILL.md` | TypeQL 3: schema, data, `fetch`, `reduce`, functions, and the 2.x forms 3.x rejects |
 | `plugin/skills/typedb-elixir-driver/SKILL.md` | the `typedb` package: connection, transaction types, `given_rows`, answers, errors, streaming, HTTP vs gRPC |
 | `plugin/skills/typedb-elixir-testing/SKILL.md` | testing an application: a database per test, the seam to fake, provoking transport failures |
-| `plugin/evals/` | five `claude plugin eval` cases, four positive and one negative |
+| `plugin/evals/` | four `claude plugin eval` cases: three that measure a contribution, one negative guard |
 
 ## The two rules the content follows
 
@@ -75,17 +75,71 @@ cd plugin
 claude plugin eval .
 ```
 
-Each case runs three times with the plugin and three times without it, and the
-`Δ` column is what the plugin contributed. A case scoring 1.00 in both arms is a
-case the plugin did not affect — worth deleting from the suite, or worth a
-skill that actually changes the answer. Every run is a real model call on the
-account that starts it, so this is a human's command rather than a CI job.
+Each case runs three times with the plugin and three times without it. The `Δ`
+column is what the plugin contributed; a case scoring 1.00 in both arms is a case
+the plugin did not affect. Every run is a real model call on the account that
+starts it, so this is a human's command rather than a CI job — CI runs only
+`claude plugin validate`.
 
-The five cases are a schema (does Claude write 3.x declarations or 2.x `sub`
-forms), a user-supplied value (`given_rows` or string interpolation), a write
-conflict (does it re-run the block or believe `:max_retries` covers a rejected
-commit), test isolation (a database per test), and one unrelated Elixir question
-that no skill should answer.
+### What the suite measures
+
+The last run, on the plugin as it stands — `mean Δ +0.44`, 5 cases, 318s, $1.39:
+
+| case | what it probes | with | without | Δ |
+| --- | --- | ---: | ---: | ---: |
+| `fault-injection-adapter` | making the driver fail on purpose in a test | 1.00 | 0.00 | **+1.00** |
+| `user-input-as-given-rows` | a value from a web form: `given_rows` or interpolation | 1.00 | 0.11 | **+0.89** |
+| `transaction-retry-loop` | a rejected commit: re-run the block, or trust `:max_retries` | 1.00 | 0.67 | **+0.33** |
+| `idempotent-insert` | `put` with a changed attribute | 1.00 | 1.00 | 0.00, kept as a guard |
+| `unrelated-elixir-request` | an Elixir question no skill should answer | 1.00 | 1.00 | 0.00, by design |
+
+Across four rounds the two driver cases were stable — `given_rows` scored a
+baseline of 0.33, 0.33, 0.33 and 0.11, and the retry case 0.50, 0.50, 0.67 and
+0.67 — so the contribution is real rather than a lucky sample. `idempotent-insert`
+scores 1.00 in both arms on purpose: it guards against the skill making a correct
+answer worse.
+
+`fault-injection-adapter` is the clearest result: **without the plugin the
+baseline scores 0.00**, because nothing in a model's training says
+`TypeDB.HTTP` is a behaviour you can implement and pass as `:http`. It reaches
+for Mox instead, which tests that you called a function rather than that the
+driver survives a dropped request.
+
+`user-input-as-given-rows` is the one that matters most, because the failure is a
+security failure: in all three baseline runs Claude produced a query without
+`given_rows`.
+
+### What it does not help with, measured
+
+**Writing TypeQL 3 from scratch.** Five probes across four eval rounds — writing
+a schema (twice), diagnosing a `SYR1` error, paging a `fetch`, and `put`
+semantics — every one scored **1.00 with the plugin and 1.00 without it**. A
+frontier model already writes correct TypeQL 3; the language is public and
+documented, and the plugin adds nothing to it.
+
+That is why `skills/typeql-3/SKILL.md` was cut down rather than kept as a
+reference. What remains is only what a measurement showed is *ours* to
+contribute: the `SYR1` trap, the 2.x table, `@subkey` being unimplemented,
+reserved keywords, the `put`/`redefine`/`undefine` behaviours with data present,
+and the error-code table — each of them a fact about what 3.12.1 actually
+answers. The schema tutorial, the literals it can already guess and the general
+query reference went.
+
+The `diagnose-2x-schema-error` case was cut for a second reason worth recording:
+the skill **never loaded** in any of its three runs (`Skill called 0x`) and Claude
+answered correctly anyway. The trigger gap was real and was fixed — `typeql-3`'s
+`description` now names the error codes, so a pasted `SYR1` loads it — but the
+case measured nothing and was removed.
+
+### A grader that lied
+
+The first round scored `schema-in-3x-form` at 0.89 **with** the plugin, and the
+failing grader was a regex asserting the answer contained no `sub entity`. The
+answer was correct; its closing sentence was *"It follows the 3.x syntax: `entity
+book`, not `book sub entity`"* — the skill's own contrast, quoted back. A regex
+over prose cannot tell a warning from a mistake. The rubric now says so
+explicitly, and the lesson generalises: grade the artefact, and let a judge with a
+written-out rubric handle anything that needs reading.
 
 ## Submitting it
 
