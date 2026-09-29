@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-29
+
 ### Changed — breaking
 
 **Ten function heads left the documented public API.** Nothing was removed and
@@ -1277,7 +1279,8 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   suite that checks the TLS defaults against a server started with
   `--server.encryption.enabled`.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.1...v0.10.2
