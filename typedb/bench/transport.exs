@@ -7,6 +7,9 @@
 #
 # The numbers in CHANGELOG.md's "Verified under load" section come from here.
 
+Code.require_file("machine.exs", __DIR__)
+Bench.Machine.puts()
+
 url = System.get_env("TYPEDB_BENCH_URL", "http://127.0.0.1:8000")
 username = System.get_env("TYPEDB_BENCH_USERNAME", "admin")
 password = System.get_env("TYPEDB_BENCH_PASSWORD", "password")

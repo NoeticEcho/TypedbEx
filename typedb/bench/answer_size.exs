@@ -8,6 +8,9 @@
 # Measures the wire bytes and the decoded term for the same answer, at a row
 # count big enough that the per-answer overhead does not dominate.
 
+Code.require_file("machine.exs", __DIR__)
+Bench.Machine.puts()
+
 url = System.get_env("TYPEDB_BENCH_URL", "http://127.0.0.1:8000")
 username = System.get_env("TYPEDB_BENCH_USERNAME", "admin")
 password = System.get_env("TYPEDB_BENCH_PASSWORD", "password")

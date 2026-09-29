@@ -6,6 +6,70 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Whether `Decimal` is available is resolved when `TypeDB.Concept` is
+  compiled, not once per value.** The answer was already cached in
+  `:persistent_term` — the expensive `Code.ensure_loaded?/1` was fixed in
+  0.6.0 — but the cached read remained on the hot path, and decoding is the part
+  of this driver that scales with the size of your answer rather than the number
+  of requests.
+
+  Measured by `bench/decimal.exs`, 500,000 values, median of five trials, on an
+  Intel Xeon @ 2.10GHz × 4, OTP 29 / Elixir 1.20.4, decimal 3.1.1:
+
+  | | µs/value | values/s |
+  | --- | ---: | ---: |
+  | before | 0.4473 | 2,235,866 |
+  | after | 0.3850 | 2,597,713 |
+
+  **14% off the decimal cast.** `Decimal.new/1` is the rest of it and is not
+  ours to make faster.
+
+  Resolved in one direction only. `Decimal` present at compile time cannot
+  become absent in any way that matters — that would take a release excluding
+  it, and then `Decimal.new/1` raises `UndefinedFunctionError`, which the
+  existing rescue turns into exactly the answer the absent branch gives.
+  Compiled *without* it, the per-value check stays, because a consumer who adds
+  the dependency later may or may not get the module recompiled, and being right
+  is worth 0.035µs. `test/support/consumer/smoke.exs` asserts which branch
+  compiled in both configurations, since that is the only place the optional
+  dependencies are genuinely absent.
+
+- **`TypeDB.HTTP`'s adapter table was still publishing 0.1.0's numbers.** The
+  0.6.0 entry below records that 77 req/s for `:httpc` at 200-way *did not
+  reproduce*, and the README was corrected then. The moduledoc was not, so
+  hexdocs went on showing the superseded figures for four releases. It now
+  carries the same table as the README, names the script that produced it, and
+  says what happened.
+
+- **Every speed or throughput figure now names the script and the machine.**
+  Each script in `bench/` prints its CPU, OTP, Elixir and dependency versions
+  before its first number, and `bench/README.md` maps each published claim to
+  the script that produces it. The README says plainly that the ratio is the
+  finding and the absolute number is a property of the machine. Figures about
+  *TypeDB's* behaviour rather than the driver's speed — the 300,000 ms
+  transaction lifetime, the 10,000-answer cap, the request-body limit — are not
+  benchmarks and say so: they are pinned by the integration suite, which re-runs
+  them on every push against three TypeDB versions.
+
+  Sections for already-released versions are left as written. They record what
+  was measured at the time, on the machine of the day, and rewriting them would
+  make the history less true rather than more.
+
+### Documentation
+
+- **Several servers are out of scope for 1.0, deliberately**, and the reasoning
+  is written down in `docs/cluster-1.0-decision.md`. The deciding fact is that
+  the cluster protocol is not in the API this driver speaks: TypeDB gives
+  replica discovery, primary routing and failover to the **gRPC** drivers and
+  says the HTTP endpoint is used "by explicitly choosing a specific replica".
+  Clustering in 3.x is alpha and Cloud/Enterprise-only, so CI has nothing to
+  test failover against; and on CE, `TypeDB.Server.servers/1` returns one entry
+  whose `address` is `nil`. Accepting `:urls` later stays additive, so nothing
+  in the 1.0 surface is held open for it. README's *Limitations* says so with
+  the workaround.
+
 ## [0.10.3] - 2026-09-29
 
 ### Added

@@ -16,17 +16,25 @@ defmodule TypeDB.HTTP do
 
   ## Why Finch is the default
 
-  Measured against a local TypeDB 3.12.1, 400 requests per run:
+  Measured by `bench/transport.exs` against a local TypeDB 3.12.1, 400 requests
+  per run with a warm pool:
 
-  | Concurrency | `:httpc` | Finch |
-  | --- | --- | --- |
-  | 16 | 344 req/s, p50 45ms | 1729 req/s, p50 8ms |
-  | 64 | 247 req/s, p50 263ms | 1773 req/s, p50 23ms |
-  | 200 | 77 req/s, p50 2477ms | 1981 req/s, p50 19ms |
+  | Concurrency | `:httpc` | Req | Finch |
+  | --- | --- | --- | --- |
+  | 16 | 569 req/s, p50 28ms | 1656 req/s, p50 9ms | 2052 req/s, p50 7ms |
+  | 64 | 437 req/s, p50 146ms | 1628 req/s, p50 38ms | 1830 req/s, p50 32ms |
+  | 200 | 408 req/s, p50 336ms | 1675 req/s, p50 101ms | 1840 req/s, p50 100ms |
 
-  `:httpc` does not degrade gracefully — throughput *falls* as concurrency rises,
-  and tail latency reaches seconds. It remains supported, because running on OTP
-  alone is sometimes worth that price, but it should be a deliberate choice.
+  `:httpc` does not scale with concurrency — three to four times slower
+  throughout, with a p99 reaching 553ms where Finch's is 112ms. It remains
+  supported, because running on OTP alone is sometimes worth that price, but it
+  should be a deliberate choice.
+
+  Run the script yourself: the ratio is the finding, and the absolute numbers
+  belong to whatever machine produced them. This table used to carry 0.1.0's
+  figures, including 77 req/s for `:httpc` at 200-way — a number that did not
+  reproduce, was corrected in `README.md` and in the 0.6.0 changelog entry, and
+  went on being published here.
 
   ## Implementing an adapter
 
