@@ -322,9 +322,7 @@ defmodule TypeDB.Concept do
     # suffix too, so the same attribute was "12.345" as a Decimal and "12.345dec"
     # as a string, and anything the caller did with the string — Float.parse/1,
     # a comparison, writing it back — broke on a dependency being absent.
-    trimmed = String.trim_trailing(value, "dec")
-
-    if decimal_loaded?(), do: to_decimal(trimmed), else: trimmed
+    value |> String.trim_trailing("dec") |> decimal_value()
   end
 
   def cast(value, "date") when is_binary(value) do
@@ -347,25 +345,44 @@ defmodule TypeDB.Concept do
 
   @compile {:no_warn_undefined, Decimal}
 
-  # Asked once per VM, not once per value.
+  # Whether `Decimal` is available is asked once — and in the common case, not
+  # at run time at all.
   #
-  # `Code.ensure_loaded?/1` is a cached lookup for a module that *is* loaded and
-  # a code-server round trip for one that is not. Measured over 50,000 casts:
-  # 1ms when `Decimal` is present, 1096ms when it is absent — a thousandfold
-  # difference, paid by exactly the people the optional dependency exists for.
-  # An answer of 5,000 decimals cost them a tenth of a second in `:code`.
+  # The question is expensive to ask per value: `Code.ensure_loaded?/1` is a
+  # cached lookup for a module that *is* loaded and a code-server round trip for
+  # one that is not. Measured over 50,000 casts: 1ms present, 1096ms absent.
+  # Caching the answer in `:persistent_term` fixed that and left a smaller cost
+  # behind — a `:persistent_term.get/2` per value, 0.035µs, about 8% of the
+  # decimal path when `Decimal` is present and a third of it when it is not.
+  # `bench/decimal.exs` measures both.
   #
-  # The answer cannot change under a running application: `Mix.install/2` and
-  # releases both settle the code path before any query runs.
-  defp decimal_loaded? do
-    case :persistent_term.get({__MODULE__, :decimal?}, :unasked) do
-      :unasked ->
-        loaded? = Code.ensure_loaded?(Decimal)
-        :persistent_term.put({__MODULE__, :decimal?}, loaded?)
-        loaded?
+  # So the lookup is resolved when this module is compiled, in the one direction
+  # where the answer cannot change afterwards. `Decimal` present at compile time
+  # cannot become absent at run time in any way that matters: it would take a
+  # release that excludes it, and then `Decimal.new/1` raises
+  # `UndefinedFunctionError`, which `to_decimal/1` already rescues into exactly
+  # the answer the absent branch gives. Compiled *without* it, the dynamic check
+  # stays, because a consumer who later adds the dependency may or may not get
+  # this module recompiled — and being right is worth 0.035µs.
+  @decimal_at_compile_time Code.ensure_loaded?(Decimal)
 
-      loaded? ->
-        loaded?
+  if @decimal_at_compile_time do
+    defp decimal_value(trimmed), do: to_decimal(trimmed)
+  else
+    defp decimal_value(trimmed) do
+      if decimal_loaded?(), do: to_decimal(trimmed), else: trimmed
+    end
+
+    defp decimal_loaded? do
+      case :persistent_term.get({__MODULE__, :decimal?}, :unasked) do
+        :unasked ->
+          loaded? = Code.ensure_loaded?(Decimal)
+          :persistent_term.put({__MODULE__, :decimal?}, loaded?)
+          loaded?
+
+        loaded? ->
+          loaded?
+      end
     end
   end
 

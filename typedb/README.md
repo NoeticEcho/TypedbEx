@@ -550,8 +550,26 @@ with a warm pool:
 
 `:httpc` does not scale with concurrency: three to four times slower throughout,
 with a p99 that reaches 553ms where Finch's is 112ms. Pick it deliberately, not
-by default. Run the script yourself — the ratio is the point, the absolute
-numbers belong to whatever machine produced them.
+by default.
+
+### About the numbers on this page
+
+Every figure here about speed or throughput comes from a script in
+[`bench/`](https://github.com/NoeticEcho/TypedbEx/blob/main/typedb/bench) that you can run, and each script prints the machine and the
+versions it ran on before its first number — [`bench/README.md`](https://github.com/NoeticEcho/TypedbEx/blob/main/typedb/bench/README.md) maps each claim to
+the script that produces it. **The ratio is the finding; the absolute number is a
+property of the machine.** The table above was produced on the maintainer's
+container; re-run on another, the same three-to-four-fold gap appears with
+different absolute figures.
+
+That distinction is not pedantry. 0.1.0 published 77 req/s for `:httpc` at
+200-way; it did not reproduce, and a figure that survives after being corrected
+elsewhere reads as a measurement when it is not.
+
+Numbers about TypeDB's own behaviour rather than this driver's speed — the
+300,000 ms transaction lifetime, the 10,000-answer cap, the request-body limit —
+are not benchmarks. They are pinned by the integration suite, which re-runs them
+on every push against three TypeDB versions.
 
 Any module implementing the `TypeDB.HTTP` behaviour works.
 
@@ -656,13 +674,21 @@ failover, no read-replica routing and no reconnection to a different node. Put
 a load balancer in front of a cluster, or supervise one connection per node and
 choose between them yourself.
 
-This is a decision rather than an omission, and it is the one limitation here
-that could plausibly change. Failover is only worth shipping if it is tested
-against a real multi-node cluster, and every claim this driver makes is checked
-against a live server — that is why the supported TypeDB range is what has been
-measured rather than what ought to work. TypeDB CE is single-node, so there is
-nothing here to test it against. Accepting `:urls` later is additive and needs
-no `1.0` slot held open for it.
+This is a decision rather than an omission, and it has now been taken
+deliberately for 1.0 — **out**, with the reasoning written down in
+[docs/cluster-1.0-decision.md](https://github.com/NoeticEcho/TypedbEx/blob/main/docs/cluster-1.0-decision.md). The short
+version is that the cluster protocol is not in the API this driver speaks:
+TypeDB's own documentation gives replica discovery, primary routing and failover
+to the **gRPC** drivers, and says the HTTP endpoint is "unchanged and can be used
+the usual way by explicitly choosing a specific replica to send requests to".
+Clustering in 3.x is also alpha and Cloud/Enterprise-only, so CI has nothing to
+test failover against — and on CE, `TypeDB.Server.servers/1` returns one entry
+whose `address` is `nil`, which is to say there is nothing to route to even if
+the driver wanted to.
+
+Accepting `:urls` later is additive and needs no `1.0` slot held open for it. If
+you want cluster-aware behaviour today, it belongs in the sibling `typedb_grpc`
+package, which speaks the protocol that has it.
 
 **Retries block the caller.** Requests run in the calling process, which is what
 makes the driver concurrent — but it also means a retry and its backoff are

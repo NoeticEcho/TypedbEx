@@ -4,6 +4,9 @@
 #
 #     mix run bench/decode.exs
 
+Code.require_file("machine.exs", __DIR__)
+Bench.Machine.puts()
+
 defmodule Bench do
   def time(label, count, fun) do
     fun.()
