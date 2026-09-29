@@ -34,7 +34,9 @@ defmodule TypeDB.FaultAdapter do
     # A response that is honestly a failure.
     :server_error,
     :html_error_page,
-    :timeout_error
+    :timeout_error,
+    # An adapter that does not honour the timeout it was handed.
+    :stall
   ]
 
   @doc "Every fault this adapter knows how to produce."
@@ -45,7 +47,20 @@ defmodule TypeDB.FaultAdapter do
   def init(_name, opts), do: {:ok, Keyword.fetch!(opts, :fault)}
 
   @impl true
+  def request(:stall, _method, _url, _headers, _body, opts) do
+    # Longer than it was told to take, and then an honest answer. A real adapter
+    # cannot be interrupted from outside, so what this exercises is not the
+    # cancelling of an attempt — nothing cancels one — but whether the driver
+    # notices that the budget is gone before starting the next.
+    opts |> Keyword.fetch!(:timeout) |> stall()
+
+    {:error, TypeDB.Error.new(:timeout, "took too long")}
+  end
+
   def request(fault, _method, _url, _headers, _body, _opts), do: respond(fault)
+
+  defp stall(:infinity), do: Process.sleep(1_000)
+  defp stall(timeout), do: Process.sleep(timeout * 2)
 
   defp respond(:raise), do: raise("the adapter blew up")
   defp respond(:throw), do: throw(:the_adapter_threw)

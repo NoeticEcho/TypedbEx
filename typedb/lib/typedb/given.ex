@@ -72,7 +72,7 @@ defmodule TypeDB.Given do
       %{"kind" => "value", "value" => ~S|Robert"); drop|, "valueType" => "string"}
   """
 
-  alias TypeDB.{Concept, DateTimeTZ, Duration, Error}
+  alias TypeDB.{Concept, DateTimeTZ, Duration, Error, Wire}
 
   @compile {:no_warn_undefined, Decimal}
 
@@ -165,14 +165,10 @@ defmodule TypeDB.Given do
 
   defp value(value, value_type), do: %{"kind" => "value", "value" => value, "valueType" => value_type}
 
+  # One rule for rendering an offset, and it lives in `TypeDB.Wire`:
+  # a `DateTime` from a time zone database carries a seconds-bearing offset for
+  # any pre-1900 timestamp, and this used to drop the seconds silently.
   defp offset(%DateTime{utc_offset: utc_offset, std_offset: std_offset}) do
-    total = utc_offset + std_offset
-    sign = if total < 0, do: "-", else: "+"
-    total = abs(total)
-
-    hours = total |> div(3600) |> Integer.to_string() |> String.pad_leading(2, "0")
-    minutes = total |> rem(3600) |> div(60) |> Integer.to_string() |> String.pad_leading(2, "0")
-
-    "#{sign}#{hours}:#{minutes}"
+    Wire.utc_offset!(utc_offset + std_offset)
   end
 end

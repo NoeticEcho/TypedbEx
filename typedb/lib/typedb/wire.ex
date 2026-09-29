@@ -34,6 +34,54 @@ defmodule TypeDB.Wire do
   end
 
   @doc """
+  Renders a fixed UTC offset in seconds as TypeQL's `±HH:MM`.
+
+  Raises `TypeDB.Error` with kind `:encode` for an offset TypeDB cannot write.
+  Measured against TypeDB 3.12.1, whose `datetime-tz` literal takes `-23:59` to
+  `+23:59` and nothing else: `+00:01:15` and `+24:00` are both syntax errors —
+  see `test/integration/datetime_tz_offset_integration_test.exs`.
+
+  Both refusals replace something worse. A sub-minute offset used to have its
+  seconds dropped, which produced a literal TypeDB *accepts* and which names a
+  different instant — and a time zone database hands out exactly such an offset
+  for any pre-1900 timestamp, `-75` seconds for London. An out-of-range one used
+  to render as `+99:59`, which came back from the server as a TypeQL syntax
+  error pointing at a column number.
+
+  One function rather than one per caller, because a rule in two places drifts:
+  `TypeDB.DateTimeTZ.new/2` and `TypeDB.Given`'s `DateTime` clause had the same
+  renderer written out twice, and both were wrong in the same two ways.
+  """
+  @spec utc_offset!(integer()) :: String.t()
+  def utc_offset!(seconds) when is_integer(seconds) and rem(seconds, 60) != 0 do
+    raise TypeDB.Error.new(
+            :encode,
+            "cannot render a UTC offset of #{seconds} seconds: TypeDB writes a fixed offset " <>
+              "as ±HH:MM and rejects ±HH:MM:SS outright, so the seconds could only be dropped — " <>
+              "and a dropped second is a timestamp that names a different instant, silently. " <>
+              "Round the offset to a whole minute, or pass the IANA zone name instead, which " <>
+              "TypeDB stores exactly."
+          )
+  end
+
+  def utc_offset!(seconds) when is_integer(seconds) and abs(seconds) >= 86_400 do
+    raise TypeDB.Error.new(
+            :encode,
+            "cannot render a UTC offset of #{seconds} seconds: TypeDB accepts -23:59 to +23:59, " <>
+              "and anything outside that is a TypeQL syntax error pointing at a column number. " <>
+              "Failing here says what is actually wrong."
+          )
+  end
+
+  def utc_offset!(seconds) when is_integer(seconds) do
+    sign = if seconds < 0, do: "-", else: "+"
+    total = abs(seconds)
+    pad = &(&1 |> Integer.to_string() |> String.pad_leading(2, "0"))
+
+    sign <> pad.(div(total, 3600)) <> ":" <> pad.(div(rem(total, 3600), 60))
+  end
+
+  @doc """
   Connection-level defaults for a query's options.
 
   Takes the config rather than the connection, so that a caller which already
