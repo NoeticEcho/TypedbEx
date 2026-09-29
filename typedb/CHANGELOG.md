@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A UTC offset TypeDB cannot write is refused instead of quietly changed.**
+  `TypeDB.DateTimeTZ.new/2` and `TypeDB.Given`'s `DateTime` clause both rendered
+  a fixed offset as `±HH:MM` by truncation, so an offset carrying seconds lost
+  them without a word. That produced a literal TypeDB *accepts* and which names
+  a different instant — and a time zone database hands out exactly such an
+  offset for any pre-1900 timestamp: London was `-75` seconds from UTC until
+  1847, and `DateTime.from_naive!(~N[1800-01-01 00:00:00], "Europe/London", tz)`
+  was written as `-00:01`, fifteen seconds away from the value the caller had.
+  An offset of a day or more fared differently and no better: it rendered as
+  `+99:59`, which came back from the server as a TypeQL syntax error pointing at
+  a column number.
+
+  Both now raise `TypeDB.Error` with kind `:encode`, naming the offset and what
+  to do instead — round to a whole minute, or pass the IANA zone name, which
+  TypeDB stores exactly. This follows `TypeDB.Duration.to_iso8601/1`'s frozen
+  precedent for a value TypeDB has no way to hold.
+
+  Measured rather than assumed: TypeDB 3.12.1 takes `-23:59` to `+23:59` and
+  rejects `+00:01:15`, `+24:00` and `+99:59` as syntax errors. The measurement
+  is `test/integration/datetime_tz_offset_integration_test.exs`, so the error
+  messages stay true to a server rather than to a stub.
+
+  Found by the round-trip properties in `test/typedb/wire_property_test.exs`,
+  which now generate offsets over the whole range the server accepts, plus the
+  two kinds it does not. No public API changed: the one rule the two callers now
+  share lives in the internal `TypeDB.Wire`.
+
 ## [0.10.1] - 2026-09-29
 
 ### Fixed

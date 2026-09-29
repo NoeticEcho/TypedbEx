@@ -20,6 +20,8 @@ defmodule TypeDB.DateTimeTZ do
   `NaiveDateTime` only keeps microseconds.
   """
 
+  alias TypeDB.Wire
+
   @type t :: %__MODULE__{
           naive: NaiveDateTime.t(),
           time_zone: String.t() | nil,
@@ -50,6 +52,15 @@ defmodule TypeDB.DateTimeTZ do
   Rendered at nanosecond precision because that is what TypeDB stores and echoes
   back, so a value written this way and read again compares equal to itself.
   Pass the result straight to `given_rows`; see `TypeDB.Given`.
+
+  Raises `TypeDB.Error` with kind `:encode` for an offset TypeDB cannot write:
+  one that is not a whole number of minutes, or one at or beyond a day. Measured
+  against TypeDB 3.12.1, which accepts `-23:59` to `+23:59` and rejects both
+  `+00:01:15` and `+24:00` as TypeQL syntax errors. The first case is the one
+  worth failing for: an offset of, say, `-75` seconds — which is what a time zone
+  database gives for a pre-1900 London timestamp — used to render as `-00:01`,
+  which TypeDB accepts happily and which is fifteen seconds away from the
+  instant you had.
   """
   @spec new(NaiveDateTime.t(), String.t() | integer()) :: t()
   def new(%NaiveDateTime{} = naive, time_zone) when is_binary(time_zone) do
@@ -57,7 +68,7 @@ defmodule TypeDB.DateTimeTZ do
   end
 
   def new(%NaiveDateTime{} = naive, utc_offset) when is_integer(utc_offset) do
-    %__MODULE__{naive: naive, utc_offset: utc_offset, raw: render(naive) <> offset(utc_offset)}
+    %__MODULE__{naive: naive, utc_offset: utc_offset, raw: render(naive) <> Wire.utc_offset!(utc_offset)}
   end
 
   # TypeDB renders nine fractional digits; NaiveDateTime keeps six at most.
@@ -65,14 +76,6 @@ defmodule TypeDB.DateTimeTZ do
     fraction = microsecond |> Integer.to_string() |> String.pad_leading(6, "0")
 
     NaiveDateTime.to_iso8601(%{naive | microsecond: {0, 0}}) <> "." <> fraction <> "000"
-  end
-
-  defp offset(seconds) do
-    sign = if seconds < 0, do: "-", else: "+"
-    total = abs(seconds)
-    pad = &(&1 |> Integer.to_string() |> String.pad_leading(2, "0"))
-
-    sign <> pad.(div(total, 3600)) <> ":" <> pad.(div(rem(total, 3600), 60))
   end
 
   @doc """
