@@ -1,0 +1,14 @@
+{
+  "name": "typedbex",
+  "displayName": "TypedbEx — TypeDB for Elixir",
+  "version": "0.11.0",
+  "description": "Write correct TypeQL 3 and idiomatic Elixir against TypeDB, using the community-maintained typedb and typedb_grpc driver packages. Not affiliated with or endorsed by TypeDB Ltd.",
+  "author": {
+    "name": "NoeticEcho",
+    "url": "https://github.com/NoeticEcho"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/NoeticEcho/TypedbEx",
+  "homepage": "https://hexdocs.pm/typedb",
+  "keywords": ["elixir", "typedb", "typeql", "database", "graph-database"]
+}
