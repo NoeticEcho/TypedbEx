@@ -26,6 +26,9 @@ defmodule TypeDB.MixProject do
       test_coverage: [
         # The floor is the number CI reaches, with a couple of points of
         # headroom, so that it catches a regression rather than the weather.
+        # Raised 83 → 85 once the coverage step began printing the delta: a
+        # floor only moves up, and the step's own output is what says how far
+        # it can move next.
         #
         # CI is the authority: it measures about two points lower than a
         # development container does, with identical per-module figures, and the
@@ -35,7 +38,7 @@ defmodule TypeDB.MixProject do
         # Modules that run only under another adapter or another JSON codec drag
         # any single run down. CI covers those by running the matrix, not by
         # pretending one run covers everything.
-        summary: [threshold: 83],
+        summary: [threshold: 85],
         ignore_modules: [
           # Test support: measuring the coverage of the thing doing the
           # measuring says nothing about the library.
