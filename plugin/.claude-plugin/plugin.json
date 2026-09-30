@@ -17,6 +17,16 @@
   "privacyPolicyUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-privacy.md",
   "termsOfServiceUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-terms.md",
   "classification": {
-    "primaryCategory": "developer-tools"
+    "object_acted_on": [
+      "TypeQL queries",
+      "TypeDB schemas",
+      "Elixir source code",
+      "database transactions",
+      "ExUnit tests"
+    ],
+    "work_department": "Software engineering",
+    "industry": "Software",
+    "life_area": "Work",
+    "subject": "Graph databases"
   }
 }
