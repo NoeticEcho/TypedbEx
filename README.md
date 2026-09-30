@@ -83,7 +83,10 @@ claude plugin validate ./plugin   # CI runs this on every push
 cd plugin && claude plugin eval . # with-plugin against without-plugin
 ```
 
-Its `version` tracks the `typedb` package's, so a release raises both. See
+Its `version` tracks the `typedb` package's, so a release raises both. The
+listing's icon, links and classification come from the manifest, and the two
+pages it links to are [docs/plugin-privacy.md](docs/plugin-privacy.md) and
+[docs/plugin-terms.md](docs/plugin-terms.md). See
 [docs/claude-plugin.md](docs/claude-plugin.md) for what is in it, the two rules
 its content follows, and what to enter in the developer portal when submitting
 it.

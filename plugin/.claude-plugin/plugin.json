@@ -10,5 +10,13 @@
   "license": "Apache-2.0",
   "repository": "https://github.com/NoeticEcho/TypedbEx",
   "homepage": "https://hexdocs.pm/typedb",
-  "keywords": ["elixir", "typedb", "typeql", "database", "graph-database"]
+  "keywords": ["elixir", "typedb", "typeql", "database", "graph-database"],
+  "icon": "./.claude-plugin/icon.svg",
+  "documentationUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/claude-plugin.md",
+  "supportUrl": "https://github.com/NoeticEcho/TypedbEx/issues",
+  "privacyPolicyUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-privacy.md",
+  "termsOfServiceUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-terms.md",
+  "classification": {
+    "primaryCategory": "developer-tools"
+  }
 }
