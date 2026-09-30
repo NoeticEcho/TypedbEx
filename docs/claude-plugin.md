@@ -54,7 +54,7 @@ shape the listing live there rather than in the portal:
 | `supportUrl` | the repository's issues |
 | `privacyPolicyUrl` | `docs/plugin-privacy.md` |
 | `termsOfServiceUrl` | `docs/plugin-terms.md` |
-| `classification` | `{ "primaryCategory": "developer-tools" }` |
+| `classification` | five keys the portal named: `object_acted_on`, `work_department`, `industry`, `life_area`, `subject` |
 
 **None of these six is documented.** They appear in neither the [manifest
 reference](https://code.claude.com/docs/en/plugins/manifest-reference) nor any of
@@ -69,9 +69,22 @@ plugin has no use for.
 
 What the validator does **not** do is check their values. It accepts a
 `classification` that is a bare string, and an `icon` pointing at a file that is
-not there — both measured. So `classification`'s shape is the one thing here that
-only the portal's **Validate** can confirm. If it objects, the fix is one line in
-the manifest and nothing else changes.
+not there — both measured. So the values are the portal's to judge, and for
+`classification` it did: an earlier `{"primaryCategory": …}` was rejected with
+**Classification block has the wrong shape**, and the report named the keys it
+accepts. `classification` must be an **object** holding only these, and only
+`object_acted_on` is a list:
+
+| key | type | this plugin |
+| --- | --- | --- |
+| `object_acted_on` | list of strings | TypeQL queries, TypeDB schemas, Elixir source code, database transactions, ExUnit tests |
+| `work_department` | string | Software engineering |
+| `industry` | string | Software |
+| `life_area` | string | Work |
+| `subject` | string | Graph databases |
+
+The portal's *Unrecognized field* notes on `classification` and the four URL keys
+are marked **No action needed**: the fields stay.
 
 The icon is a graph of four nodes: deliberately not TypeDB's logo, and not
 Elixir's droplet either. Neither mark is ours to ship.
