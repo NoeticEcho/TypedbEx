@@ -1034,8 +1034,15 @@ jobs:
       - name: Install the Claude Code CLI
         run: npm install --no-fund --no-audit @anthropic-ai/claude-code@2.1.285
 
+      # --strict turns the validator's warnings into a failure, which is what
+      # you want in CI: an unknown top-level field, a name that is not
+      # kebab-case, or a missing version, description or author are all warnings
+      # the runtime tolerates and the directory does not. The listing fields this
+      # manifest sets are undocumented, so this flag is also the check that they
+      # stay recognized — if a CLI release stops knowing one, it becomes an
+      # unknown field and this job goes red.
       - name: Validate the plugin
-        run: ./node_modules/.bin/claude plugin validate ./plugin
+        run: ./node_modules/.bin/claude plugin validate ./plugin --strict
 
       # The directory blocks a plugin whose README is under 40 words, counting
       # only words outside code blocks, and that is the one portal check cheap

@@ -57,9 +57,14 @@ It sends no data anywhere and stores nothing. It cannot: there is no code in it
 to run. The only outbound requests are the ones you or Claude make by following
 a documentation link.
 
-## Licence
+## Licence, privacy and terms
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+- [Privacy policy](https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-privacy.md)
+  — nothing is collected, stored or sent; there is no code here to do it
+- [Terms of use](https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-terms.md)
+  — Apache-2.0, no warranty, no service
 
 TypeDB and TypeQL are trademarks of TypeDB Ltd., used here only to name the
 database and the query language these skills target.
