@@ -1047,6 +1047,22 @@ jobs:
       # The directory blocks a plugin whose README is under 40 words, counting
       # only words outside code blocks, and that is the one portal check cheap
       # enough to run here too.
+      - name: The plugin's classification uses only the directory's own values
+        # The portal's Validate (2026-10-01) drops a value outside its taxonomy;
+        # these are the lists it printed. A new value is checked there first.
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          c = json.load(open("plugin/.claude-plugin/plugin.json"))["classification"]
+          objects = {"code","databases","servers-cloud","logs-errors","files-documents","ai-models-agents","pipelines-jobs","websites","finances","tickets-tasks","email-messages","designs-media","reference-docs","dependencies-packages","music-podcasts","papers-articles","notes-memory","books","contacts-leads","pull-requests","problems-puzzles","courses-lessons","events-tickets","apis","claude-history","claude-settings","recipes-meals","workouts-health-records","trips"}
+          industries = {"health-life-sciences","financial-services","education","nonprofit","retail-ecommerce","travel-hospitality","media-entertainment","government","legal","real-estate","energy","manufacturing","transportation-logistics","utilities","agriculture","mining","construction","telecommunications","insurance","research-academia","events","fitness-wellness","agencies-staffing","software-saas"}
+          subjects = {"medicine","science","maths","languages","history","philosophy-religion","the-arts","computing","engineering","law","economics","politics-government","psychology","sociology-anthropology","geography","business-management","education"}
+          bad = [v for v in c.get("object_acted_on", []) if v not in objects]
+          bad += [c[k] for k, ok in (("industry", industries), ("subject", subjects)) if k in c and c[k] not in ok]
+          bad += [k for k in c if k not in {"object_acted_on", "work_department", "industry", "life_area", "subject"}]
+          print("classification:", "ok" if not bad else bad)
+          sys.exit(1 if bad else 0)
+          PY
       - name: The plugin README is long enough for the directory
         run: |
           words=$(python3 - <<'PY'
