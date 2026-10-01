@@ -18,7 +18,7 @@
   "termsOfServiceUrl": "https://github.com/NoeticEcho/TypedbEx/blob/main/docs/plugin-terms.md",
   "classification": {
     "object_acted_on": ["databases", "code"],
-    "work_department": "Engineering",
+    "work_department": "engineering",
     "industry": "software-saas",
     "subject": "computing"
   }
