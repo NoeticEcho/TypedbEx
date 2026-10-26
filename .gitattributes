@@ -4,5 +4,8 @@
 *.txt text eol=lf
 *.livemd text eol=lf
 
-# Everything else: normalise in the repository, let git decide on checkout.
-* text=auto
+# Everything else: normalise in the repository and check out as LF. Claude's
+# plugin directory refuses a line-ending rule without eol=lf on its own line
+# (it cannot know which bytes a checkout gives), and this repository is LF
+# everywhere anyway.
+* text=auto eol=lf
