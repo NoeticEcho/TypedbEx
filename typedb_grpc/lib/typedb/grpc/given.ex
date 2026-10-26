@@ -12,6 +12,7 @@ defmodule TypeDB.GRPC.Given do
   # and the transaction never hears of it.
 
   alias TypeDB.{Concept, Error}
+  alias TypeDB.GRPC.Vector
   alias Typedb.Protocol, as: Proto
 
   @min_int64 -Bitwise.bsl(1, 63)
@@ -140,7 +141,7 @@ defmodule TypeDB.GRPC.Given do
             )
     end
 
-    %Proto.Value{value: {:vector, %Proto.Value.Vector{values: floats}}}
+    Vector.value(floats)
   end
 
   def value(other) do

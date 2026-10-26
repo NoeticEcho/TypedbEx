@@ -16,8 +16,11 @@ worked before changes.
 - **Vector values, experimental.** Requires a TypeDB build with vector support;
   the wire format may change, and so may this API until TypeDB releases it. Uses
   the vector messages of typedb-protocol's `vector-search` branch (field 11 on
-  `Value` and `ValueType`), added by hand to the generated `concept.pb.ex` —
-  regenerating from a released protocol without them removes them again.
+  `Value` and `ValueType`). No released protocol defines that field, so the
+  generated code does not know it: protobuf keeps it among the message's unknown
+  fields, and a small hand-written module outside `lib/protocol` decodes it from
+  there and encodes it back. The generated code is untouched, so regenerating
+  the protocol from a released version cannot remove vector support.
 
   A vector decodes to what the HTTP transport produces for it, so the two stay
   interchangeable: an attribute or value whose `value` is a list of floats and
@@ -396,7 +399,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.4.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.0...HEAD
+[0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.4.0...typedb_grpc-v0.5.0
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...typedb_grpc-v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...typedb_grpc-v0.3.1
 [0.3.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.2.0...typedb_grpc-v0.3.0

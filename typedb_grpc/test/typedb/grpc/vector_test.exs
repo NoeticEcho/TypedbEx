@@ -7,8 +7,10 @@ defmodule TypeDB.GRPC.VectorTest do
 
   The fixtures are bytes rather than structs wherever the claim is about the
   wire: `Value.vector` is field 11, a message whose field 1 is a packed
-  `repeated float`. Written out by hand so that a regenerated protocol that
-  moved either number would fail here rather than in somebody's application.
+  `repeated float`. Written out by hand so that a change to either number would
+  fail here rather than in somebody's application. The generated protocol does
+  not know field 11 at all; `TypeDB.GRPC.Vector` reads it from the message's
+  unknown fields.
 
   The shape they decode to is the HTTP transport's — a list of floats and a
   `vector(N, "float32")` value type — because an application must not have to
@@ -16,7 +18,7 @@ defmodule TypeDB.GRPC.VectorTest do
   """
 
   alias TypeDB.{Concept, ConceptRow}
-  alias TypeDB.GRPC.{Decode, Given}
+  alias TypeDB.GRPC.{Decode, Given, Vector}
   alias Typedb.Protocol, as: Proto
 
   # `Value` as it was before vectors: fields 1–10, no 11. What a driver or a
@@ -36,6 +38,9 @@ defmodule TypeDB.GRPC.VectorTest do
   # Value { vector (11): Vector { values (1, packed): [1.0, 0.5] } }
   @vector_bytes <<0x5A, 10, 0x0A, 8, 1.0::float-32-little, 0.5::float-32-little>>
 
+  # ValueType { vector (11): Vector { dimension (1): 2 } }
+  @vector_type_bytes <<0x5A, 2, 0x08, 2>>
+
   defp vector_value(values, dimension \\ nil) do
     %Concept.Value{value: values, value_type: ~s|vector(#{dimension || length(values)}, "float32")|}
   end
@@ -46,6 +51,27 @@ defmodule TypeDB.GRPC.VectorTest do
 
       assert Decode.value(value) == [1.0, 0.5]
       assert Decode.value_type(value) == ~s|vector(2, "float32")|
+    end
+
+    test "is read from the unknown fields, so the generated protocol need not know field 11" do
+      value = Proto.Value.decode(@vector_bytes)
+
+      assert %Proto.Value{value: nil, __unknown_fields__: [{11, 2, _payload}]} = value
+      assert %Proto.ValueType{value_type: nil} = Proto.ValueType.decode(@vector_type_bytes)
+    end
+
+    test "a vector field that occurs twice is merged, as protobuf merges an embedded message" do
+      bytes = <<0x5A, 6, 0x0A, 4, 1.0::float-32-little, 0x5A, 6, 0x0A, 4, 0.5::float-32-little>>
+
+      assert Decode.value(Proto.Value.decode(bytes)) == [1.0, 0.5]
+    end
+
+    test "a field 11 that is not a vector message decodes to nil instead of failing the answer" do
+      # Field 1 of the payload claims 9 bytes and has 1.
+      value = Proto.Value.decode(<<0x5A, 3, 0x0A, 9, 0>>)
+
+      assert Decode.value(value) == nil
+      assert Decode.value_type(value) == nil
     end
 
     test "a float32 component widens to the same double the HTTP API reports" do
@@ -80,7 +106,7 @@ defmodule TypeDB.GRPC.VectorTest do
              value: Proto.Value.decode(@vector_bytes),
              attribute_type: %Proto.AttributeType{
                label: "embedding",
-               value_type: %Proto.ValueType{value_type: {:vector, %Proto.ValueType.Vector{dimension: 2}}}
+               value_type: Proto.ValueType.decode(@vector_type_bytes)
              }
            }}
       }
@@ -103,9 +129,7 @@ defmodule TypeDB.GRPC.VectorTest do
     end
 
     test "integer components are sent as floats" do
-      assert %Proto.Value{value: {:vector, %Proto.Value.Vector{values: values}}} =
-               Given.value(vector_value([1, 0]))
-
+      assert {:ok, values} = Vector.values(Given.value(vector_value([1, 0])))
       assert values === [1.0, +0.0]
     end
 
@@ -144,7 +168,7 @@ defmodule TypeDB.GRPC.VectorTest do
 
     test "float32's largest value is still sent" do
       <<max::float-32>> = <<0x7F7F_FFFF::32>>
-      assert %{value: {:vector, %{values: [^max, 0.0]}}} = Given.value(vector_value([max, 0]))
+      assert {:ok, [^max, +0.0]} = Vector.values(Given.value(vector_value([max, 0])))
     end
 
     test "a dtype other than float32 is an :encode error" do

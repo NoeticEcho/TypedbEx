@@ -24,8 +24,11 @@ defmodule Mix.Tasks.Typedb.Grpc.Gen do
 
   `protoc` and `protoc-gen-elixir` on `PATH`:
 
-      mix escript.install hex protobuf
+      mix escript.install hex protobuf 0.17.0   # the version in mix.lock
       # then add ~/.mix/escripts to PATH
+
+  The generator's version is written into every generated module, so a
+  different one rewrites every file, and CI's regenerate-and-diff check fails.
 
   ## Options
 

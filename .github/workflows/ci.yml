@@ -711,9 +711,15 @@ jobs:
 
       - run: mix deps.get
 
+      # The generator's version is stamped into every generated module, so it
+      # must be the protobuf the lock resolves — the latest one on hex would
+      # rewrite every header the day it is published.
       - name: Install protoc-gen-elixir
         run: |
-          mix escript.install hex protobuf --force
+          protobuf="$(sed -n 's/^  "protobuf": {:hex, :protobuf, "\([^"]*\)".*/\1/p' mix.lock)"
+          test -n "$protobuf" || { echo "no protobuf version in mix.lock" >&2; exit 1; }
+          echo "Installing protoc-gen-elixir $protobuf, from mix.lock"
+          mix escript.install hex protobuf "$protobuf" --force
           echo "$HOME/.mix/escripts" >> "$GITHUB_PATH"
 
       # `lib/protocol` is committed so that installing this package needs no

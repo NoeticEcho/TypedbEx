@@ -65,11 +65,13 @@ defmodule TypeDB.GRPC.APIConventionTest do
   # in and bytes out, with no operation of its own for a `!` twin to wrap.
   # `Given` is `@moduledoc false` plumbing behind `:given_rows`; it raises by
   # design, and `Transaction` turns that into the `{:error, _}` callers see.
-  @not_api ~w(Bang Telemetry Protocol Config Connection Decode Error Case Migration Given)
+  # `Vector` is `@moduledoc false` plumbing behind `Decode` and `Given`, and its
+  # nested message modules are plumbing with it.
+  @not_api ~w(Bang Telemetry Protocol Config Connection Decode Error Case Migration Given Vector)
 
   defp public_api?(module) do
     case inspect(module) do
-      "TypeDB.GRPC." <> rest -> rest not in @not_api
+      "TypeDB.GRPC." <> rest -> hd(String.split(rest, ".")) not in @not_api
       "TypeDB.GRPC" -> true
       _ -> false
     end

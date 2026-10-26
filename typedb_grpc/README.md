@@ -87,7 +87,7 @@ to speak it.
 ```elixir
 def deps do
   [
-    {:typedb_grpc, "~> 0.4.0"}
+    {:typedb_grpc, "~> 0.5.0"}
   ]
 end
 ```
@@ -187,7 +187,7 @@ explains what each one cost to learn.
 that installing this package does not require `protoc`. Regenerate with:
 
 ```sh
-mix escript.install hex protobuf   # once, and put ~/.mix/escripts on PATH
+mix escript.install hex protobuf 0.17.0   # once, the version in mix.lock; put ~/.mix/escripts on PATH
 mix typedb.grpc.gen 3.12.0
 ```
 

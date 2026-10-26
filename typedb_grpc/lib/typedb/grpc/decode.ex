@@ -37,12 +37,19 @@ defmodule TypeDB.GRPC.Decode do
   component that is not finite decodes to `nil`, because that is what the HTTP
   API's JSON has to make of it, and the two transports should not disagree.
 
+  The vector is field 11 of `Value` and of `ValueType`, defined on
+  typedb-protocol's `vector-search` branch and in no released protocol, so the
+  generated structs do not know it. Protobuf keeps it in their
+  `__unknown_fields__`, and it is read from there by a hand-written decoder
+  outside the generated code — regenerating the protocol cannot remove it.
+
   A server without vector support never sends the field, and one that sends a
   value kind this build does not know leaves the `oneof` unset: that value
   decodes to `nil` rather than failing the answer.
   """
 
   alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration}
+  alias TypeDB.GRPC.Vector
   alias Typedb.Protocol, as: Proto
 
   # TypeDB's decimal has a fixed fractional scale of 19 digits.
@@ -76,7 +83,13 @@ defmodule TypeDB.GRPC.Decode do
   @doc "A protobuf `Value` into the Elixir term it stands for."
   @spec value(Proto.Value.t()) :: term()
   def value(%Proto.Value{value: {tag, payload}}), do: scalar(tag, payload)
-  def value(%Proto.Value{value: nil}), do: nil
+
+  def value(%Proto.Value{value: nil} = value) do
+    case Vector.values(value) do
+      {:ok, values} -> vector(values)
+      :error -> nil
+    end
+  end
 
   @doc """
   The name TypeDB gives the value type of a `Value`, matching the strings the
@@ -84,11 +97,14 @@ defmodule TypeDB.GRPC.Decode do
   on both transports.
   """
   @spec value_type(Proto.Value.t()) :: String.t() | nil
-  def value_type(%Proto.Value{value: {:vector, %Proto.Value.Vector{values: values}}}),
-    do: vector_type(length(values))
-
   def value_type(%Proto.Value{value: {tag, _}}), do: value_type_name(tag)
-  def value_type(%Proto.Value{value: nil}), do: nil
+
+  def value_type(%Proto.Value{value: nil} = value) do
+    case Vector.values(value) do
+      {:ok, values} -> vector_type(length(values))
+      :error -> nil
+    end
+  end
 
   # -- rows ------------------------------------------------------------------
 
@@ -155,14 +171,14 @@ defmodule TypeDB.GRPC.Decode do
   end
 
   defp declared_value_type(nil), do: nil
-
-  defp declared_value_type(%Proto.ValueType{
-         value_type: {:vector, %Proto.ValueType.Vector{dimension: dimension}}
-       }),
-       do: vector_type(dimension)
-
   defp declared_value_type(%Proto.ValueType{value_type: {tag, _}}), do: value_type_name(tag)
-  defp declared_value_type(%Proto.ValueType{value_type: nil}), do: nil
+
+  defp declared_value_type(%Proto.ValueType{value_type: nil} = value_type) do
+    case Vector.dimension(value_type) do
+      {:ok, dimension} -> vector_type(dimension)
+      :error -> nil
+    end
+  end
 
   defp value_concept(%Proto.Value{} = value) do
     %Concept.Value{value: value(value), value_type: value_type(value)}
@@ -210,7 +226,7 @@ defmodule TypeDB.GRPC.Decode do
 
   # Protobuf hands a non-finite float over as an atom; JSON cannot carry one at
   # all, and the HTTP transport reads it as `nil`. Experimental, as above.
-  defp scalar(:vector, %Proto.Value.Vector{values: values}) do
+  defp vector(values) do
     Enum.map(values, fn
       value when is_float(value) -> value
       _infinity_or_nan -> nil

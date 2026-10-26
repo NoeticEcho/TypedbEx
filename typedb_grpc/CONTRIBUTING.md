@@ -77,7 +77,7 @@ that installing the package needs no `protoc`. Never edit it by hand — CI
 regenerates it and diffs, so a hand edit fails the build.
 
 ```sh
-mix escript.install hex protobuf   # once; put ~/.mix/escripts on PATH
+mix escript.install hex protobuf 0.17.0   # once, the version in mix.lock; put ~/.mix/escripts on PATH
 mix typedb.grpc.gen 3.12.0
 ```
 
