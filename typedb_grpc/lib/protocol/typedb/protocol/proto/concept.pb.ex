@@ -161,6 +161,17 @@ defmodule Typedb.Protocol.Value.Struct do
   field :struct_type_name, 1, type: :string, json_name: "structTypeName"
 end
 
+defmodule Typedb.Protocol.Value.Vector do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "typedb.protocol.Value.Vector",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :values, 1, repeated: true, type: :float, packed: true, deprecated: false
+end
+
 defmodule Typedb.Protocol.Value do
   @moduledoc false
 
@@ -186,6 +197,7 @@ defmodule Typedb.Protocol.Value do
 
   field :duration, 9, type: Typedb.Protocol.Value.Duration, oneof: 0
   field :struct, 10, type: Typedb.Protocol.Value.Struct, oneof: 0
+  field :vector, 11, type: Typedb.Protocol.Value.Vector, oneof: 0
 end
 
 defmodule Typedb.Protocol.Type do
@@ -350,6 +362,17 @@ defmodule Typedb.Protocol.ValueType.Struct do
   field :name, 1, type: :string
 end
 
+defmodule Typedb.Protocol.ValueType.Vector do
+  @moduledoc false
+
+  use Protobuf,
+    full_name: "typedb.protocol.ValueType.Vector",
+    protoc_gen_elixir_version: "0.17.0",
+    syntax: :proto3
+
+  field :dimension, 1, type: :uint32
+end
+
 defmodule Typedb.Protocol.ValueType do
   @moduledoc false
 
@@ -375,4 +398,5 @@ defmodule Typedb.Protocol.ValueType do
 
   field :duration, 9, type: Typedb.Protocol.ValueType.Duration, oneof: 0
   field :struct, 10, type: Typedb.Protocol.ValueType.Struct, oneof: 0
+  field :vector, 11, type: Typedb.Protocol.ValueType.Vector, oneof: 0
 end

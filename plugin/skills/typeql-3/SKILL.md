@@ -1,6 +1,6 @@
 ---
 name: typeql-3
-description: Correct TypeQL for TypeDB 3.x where it differs from what a reader expects — TypeDB 2.x forms that 3.x rejects, the error codes 3.x answers with and what each really means, and the annotations, literals and stage rules that are easy to get wrong. Use when a TypeQL query or define is rejected, when a TypeDB error code such as TQL0, SYR1, SYR9, INF2, DEX31, REX3, SVL50, SVL51, LIT255 or CNT9 needs explaining, when a TypeDB schema is being written or migrated, or when code carries TypeDB 2.x habits such as sub entity, get, rule or a trailing count.
+description: Correct TypeQL for TypeDB 3.x where it differs from what a reader expects — TypeDB 2.x forms that 3.x rejects, the error codes 3.x answers with and what each really means, and the annotations, literals and stage rules that are easy to get wrong. Use when a TypeQL query or define is rejected, when a TypeDB error code such as TQL0, SYR1, SYR9, INF2, DEX31, REX3, SVL50, SVL51, LIT255 or CNT9 needs explaining, when a TypeDB schema is being written or migrated, or when code carries TypeDB 2.x habits such as sub entity, get, rule or a trailing count. Also covers vector attributes and cosine_similarity_search (preview).
 ---
 
 # TypeQL 3, where it surprises people
@@ -199,6 +199,48 @@ move it back.
 | `CNT9` | a `@key` or `@unique` violation, raised on the `insert`, not at commit |
 | `FER20` | a `fetch` subquery with no `fetch` in it |
 | `QEX21` | a `given` stage with no rows supplied |
+
+## Vectors (preview)
+
+**Preview: this needs a TypeDB build with vector support, which released TypeDB
+does not have yet, and the syntax may change before it does.** Unlike the rest
+of this skill, it was run against such a build rather than CE 3.12.1.
+
+A vector is a value type with a dimension and a dtype. `float32` is the only
+dtype, and the dimension is 1 to 65535 (`SYR18` outside that):
+
+```typeql
+define
+  attribute content, value string;
+  attribute embedding, value vector(3, "float32");
+  entity doc, owns content, owns embedding;
+```
+
+A literal names its dtype too. A list whose length differs from the declared
+dimension is refused with `DVL15`:
+
+```typeql
+insert $d isa doc, has content "cats", has embedding vector([0.9, 0.1, 0.0], "float32");
+```
+
+Search is `cosine_similarity_search(<attribute type>, <query vector>, <threshold>)`,
+bound with `let ... in` in a `match`. It yields every attribute of that type
+whose cosine similarity to the query vector is at least the threshold. The first
+argument must be a type label, not a variable (`REP257`), and the score itself
+is not returned:
+
+```typeql
+match
+  let $e in cosine_similarity_search(embedding, vector([1.0, 0.0, 0.0], "float32"), 0.9);
+  $d isa doc, has content $c, has embedding $e;
+select $c;
+```
+
+In application code, the query vector comes in through a `given` row rather
+than being written into the query:
+`given $q: vector(3, "float32"); match let $e in cosine_similarity_search(embedding, $q, 0.9); ...`.
+A given vector whose length differs from its declared dimension is `PEX9`.
+The `typedb-elixir-driver` skill shows how to pass one from Elixir.
 
 ## Checking a query without running it
 

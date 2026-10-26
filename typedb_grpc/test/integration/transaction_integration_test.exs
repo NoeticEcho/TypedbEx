@@ -602,6 +602,49 @@ defmodule TypeDB.GRPC.TransactionIntegrationTest do
     end
   end
 
+  describe "a given value this transport cannot encode" do
+    # It used to raise inside the transaction's own process, which took the
+    # transaction down and reached the caller as an exit dressed up as
+    # `:transport` — a bad argument reported as a broken network, with the work
+    # done so far in that transaction lost with it.
+    test "is an :encode error, and the transaction survives it", %{conn: conn, database: database} do
+      {:ok, tx} = Transaction.open(conn, database, :write)
+      on_exit(fn -> Transaction.close(tx) end)
+
+      assert {:ok, _} = Transaction.query(tx, "insert $p isa person, has name 'before';")
+
+      assert {:error, %TypeDB.Error{kind: :encode}} =
+               Transaction.query(tx, "given $n: string; insert $p isa person, has name == $n;",
+                 given_rows: [%{"n" => {:not, :a, :value}}]
+               )
+
+      assert {:error, %TypeDB.Error{kind: :encode}} =
+               Transaction.query_many(tx, [
+                 {"given $n: string; insert $p isa person, has name == $n;", given_rows: [%{"n" => self()}]}
+               ])
+
+      assert {:error, %TypeDB.Error{kind: :encode}} =
+               Transaction.execute_many(tx, [
+                 {"given $n: string; insert $p isa person, has name == $n;", given_rows: [:not_a_row]}
+               ])
+
+      assert_raise TypeDB.Error, fn ->
+        tx
+        |> Transaction.stream("given $n: string; match $p isa person, has name == $n;",
+          given_rows: [%{"n" => make_ref()}]
+        )
+        |> Enum.to_list()
+      end
+
+      assert Transaction.open?(tx)
+      assert {:ok, _} = Transaction.query(tx, "insert $p isa person, has name 'after';")
+      assert :ok = Transaction.commit(tx)
+
+      assert count_named(conn, database, "before") == 1
+      assert count_named(conn, database, "after") == 1
+    end
+  end
+
   defp count_like(conn, database, pattern) do
     {:ok, answer} =
       Transaction.transaction(conn, database, :read, fn tx ->

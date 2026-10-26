@@ -25,6 +25,21 @@ defmodule TypeDB.GRPC.Decode do
   That last one is a small win over the HTTP transport: this driver never has to
   emit or parse an ISO-8601 duration, so the negative-component problem the
   sibling documents cannot arise here.
+
+  ## Vectors (experimental)
+
+  Requires a TypeDB build with vector support; the wire format may change.
+
+  A `vector(N, "float32")` value decodes to what the HTTP transport produces for
+  it: a list of floats, with `value_type` the string `vector(N, "float32")`. The
+  protobuf message carries the floats and nothing else, so the dimension is the
+  list's length and the dtype is `float32`, the only one TypeQL accepts. A
+  component that is not finite decodes to `nil`, because that is what the HTTP
+  API's JSON has to make of it, and the two transports should not disagree.
+
+  A server without vector support never sends the field, and one that sends a
+  value kind this build does not know leaves the `oneof` unset: that value
+  decodes to `nil` rather than failing the answer.
   """
 
   alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration}
@@ -69,6 +84,9 @@ defmodule TypeDB.GRPC.Decode do
   on both transports.
   """
   @spec value_type(Proto.Value.t()) :: String.t() | nil
+  def value_type(%Proto.Value{value: {:vector, %Proto.Value.Vector{values: values}}}),
+    do: vector_type(length(values))
+
   def value_type(%Proto.Value{value: {tag, _}}), do: value_type_name(tag)
   def value_type(%Proto.Value{value: nil}), do: nil
 
@@ -137,6 +155,12 @@ defmodule TypeDB.GRPC.Decode do
   end
 
   defp declared_value_type(nil), do: nil
+
+  defp declared_value_type(%Proto.ValueType{
+         value_type: {:vector, %Proto.ValueType.Vector{dimension: dimension}}
+       }),
+       do: vector_type(dimension)
+
   defp declared_value_type(%Proto.ValueType{value_type: {tag, _}}), do: value_type_name(tag)
   defp declared_value_type(%Proto.ValueType{value_type: nil}), do: nil
 
@@ -183,6 +207,15 @@ defmodule TypeDB.GRPC.Decode do
   # enough to build anything from. Returned as the name rather than as nil, so a
   # caller can at least tell what it was.
   defp scalar(:struct, %Proto.Value.Struct{struct_type_name: name}), do: {:struct, name}
+
+  # Protobuf hands a non-finite float over as an atom; JSON cannot carry one at
+  # all, and the HTTP transport reads it as `nil`. Experimental, as above.
+  defp scalar(:vector, %Proto.Value.Vector{values: values}) do
+    Enum.map(values, fn
+      value when is_float(value) -> value
+      _infinity_or_nan -> nil
+    end)
+  end
 
   # A `datetime` is the wall clock TypeDB was given, with no zone attached, so it
   # decodes to a `NaiveDateTime` — the same thing the sibling produces from the
@@ -350,4 +383,7 @@ defmodule TypeDB.GRPC.Decode do
   defp value_type_name(:datetime_tz), do: "datetime-tz"
   defp value_type_name(:duration), do: "duration"
   defp value_type_name(:struct), do: "struct"
+
+  # The spelling the HTTP API uses, so the string matches across transports.
+  defp vector_type(dimension), do: ~s|vector(#{dimension}, "float32")|
 end

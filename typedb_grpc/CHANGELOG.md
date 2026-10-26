@@ -6,6 +6,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+A minor release: one new, experimental capability and one fix. Nothing that
+worked before changes.
+
+### Added
+
+- **Vector values, experimental.** Requires a TypeDB build with vector support;
+  the wire format may change, and so may this API until TypeDB releases it. Uses
+  the vector messages of typedb-protocol's `vector-search` branch (field 11 on
+  `Value` and `ValueType`), added by hand to the generated `concept.pb.ex` —
+  regenerating from a released protocol without them removes them again.
+
+  A vector decodes to what the HTTP transport produces for it, so the two stay
+  interchangeable: an attribute or value whose `value` is a list of floats and
+  whose `value_type` is `vector(N, "float32")`, and an attribute type whose
+  `value_type` is the same string. A non-finite component decodes to `nil`, as
+  it does over HTTP.
+
+  To send one as a `given` value, pass the term that also works with `typedb`:
+
+      Transaction.query(tx, ~s|given $q: vector(3, "float32"); match ...|,
+        given_rows: [%{"q" => %TypeDB.Concept.Value{value: [0.1, 0.2, 0.3], value_type: ~s|vector(3, "float32")|}}]
+      )
+
+  Protobuf carries only the floats, so the declared dimension is checked before
+  sending: a list of the wrong length is an `:encode` error rather than
+  something the server cannot see.
+
+  A server without vector support never sends the field, and one sending a
+  value kind this build does not know leaves it unset — such a value decodes to
+  `nil` instead of failing the answer. Pinned with protobuf fixtures, including
+  the pre-vector schema decoding a vector as an unset value.
+
+### Fixed
+
+- **A `given` value this transport cannot encode no longer kills the
+  transaction.** The rows were encoded inside the transaction's process, so a
+  term with no TypeDB value raised there: the transaction died, the caller got
+  `{:error, %TypeDB.Error{kind: :transport}}` for what was a bad argument, and
+  the transaction's uncommitted work was lost. Requests are now built in the
+  caller's process; such a value is `{:error, %TypeDB.Error{kind: :encode}}`
+  from `query/3`, `query_many/3` and `execute_many/3` (and a raised `:encode`
+  error from `stream/3`), and the transaction stays open and usable.
+
+  The same path now also refuses, as `:encode`, what used to pass the encoder
+  and fail while the request was being sent: `given_rows` that are not a list
+  of maps, an integer outside `sint64`, and a string that is not valid UTF-8.
+  Atom keys in a row are accepted, as `typedb` accepts them.
+
 ## [0.4.0] - 2026-09-29
 
 ### Changed

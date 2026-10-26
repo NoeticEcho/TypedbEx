@@ -1,7 +1,7 @@
 {
   "name": "typedbex",
   "displayName": "TypedbEx — TypeDB for Elixir",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Write correct TypeQL 3 and idiomatic Elixir against TypeDB, using the community-maintained typedb and typedb_grpc driver packages. Not affiliated with or endorsed by TypeDB Ltd.",
   "author": {
     "name": "NoeticEcho",
