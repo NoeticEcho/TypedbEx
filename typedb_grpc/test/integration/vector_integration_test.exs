@@ -3,14 +3,14 @@ defmodule TypeDB.GRPC.VectorIntegrationTest do
   Vector values against a live server — experimental, and only meaningful
   against a TypeDB build with vector support, which a stock release is not.
 
-  Tagged `:vector_alpha` and *not* `:integration`: ExUnit runs a test that
+  Tagged `:vector_preview` and *not* `:integration`: ExUnit runs a test that
   matches any `--include`, so the second tag would pull this into every
   ordinary integration run, where a server without vectors fails the schema
   below. To run it:
 
       TYPEDB_GRPC_ADDRESS=127.0.0.1:1729 \\
       TYPEDB_INTEGRATION_URL=http://127.0.0.1:8000 \\
-        mix test --include vector_alpha test/integration/vector_integration_test.exs
+        mix test --include vector_preview test/integration/vector_integration_test.exs
 
   With `TYPEDB_INTEGRATION_URL` set as well, the same value is also read over
   HTTP and compared, which is the claim that matters: an application reads the
@@ -19,7 +19,7 @@ defmodule TypeDB.GRPC.VectorIntegrationTest do
 
   use TypeDB.GRPC.Case, async: false
 
-  @moduletag :vector_alpha
+  @moduletag :vector_preview
 
   alias TypeDB.{Answer, Concept, ConceptRow}
   alias TypeDB.GRPC.Transaction

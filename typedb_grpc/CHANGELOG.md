@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
 A minor release: one new, experimental capability and one fix. Nothing that
 worked before changes.
 
@@ -31,7 +33,8 @@ worked before changes.
 
   Protobuf carries only the floats, so the declared dimension is checked before
   sending: a list of the wrong length is an `:encode` error rather than
-  something the server cannot see.
+  something the server cannot see. So is a component outside float32's range,
+  which the wire cannot hold.
 
   A server without vector support never sends the field, and one sending a
   value kind this build does not know leaves it unset — such a value decodes to
@@ -52,7 +55,8 @@ worked before changes.
   The same path now also refuses, as `:encode`, what used to pass the encoder
   and fail while the request was being sent: `given_rows` that are not a list
   of maps, an integer outside `sint64`, and a string that is not valid UTF-8.
-  Atom keys in a row are accepted, as `typedb` accepts them.
+  Atom keys in a row are accepted, as `typedb` accepts them; a row holding the
+  same name as an atom and as a string keeps one of the two, as it does there.
 
 ## [0.4.0] - 2026-09-29
 

@@ -135,6 +135,18 @@ defmodule TypeDB.GRPC.VectorTest do
       assert error.kind == :encode
     end
 
+    test "a component past float32's range is an :encode error, raised in the caller" do
+      for big <- [1.0e39, -1.0e39, 10 ** 400] do
+        error = assert_raise TypeDB.Error, fn -> Given.value(vector_value([big, 0.0])) end
+        assert error.kind == :encode
+      end
+    end
+
+    test "float32's largest value is still sent" do
+      <<max::float-32>> = <<0x7F7F_FFFF::32>>
+      assert %{value: {:vector, %{values: [^max, 0.0]}}} = Given.value(vector_value([max, 0]))
+    end
+
     test "a dtype other than float32 is an :encode error" do
       error =
         assert_raise TypeDB.Error, ~r/unsupported vector type/, fn ->

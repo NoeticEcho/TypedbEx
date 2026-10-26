@@ -130,15 +130,17 @@ defmodule TypeDB.GRPC.Given do
   def value(%Concept.Value{value: values, value_type: "vector(" <> _ = value_type}) do
     dimension = vector_dimension!(value_type)
 
-    unless is_list(values) and length(values) == dimension and Enum.all?(values, &is_number/1) do
+    floats = if is_list(values), do: Enum.map(values, &float32/1), else: [:error]
+
+    unless length(floats) == dimension and :error not in floats do
       raise Error.new(
               :encode,
               "cannot encode #{inspect(values, limit: 5)} as a #{value_type}: " <>
-                "expected a list of #{dimension} numbers"
+                "expected a list of #{dimension} numbers, each a finite float32"
             )
     end
 
-    %Proto.Value{value: {:vector, %Proto.Value.Vector{values: Enum.map(values, &(&1 * 1.0))}}}
+    %Proto.Value{value: {:vector, %Proto.Value.Vector{values: floats}}}
   end
 
   def value(other) do
@@ -149,6 +151,20 @@ defmodule TypeDB.GRPC.Given do
               "TypeDB.Concept.Value"
           )
   end
+
+  # A component as the float32 the message packs it into, or :error. A float
+  # past float32's range would raise in protobuf's encoder, which runs in the
+  # transaction's process, and an integer past a double's would raise here.
+  @float32_max (fn ->
+                  <<max::float-32>> = <<0x7F7F_FFFF::32>>
+                  max
+                end).()
+  defp float32(x) when is_integer(x) do
+    if abs(x) <= @float32_max, do: x * 1.0, else: :error
+  end
+
+  defp float32(x) when is_float(x) and abs(x) <= @float32_max, do: x
+  defp float32(_x), do: :error
 
   # `float32` is the only dtype TypeQL accepts for a vector.
   defp vector_dimension!(value_type) do
