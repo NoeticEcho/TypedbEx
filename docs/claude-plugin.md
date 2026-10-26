@@ -131,11 +131,13 @@ abandoned in the listing.
 is `typedbex`, the repository's own name, rather than anything built on
 `typedb`.
 
-Adding the listing fields did **not** move `version`: it stays at `0.11.0`, the
-driver's version. Nothing in the manifest forces a bump — `version` exists to pin
-installs, and the three skills are byte-for-byte unchanged, so there is no new
-behaviour for an installed copy to pick up. It rises with the driver's next
-release, as above.
+Adding the listing fields did **not** move `version`: the skills were
+byte-for-byte unchanged, so there was nothing new for an installed copy to pick
+up. `version` exists to pin installs, so it moves when the skills change. It
+started at the driver's version, 0.11.0. A change to the skills alone is a patch
+of the plugin's own: 0.11.1 added «Vectors (preview)», with `typedb_grpc` 0.5.0.
+A driver release that changes what the skills describe moves it to that
+driver's version.
 
 ## Checking it
 

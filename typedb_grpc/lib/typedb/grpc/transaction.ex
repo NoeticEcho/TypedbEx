@@ -90,7 +90,7 @@ defmodule TypeDB.GRPC.Transaction do
 
   use TypeDB.GRPC.Bang
   alias TypeDB.{Answer, Error}
-  alias TypeDB.GRPC.{Connection, Decode, Telemetry}
+  alias TypeDB.GRPC.{Connection, Decode, Given, Telemetry}
   alias TypeDB.GRPC.Error, as: GRPCError
   alias Typedb.Protocol, as: Proto
 
@@ -138,7 +138,10 @@ defmodule TypeDB.GRPC.Transaction do
   ## Options
 
     * `:given_rows` — rows for TypeQL's `given` stage, in the same shape the
-      sibling driver takes
+      sibling driver takes. A value this transport cannot encode is
+      `{:error, %TypeDB.Error{kind: :encode}}`, and the transaction stays open.
+      A vector is passed as a `TypeDB.Concept.Value` with a
+      `vector(N, "float32")` value type — experimental, see `TypeDB.GRPC.Decode`
     * `:timeout` — how long to wait for the answer
     * `:include_instance_types` — ask the server to attach the type of every
       instance in the answer
@@ -487,7 +490,10 @@ defmodule TypeDB.GRPC.Transaction do
       |> put_query_count(message)
 
     Telemetry.span_operation(metadata, fn ->
-      result = do_call(tx.pid, message, timeout)
+      result =
+        with {:ok, message} <- build_requests(message) do
+          do_call(tx.pid, message, timeout)
+        end
 
       {result,
        case result do
@@ -509,6 +515,25 @@ defmodule TypeDB.GRPC.Transaction do
   end
 
   defp put_query_count(metadata, _), do: metadata
+
+  # Query requests are built here, in the caller, and only then handed to the
+  # transaction. Building them inside `handle_call/3` meant a `given` value that
+  # could not be encoded raised in the transaction's process: it died, the
+  # caller saw `:transport`, and the transaction's work was lost over a bad
+  # argument. Now that is an `:encode` error and the transaction carries on.
+  defp build_requests({op, queries}) when op in [:query_many, :execute_many] do
+    {:ok, {op, Enum.map(queries, fn {query, opts} -> query_request(query, opts) end)}}
+  rescue
+    error in Error -> {:error, error}
+  end
+
+  defp build_requests({:stream_start, query, opts}) do
+    {:ok, {:stream_start, query_request(query, opts)}}
+  rescue
+    error in Error -> {:error, error}
+  end
+
+  defp build_requests(message), do: {:ok, message}
 
   defp do_call(pid, message, timeout) do
     GenServer.call(pid, message, timeout)
@@ -641,16 +666,11 @@ defmodule TypeDB.GRPC.Transaction do
   end
 
   @impl GenServer
-  def handle_call({:query_many, queries}, from, state) do
+  def handle_call({:query_many, requests}, from, state) do
     {reqs, pending} =
-      Enum.map_reduce(queries, state.pending, fn {query, opts}, acc ->
+      Enum.map_reduce(requests, state.pending, fn request, acc ->
         id = request_id()
-
-        req = %Proto.Transaction.Req{
-          req_id: id,
-          req: {:query_req, query_request(query, opts)}
-        }
-
+        req = %Proto.Transaction.Req{req_id: id, req: {:query_req, request}}
         {req, Map.put(acc, id, new_accumulator())}
       end)
 
@@ -660,11 +680,11 @@ defmodule TypeDB.GRPC.Transaction do
     {:noreply, register_call(%{state | pending: pending}, from, ids)}
   end
 
-  def handle_call({:execute_many, queries}, from, state) do
+  def handle_call({:execute_many, requests}, from, state) do
     {reqs, pending} =
-      Enum.map_reduce(queries, state.pending, fn {query, opts}, acc ->
+      Enum.map_reduce(requests, state.pending, fn request, acc ->
         id = request_id()
-        req = %Proto.Transaction.Req{req_id: id, req: {:query_req, query_request(query, opts)}}
+        req = %Proto.Transaction.Req{req_id: id, req: {:query_req, request}}
         {req, Map.put(acc, id, %{new_accumulator() | discard: true})}
       end)
 
@@ -674,9 +694,9 @@ defmodule TypeDB.GRPC.Transaction do
     {:noreply, register_call(%{state | pending: pending}, from, ids)}
   end
 
-  def handle_call({:stream_start, query, opts}, _from, state) do
+  def handle_call({:stream_start, request}, _from, state) do
     id = request_id()
-    send_reqs(state, [%Proto.Transaction.Req{req_id: id, req: {:query_req, query_request(query, opts)}}])
+    send_reqs(state, [%Proto.Transaction.Req{req_id: id, req: {:query_req, request}}])
 
     accumulator = %{
       mode: :stream,
@@ -1183,7 +1203,7 @@ defmodule TypeDB.GRPC.Transaction do
     %Proto.Query.Req{
       query: query,
       options: query_options(opts),
-      given: given_rows(opts[:given_rows])
+      given: Given.encode_rows(opts[:given_rows])
     }
   end
 
@@ -1203,85 +1223,6 @@ defmodule TypeDB.GRPC.Transaction do
     if opts[:include_plan] != nil do
       %Proto.Options.Analyze{include_plan: opts[:include_plan]}
     end
-  end
-
-  defp given_rows(nil), do: nil
-  defp given_rows([]), do: nil
-
-  defp given_rows(rows) when is_list(rows) do
-    variables = rows |> hd() |> Map.keys() |> Enum.sort()
-
-    %Proto.Query.Req.GivenRows{
-      variables: variables,
-      rows:
-        Enum.map(rows, fn row ->
-          %Proto.Query.Req.GivenRow{
-            entries: Enum.map(variables, &given_entry(Map.get(row, &1)))
-          }
-        end)
-    }
-  end
-
-  defp given_entry(nil),
-    do: %Proto.Query.Req.GivenEntry{entry: {:empty, %Proto.Query.Req.GivenEntry.EmptyEntry{}}}
-
-  defp given_entry(value) do
-    %Proto.Query.Req.GivenEntry{entry: {:value, encode_value(value)}}
-  end
-
-  defp encode_value(value) when is_boolean(value), do: %Proto.Value{value: {:boolean, value}}
-  defp encode_value(value) when is_integer(value), do: %Proto.Value{value: {:integer, value}}
-  defp encode_value(value) when is_float(value), do: %Proto.Value{value: {:double, value}}
-  defp encode_value(value) when is_binary(value), do: %Proto.Value{value: {:string, value}}
-
-  defp encode_value(%Date{} = date) do
-    %Proto.Value{value: {:date, %Proto.Value.Date{num_days_since_ce: Date.diff(date, ~D[0001-01-01]) + 1}}}
-  end
-
-  defp encode_value(%DateTime{} = datetime) do
-    nanos = DateTime.to_unix(datetime, :nanosecond)
-
-    %Proto.Value{
-      value:
-        {:datetime,
-         %Proto.Value.Datetime{seconds: div(nanos, 1_000_000_000), nanos: rem(nanos, 1_000_000_000)}}
-    }
-  end
-
-  # `NaiveDateTime` is TypeDB's `datetime`, and it is here because the sibling both writes
-  # AND READS it: `TypeDB.Given` maps `NaiveDateTime.t()` to `datetime`, and
-  # `TypeDB.Concept` decodes a `datetime` back into one. Without this clause a value read
-  # from the graph could not be written back to it through this transport — the round trip
-  # was broken in one direction only, which is the shape that survives a test suite.
-  #
-  # Measured 10.09.2026 in a consumer's migrator, which passes the moment a migration was
-  # applied as a `given` row: `no TypeDB value for ~N[2026-09-10 18:01:03.282]`, and with
-  # it every test that stands a graph up in `setup_all` — fourteen modules invalidated at
-  # once, none of them about datetimes.
-  #
-  # Read as UTC deliberately. TypeDB's `datetime` carries no zone, so there is nothing to
-  # convert *to* and nothing to guess: this encodes the wall clock it was given, which is
-  # what the sibling's ISO-8601 string does as well.
-  defp encode_value(%NaiveDateTime{} = naive) do
-    nanos = naive |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:nanosecond)
-
-    %Proto.Value{
-      value:
-        {:datetime,
-         %Proto.Value.Datetime{seconds: div(nanos, 1_000_000_000), nanos: rem(nanos, 1_000_000_000)}}
-    }
-  end
-
-  defp encode_value(%TypeDB.Duration{months: months, days: days, nanos: nanos}) do
-    %Proto.Value{value: {:duration, %Proto.Value.Duration{months: months, days: days, nanos: nanos}}}
-  end
-
-  defp encode_value(other) do
-    raise Error.new(
-            :encode,
-            "no TypeDB value for #{inspect(other)} — supported: boolean, integer, float, string, " <>
-              "Date, DateTime, NaiveDateTime and TypeDB.Duration"
-          )
   end
 
   # -- helpers ---------------------------------------------------------------

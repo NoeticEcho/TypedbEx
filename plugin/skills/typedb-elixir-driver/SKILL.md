@@ -9,7 +9,7 @@ Two community packages, one API shape: **`typedb`** over TypeDB's HTTP API v1,
 and **`typedb_grpc`** over gRPC. Neither is TypeDB Ltd.'s official driver.
 
 Every function named here is in the **documented** public API of `typedb`
-0.11.0. Anything not listed in the reference at
+0.11.0, except `TypeDB.GRPC.query/4`, which is `typedb_grpc`'s. Anything not listed in the reference at
 <https://hexdocs.pm/typedb> is internal and may change in a patch release, so do
 not call it even if it exists.
 
@@ -377,6 +377,50 @@ measured reasons:
 
 Concepts decode into the same `TypeDB.Concept` structs and failures arrive as
 the same `%TypeDB.Error{}`, so switching is not a rewrite.
+
+## Vectors (preview)
+
+**Preview: this needs a TypeDB build with vector support, which released TypeDB
+does not have yet, and the API may change, both TypeDB's and this one.** Over gRPC it
+also needs a `typedb_grpc` release that lists vector support in its changelog;
+older ones read a vector as `nil`. For the TypeQL side (declaring a
+`vector(N, "float32")` attribute, literals, `cosine_similarity_search`), see the
+`typeql-3` skill.
+
+A vector reads back as a list of floats, with `value_type` set to the string
+`vector(N, "float32")`. Both transports produce the same term. The values are
+`float32` widened to Elixir floats, so `0.1` reads back as `0.10000000149011612`.
+Compare with a tolerance, not with `==`.
+
+To send one, pass a `%TypeDB.Concept.Value{}` that names the type. Both
+transports accept the same term, so the same rows work with `TypeDB.query/4`
+and with `TypeDB.GRPC.query/4`:
+
+```elixir
+vector = fn values -> %TypeDB.Concept.Value{value: values, value_type: ~s|vector(3, "float32")|} end
+
+# insert
+TypeDB.query(conn, "docs", """
+  given $c: string, $v: vector(3, "float32");
+  insert $d isa doc, has content == $c, has embedding == $v;
+""", transaction_type: :write, given_rows: [%{"c" => "cats", "v" => vector.([0.9, 0.1, 0.0])}])
+
+# search: the query vector is a given row too, never text in the query
+TypeDB.GRPC.query(grpc_conn, "docs", """
+  given $q: vector(3, "float32");
+  match
+    let $e in cosine_similarity_search(embedding, $q, 0.8);
+    $d isa doc, has content $c, has embedding $e;
+  select $c;
+""", transaction_type: :read, given_rows: [%{"q" => vector.(embed(user_text))}])
+```
+
+A bare list is not a vector: `given_rows: [%{"q" => [0.9, 0.1, 0.0]}]` is an
+`:encode` error on both transports. `typedb` raises it, and `typedb_grpc`
+returns it as `{:error, %TypeDB.Error{kind: :encode}}`. The list's length must match the `N` in
+`value_type`. Over gRPC the driver checks this before sending, because the wire
+format carries only the floats, and a mismatch is an `:encode` error. Over HTTP
+the server refuses it with `PEX9`.
 
 ## Three adapters, one behaviour
 

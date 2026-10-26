@@ -25,9 +25,31 @@ defmodule TypeDB.GRPC.Decode do
   That last one is a small win over the HTTP transport: this driver never has to
   emit or parse an ISO-8601 duration, so the negative-component problem the
   sibling documents cannot arise here.
+
+  ## Vectors (experimental)
+
+  Requires a TypeDB build with vector support; the wire format may change.
+
+  A `vector(N, "float32")` value decodes to what the HTTP transport produces for
+  it: a list of floats, with `value_type` the string `vector(N, "float32")`. The
+  protobuf message carries the floats and nothing else, so the dimension is the
+  list's length and the dtype is `float32`, the only one TypeQL accepts. A
+  component that is not finite decodes to `nil`, because that is what the HTTP
+  API's JSON has to make of it, and the two transports should not disagree.
+
+  The vector is field 11 of `Value` and of `ValueType`, defined on
+  typedb-protocol's `vector-search` branch and in no released protocol, so the
+  generated structs do not know it. Protobuf keeps it in their
+  `__unknown_fields__`, and it is read from there by a hand-written decoder
+  outside the generated code — regenerating the protocol cannot remove it.
+
+  A server without vector support never sends the field, and one that sends a
+  value kind this build does not know leaves the `oneof` unset: that value
+  decodes to `nil` rather than failing the answer.
   """
 
   alias TypeDB.{Concept, ConceptRow, DateTimeTZ, Duration}
+  alias TypeDB.GRPC.Vector
   alias Typedb.Protocol, as: Proto
 
   # TypeDB's decimal has a fixed fractional scale of 19 digits.
@@ -61,7 +83,13 @@ defmodule TypeDB.GRPC.Decode do
   @doc "A protobuf `Value` into the Elixir term it stands for."
   @spec value(Proto.Value.t()) :: term()
   def value(%Proto.Value{value: {tag, payload}}), do: scalar(tag, payload)
-  def value(%Proto.Value{value: nil}), do: nil
+
+  def value(%Proto.Value{value: nil} = value) do
+    case Vector.values(value) do
+      {:ok, values} -> vector(values)
+      :error -> nil
+    end
+  end
 
   @doc """
   The name TypeDB gives the value type of a `Value`, matching the strings the
@@ -70,7 +98,13 @@ defmodule TypeDB.GRPC.Decode do
   """
   @spec value_type(Proto.Value.t()) :: String.t() | nil
   def value_type(%Proto.Value{value: {tag, _}}), do: value_type_name(tag)
-  def value_type(%Proto.Value{value: nil}), do: nil
+
+  def value_type(%Proto.Value{value: nil} = value) do
+    case Vector.values(value) do
+      {:ok, values} -> vector_type(length(values))
+      :error -> nil
+    end
+  end
 
   # -- rows ------------------------------------------------------------------
 
@@ -138,7 +172,13 @@ defmodule TypeDB.GRPC.Decode do
 
   defp declared_value_type(nil), do: nil
   defp declared_value_type(%Proto.ValueType{value_type: {tag, _}}), do: value_type_name(tag)
-  defp declared_value_type(%Proto.ValueType{value_type: nil}), do: nil
+
+  defp declared_value_type(%Proto.ValueType{value_type: nil} = value_type) do
+    case Vector.dimension(value_type) do
+      {:ok, dimension} -> vector_type(dimension)
+      :error -> nil
+    end
+  end
 
   defp value_concept(%Proto.Value{} = value) do
     %Concept.Value{value: value(value), value_type: value_type(value)}
@@ -183,6 +223,15 @@ defmodule TypeDB.GRPC.Decode do
   # enough to build anything from. Returned as the name rather than as nil, so a
   # caller can at least tell what it was.
   defp scalar(:struct, %Proto.Value.Struct{struct_type_name: name}), do: {:struct, name}
+
+  # Protobuf hands a non-finite float over as an atom; JSON cannot carry one at
+  # all, and the HTTP transport reads it as `nil`. Experimental, as above.
+  defp vector(values) do
+    Enum.map(values, fn
+      value when is_float(value) -> value
+      _infinity_or_nan -> nil
+    end)
+  end
 
   # A `datetime` is the wall clock TypeDB was given, with no zone attached, so it
   # decodes to a `NaiveDateTime` — the same thing the sibling produces from the
@@ -350,4 +399,7 @@ defmodule TypeDB.GRPC.Decode do
   defp value_type_name(:datetime_tz), do: "datetime-tz"
   defp value_type_name(:duration), do: "duration"
   defp value_type_name(:struct), do: "struct"
+
+  # The spelling the HTTP API uses, so the string matches across transports.
+  defp vector_type(dimension), do: ~s|vector(#{dimension}, "float32")|
 end
