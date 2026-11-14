@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-14
+
+Tests only: the vector test follows the TypeDB build it is pinned to.
+
+### Changed
+
+- `test/integration/vector_integration_test.exs` runs against the build
+  `3.14.1-dev` at commit `11ab292c`, where vector search changed shape: the
+  attribute declares `@index(hnsw:cosine)`, and the search binds two
+  variables, `let $e, $score in cosine_similarity_search(...)`. The committed
+  test used neither and failed there. A new test sorts on `$score` and checks
+  it decodes as a float. The driver's code is unchanged: the score is an
+  ordinary `double`.
+
 ## [0.5.0] - 2026-10-26
 
 A minor release: one new, experimental capability and one fix. Nothing that
@@ -399,7 +413,8 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.1...HEAD
+[0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.0...typedb_grpc-v0.5.1
 [0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.4.0...typedb_grpc-v0.5.0
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...typedb_grpc-v0.4.0
 [0.3.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.0...typedb_grpc-v0.3.1

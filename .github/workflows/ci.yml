@@ -14,7 +14,7 @@ permissions:
 jobs:
   test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: typedb
@@ -33,6 +33,8 @@ jobs:
           # Oldest supported combination.
           - elixir: "1.18"
             otp: "25"
+            # setup-beam has no OTP 25 build for Ubuntu 26.04 (ubuntu-latest).
+            os: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4

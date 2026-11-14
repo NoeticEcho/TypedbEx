@@ -1,7 +1,7 @@
 defmodule TypeDB.MixProject do
   use Mix.Project
 
-  @version "0.11.0"
+  @version "0.11.1"
   @source_url "https://github.com/NoeticEcho/TypedbEx"
 
   def project do
@@ -205,7 +205,8 @@ defmodule TypeDB.MixProject do
           TypeDB.Concept.AttributeType,
           TypeDB.Concept.RoleType,
           TypeDB.Duration,
-          TypeDB.DateTimeTZ
+          TypeDB.DateTimeTZ,
+          TypeDB.Vector
         ],
         Errors: [TypeDB.Error],
         Observability: [TypeDB.Telemetry],

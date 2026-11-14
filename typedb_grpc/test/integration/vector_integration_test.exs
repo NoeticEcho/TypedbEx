@@ -42,7 +42,7 @@ defmodule TypeDB.GRPC.VectorIntegrationTest do
           Transaction.query(tx, """
             define
               attribute content, value string;
-              attribute embedding, value vector(4, "float32");
+              attribute embedding, value vector(4, "float32") @index(hnsw:cosine);
               entity memory, owns content, owns embedding;
           """)
         end)
@@ -91,7 +91,7 @@ defmodule TypeDB.GRPC.VectorIntegrationTest do
         database,
         """
         given $q: vector(4, "float32");
-        match let $e in cosine_similarity_search(embedding, $q, 0.8);
+        match let $e, $score in cosine_similarity_search(embedding, $q, 0.8);
           $m isa memory, has content $c, has embedding $e;
         select $c;
         """,
@@ -144,5 +144,26 @@ defmodule TypeDB.GRPC.VectorIntegrationTest do
                0.4000000059604645
              ]
     end
+  end
+
+  test "the score binds as a double that sorts", %{conn: conn, database: database} do
+    insert(conn, database, [{"x", [1, 0, 0, 0]}, {"near-x", [0.9, 0.1, 0, 0]}, {"y", [0, 1, 0, 0]}])
+
+    rows =
+      read(
+        conn,
+        database,
+        """
+        given $q: vector(4, "float32");
+        match let $e, $score in cosine_similarity_search(embedding, $q, -1.0);
+          $m isa memory, has content $c, has embedding $e;
+        select $c, $score; sort $score desc; limit 2;
+        """,
+        given_rows: [%{"q" => vector([1, 0, 0, 0])}]
+      )
+
+    assert Enum.map(rows, &ConceptRow.typed_value(&1, "c")) == ["x", "near-x"]
+    assert [a, b] = Enum.map(rows, &ConceptRow.typed_value(&1, "score"))
+    assert is_float(a) and a >= b
   end
 end

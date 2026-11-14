@@ -627,3 +627,9 @@ set_password!/3
 set_password(TypeDB.Connection.t(), String.t(), String.t(), keyword()) ::
   :ok | {:error, TypeDB.Error.t()}
 set_password/3
+
+## TypeDB.Vector
+
+check!/2    # @doc false
+value!([number()]) :: TypeDB.Concept.Value.t()
+value([number()]) :: {:ok, TypeDB.Concept.Value.t()} | {:error, TypeDB.Error.t()}
