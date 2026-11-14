@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.5.1] - unreleased
+## [0.5.1] - 2026-11-14
 
 Tests only: the vector test follows the TypeDB build it is pinned to.
 
@@ -413,7 +413,7 @@ Two audits before the first release — Audit V of this package and Audit VI of
 both — are in the repository's `AUDIT.md`, findings, measurements and one
 withdrawn finding included.
 
-[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.0...HEAD
+[Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.1...HEAD
 [0.5.1]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.5.0...typedb_grpc-v0.5.1
 [0.5.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.4.0...typedb_grpc-v0.5.0
 [0.4.0]: https://github.com/NoeticEcho/TypedbEx/compare/typedb_grpc-v0.3.1...typedb_grpc-v0.4.0
