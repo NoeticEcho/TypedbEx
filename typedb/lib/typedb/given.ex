@@ -131,6 +131,11 @@ defmodule TypeDB.Given do
     %{"kind" => "attribute", "iid" => iid, "value" => value, "valueType" => value_type}
   end
 
+  # Experimental: a vector's length and components are checked against the
+  # type it declares before anything is sent (`TypeDB.Vector`).
+  def encode(%Concept.Value{value: value, value_type: "vector(" <> _ = value_type}),
+    do: value(TypeDB.Vector.check!(value, value_type), value_type)
+
   def encode(%Concept.Value{value: value, value_type: value_type}), do: value(value, value_type)
 
   def encode(value) when is_boolean(value), do: value(value, "boolean")

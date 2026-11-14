@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] - unreleased
+
+A patch: one new module, experimental, and a check before sending. Nothing
+that worked before changes.
+
+### Added
+
+- **`TypeDB.Vector`, experimental.** Vector values need a TypeDB build with
+  vector support, which no release is yet; the syntax may change until TypeDB
+  releases it. `TypeDB.Vector.value/1` (and `value!/1`) builds the `given` term
+  for a list of numbers, as `vector(N, "float32")`, and it works over
+  `typedb_grpc` too. The module documents the current syntax — the
+  `@index(hnsw:cosine)` annotation the attribute needs and the two-variable
+  search, `let $e, $score in cosine_similarity_search(attr, $q, threshold)`,
+  whose score is a `double` that sorts — and what was observed on the build
+  `3.14.1-dev` at `11ab292c`: a stored non-finite component and a zero-norm
+  query are refused by the server; a search inside `not { }` or inside a
+  branch of `or { }` **panics the server process**.
+- `test/integration/vector_integration_test.exs`, tagged `:vector_preview`
+  and run with `TYPEDB_VECTOR_URL` set: the HTTP transport had no vector test.
+  It covers the declared type, the round trip of a stored vector, the score's
+  sort and limit, the threshold with an owner filter and a negation in the
+  same query, several `given` rows sorted and limited together, and the
+  server's refusal of a zero-norm query.
+
+### Changed
+
+- **A vector given over HTTP is checked before it is sent**, as `typedb_grpc`
+  already did: its length must match the dimension its `value_type` declares,
+  and each component must be a number a `float32` holds. Anything else raises
+  `TypeDB.Error` with kind `:encode` from the encoder, where it used to reach
+  the server — a component past `float32`'s range became an infinity there.
+
 ## [0.11.0] - 2026-09-29
 
 ### Changed — breaking
@@ -1280,6 +1313,7 @@ TypeDB 3.12.1 on Elixir 1.20 / OTP 29.
   `--server.encryption.enabled`.
 
 [Unreleased]: https://github.com/NoeticEcho/TypedbEx/compare/v0.11.0...HEAD
+[0.11.1]: https://github.com/NoeticEcho/TypedbEx/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/NoeticEcho/TypedbEx/compare/v0.10.2...v0.10.3
